@@ -48,6 +48,7 @@
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionManager.h"
 #include "Online/FortGameSession.h"
+#include "Online/FortHotfixManager.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
 #include "Building/BGAConsumableSpawner.h"
@@ -297,6 +298,7 @@ static void InstallHooks()
     AActor::Hook();
     UGameInstance::Hook();
     UFortGameInstance::Hook();
+    UFortHotfixManager::Hook();
     FOnlineSubsystemImpl::Hook();
     FOnlineVoiceImpl::Hook();
     FFortMcpConfig::Hook();

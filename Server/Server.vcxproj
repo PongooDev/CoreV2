@@ -97,6 +97,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Base64.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Crc.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortContentEncryptionManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortHotfixManager.h" />
     <ClInclude Include="Boot.h" />
     <ClInclude Include="..\Core\Public\BackendRequest.h" />
     <ClInclude Include="..\Core\Public\Configuration.h" />
@@ -472,6 +476,9 @@
     <ClInclude Include="..\ThirdParty\Memcury\memcury.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Base64.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Crc.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortHotfixManager.cpp" />
     <ClCompile Include="Boot.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="..\Core\Private\BackendRequest.cpp" />

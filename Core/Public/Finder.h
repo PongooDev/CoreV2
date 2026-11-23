@@ -179,6 +179,9 @@ namespace Finder
     bool ResolveModularFeaturesLive();
     // GConfig, GEngineIni, FConfigCacheIni::Find and FConfigFile::CombineFromBuffer (the online hotfix's ini merge).
     bool ResolveConfigCombine();
+    // 5.21+: UFortHotfixManager's after-hotfix handler's FConfigCacheIni::GetArray, GConfig and GGameIni, and its call
+    // that hashes the keychain it built from [HotfixedEncryptionKeys] (Sites::FortHotfixManagerKeyChainHashCall).
+    bool ResolveHotfixedEncryptionKeys();
     // FOnlineSubsystemImpl::IsDedicated and the number of candidates (one when found); ResolveServer requires it.
     uintptr_t FindOnlineSubsystemIsDedicated(int32_t& OutMatches);
     // The same, setting Natives::FOnlineSubsystemImpl_IsDedicated and bForceDedicated, for use before ResolveServer.

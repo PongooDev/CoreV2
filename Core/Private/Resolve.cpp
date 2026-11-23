@@ -16215,6 +16215,83 @@ bool Finder::ResolveConfigCombine()
     return true;
 }
 
+bool Finder::ResolveHotfixedEncryptionKeys()
+{
+    if (Sites::FortHotfixManagerKeyChainHashCall)
+    {
+        return true;
+    }
+
+    // UFortHotfixManager's after-hotfix handler (5.21 0xFDD540, 8.00 0x12BB020, 8.20 0x13BEF60), which its constructor
+    // binds (8.00 0x12B8030), and FFortContentEncryptionManager::MergeInKeyChain (5.21 0xD43CC0, 8.00 0xF9AB30).
+    const uintptr_t Handler = FunctionOf(L"HotfixedEncryptionKeys");
+    const uintptr_t Merge = FunctionOf(L"[FFortContentEncryptionManager] MergeInKeyChain() called");
+    if (!Handler || !Merge)
+    {
+        Log::Info(L"Finder: no hotfixed encryption keys handler in this build (handler 0x{:X}, MergeInKeyChain 0x{:X})",
+            Handler ? Handler - Finder::ImageBase() : 0, Merge ? Merge - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    // It opens with GConfig->GetArray(TEXT("HotfixedEncryptionKeys"), TEXT("Keys"), Keys, GGameIni): mov rcx, [GConfig];
+    // lea rax, [GGameIni]; mov [rsp+20h], rax; call. The game ini (8.00 0x5A912E8, which "CheatScript.%s" and
+    // OnlineAccountCommon are read from too), not GEngineIni (0x5A91238): the keys come in the DefaultGame.ini hotfix.
+    uintptr_t Config = 0;
+    uintptr_t GameIni = 0;
+    uintptr_t GetArray = 0;
+    uintptr_t Loaded[16] = {};
+    Finder::TraceFind(Handler, 32, [&](uintptr_t Instruction)
+    {
+        const uint8_t Rex = Byte(Instruction);
+        if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x8B && Byte(Instruction + 2) == 0x0D && !Config)
+        {
+            Config = Finder::RelativeTarget(Instruction, 3, 7);
+        }
+        else if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x8D && (Byte(Instruction + 2) & 0xC7) == 0x05)
+        {
+            Loaded[((Byte(Instruction + 2) >> 3) & 7) + (Rex == 0x4C ? 8 : 0)] = Finder::RelativeTarget(Instruction, 3, 7);
+        }
+        else if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x89 && (Byte(Instruction + 2) & 0xC7) == 0x44 && Byte(Instruction + 3) == 0x24 && Byte(Instruction + 4) == 0x20)
+        {
+            GameIni = Loaded[((Byte(Instruction + 2) >> 3) & 7) + (Rex == 0x4C ? 8 : 0)];
+        }
+        GetArray = Byte(Instruction) == 0xE8 ? Finder::RelativeTarget(Instruction, 1, 5) : 0;
+        return GetArray != 0;
+    });
+
+    // After its loop: lea rcx, [KeyChain]; call UpdateHash; call GetEncryptionManager; mov rcx, rax; lea rdx, [KeyChain];
+    // call MergeInKeyChain (5.21 0xFDDB1D, 8.00 0x12BB5B3, 8.20 0x13BF4F3).
+    uintptr_t HashCall = 0;
+    uintptr_t UpdateHash = 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DecodedDirectCalls(Handler);
+    for (size_t Index = 2; Index < Calls.size() && !HashCall; ++Index)
+    {
+        if (Calls[Index].second == Merge && Calls[Index - 1].first == Calls[Index - 2].first + 5)
+        {
+            HashCall = Calls[Index - 2].first;
+            UpdateHash = Calls[Index - 2].second;
+        }
+    }
+
+    if (!Config || !GameIni || !GetArray || !HashCall || (Natives::GConfig && reinterpret_cast<uintptr_t>(Natives::GConfig) != Config)
+        || (Natives::GGameIni && reinterpret_cast<uintptr_t>(Natives::GGameIni) != GameIni))
+    {
+        Log::Error(L"Finder: hotfixed encryption keys handler at +0x{:X} not understood (GConfig 0x{:X}, GGameIni 0x{:X}, GetArray 0x{:X}, hash call 0x{:X})",
+            Handler - Finder::ImageBase(), Config ? Config - Finder::ImageBase() : 0, GameIni ? GameIni - Finder::ImageBase() : 0,
+            GetArray ? GetArray - Finder::ImageBase() : 0, HashCall ? HashCall - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    Natives::GConfig = reinterpret_cast<void**>(Config);
+    Natives::GGameIni = reinterpret_cast<const FString*>(GameIni);
+    Natives::FConfigCacheIni_GetArray = reinterpret_cast<decltype(Natives::FConfigCacheIni_GetArray)>(GetArray);
+    Natives::FFortKeyChain_UpdateHash = reinterpret_cast<decltype(Natives::FFortKeyChain_UpdateHash)>(UpdateHash);
+    Sites::FortHotfixManagerKeyChainHashCall = reinterpret_cast<uint8_t*>(HashCall);
+    Log::Info(L"Finder: hotfixed encryption keys: handler +0x{:X}, FConfigCacheIni::GetArray +0x{:X}, keychain hash +0x{:X} called at +0x{:X}",
+        Handler - Finder::ImageBase(), GetArray - Finder::ImageBase(), UpdateHash - Finder::ImageBase(), HashCall - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveEngineInit()
 {
     if (Natives::UEngine_InitIndex >= 0)

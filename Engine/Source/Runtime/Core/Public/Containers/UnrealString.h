@@ -188,6 +188,53 @@ public:
         return Find(Suffix, SearchCase, ESearchDir::FromEnd) == Len() - SuffixLen;
     }
 
+    bool StartsWith(const wchar_t* Prefix, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase) const
+    {
+        const int32_t PrefixLen = Prefix ? static_cast<int32_t>(wcslen(Prefix)) : 0;
+        if (PrefixLen == 0 || PrefixLen > Len())
+        {
+            return PrefixLen == 0;
+        }
+        return SearchCase == ESearchCase::CaseSensitive ? wcsncmp(**this, Prefix, PrefixLen) == 0 : _wcsnicmp(**this, Prefix, PrefixLen) == 0;
+    }
+
+    bool RemoveFromStart(const wchar_t* Prefix, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase)
+    {
+        const int32_t PrefixLen = Prefix ? static_cast<int32_t>(wcslen(Prefix)) : 0;
+        if (PrefixLen == 0 || !StartsWith(Prefix, SearchCase))
+        {
+            return false;
+        }
+        *this = Mid(PrefixLen);
+        return true;
+    }
+
+    bool RemoveFromEnd(const wchar_t* Suffix, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase)
+    {
+        const int32_t SuffixLen = Suffix ? static_cast<int32_t>(wcslen(Suffix)) : 0;
+        if (SuffixLen == 0 || !EndsWith(Suffix, SearchCase))
+        {
+            return false;
+        }
+        *this = Left(Len() - SuffixLen);
+        return true;
+    }
+
+    FString TrimStartAndEnd() const
+    {
+        int32_t First = 0;
+        int32_t Last = Len();
+        while (First < Last && std::iswspace(Data[First]))
+        {
+            ++First;
+        }
+        while (Last > First && std::iswspace(Data[Last - 1]))
+        {
+            --Last;
+        }
+        return Mid(First, Last - First);
+    }
+
     static FString Printf(const wchar_t* Format, ...)
     {
         va_list Args;

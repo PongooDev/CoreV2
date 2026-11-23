@@ -205,6 +205,11 @@ namespace Natives
     inline void (*FConfigFile_CombineFromBuffer)(void* This, const FString& Buffer) = nullptr;
     inline void** GConfig = nullptr;
     inline const FString* GEngineIni = nullptr;
+    inline const FString* GGameIni = nullptr;
+    inline int32_t (*FConfigCacheIni_GetArray)(void* This, const wchar_t* Section, const wchar_t* Key, TArray<FString>& OutArray, const FString& Filename) = nullptr;
+    // Sorts an FFortKeyChain's keys and sets its Hash from them (8.00 0xFA6A40), which FFortContentEncryptionManager::
+    // MergeInKeyChain compares with its own before merging anything.
+    inline void (*FFortKeyChain_UpdateHash)(void* KeyChain) = nullptr;
     inline void** FOnlineVoiceImpl_VTable = nullptr;
     inline int32_t FOnlineVoiceImpl_InitIndex = -1;
     inline int32_t FOnlineVoiceImpl_SerializeRemotePacketIndex = -1;
@@ -1294,6 +1299,9 @@ namespace Sites
     inline std::vector<uint8_t*> FlushActorDormancyCalls;
     inline uint8_t* FortGameInstanceStartDedicatedCheck = nullptr;
     inline uint8_t* FortGameInstanceStartDedicatedTarget = nullptr;
+    // UFortHotfixManager's after-hotfix handler (8.00 0x12BB020): its call that hashes the keychain it built from
+    // [HotfixedEncryptionKeys], right before it gets the encryption manager and calls MergeInKeyChain.
+    inline uint8_t* FortHotfixManagerKeyChainHashCall = nullptr;
 
     struct FShowFlag
     {

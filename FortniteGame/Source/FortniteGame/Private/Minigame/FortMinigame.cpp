@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Items/FortInventory.h"
@@ -521,6 +522,31 @@ bool AFortMinigame::UsesClientAcknowledgedTeleport()
     return StaticClass() && !FindStaticFunction_RespawnMinigamePlayers() && FindStaticFunction_OnClientFinishTeleportingForMinigame() && FindStaticFunction_ClearTeleportForMinigame();
 }
 
+AFortPlayerState* AFortMinigame::PlayerStateOf(const FMinigamePlayer& Entry) const
+{
+    if (FMinigamePlayer::HasPlayerState())
+    {
+        return static_cast<AFortPlayerState*>(Entry.PlayerState);
+    }
+    UWorld* World = FMinigamePlayer::HasUniquePlayerId() ? GetWorld() : nullptr;
+    AGameStateBase* GameState = World ? static_cast<AGameStateBase*>(World->GetGameState()) : nullptr;
+    const FUniqueNetIdRepl& EntryId = Entry.UniquePlayerId;
+    if (!GameState || !EntryId.IsValid())
+    {
+        return nullptr;
+    }
+    const std::wstring Id = EntryId.ToString().ToStdString();
+    for (APlayerState* Candidate : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+    {
+        const FUniqueNetIdRepl& CandidateId = Candidate ? static_cast<const FUniqueNetIdRepl&>(Candidate->UniqueId) : EntryId;
+        if (Candidate && CandidateId.IsValid() && CandidateId.ToString().ToStdString() == Id)
+        {
+            return Cast<AFortPlayerState>(reinterpret_cast<UObject*>(Candidate));
+        }
+    }
+    return nullptr;
+}
+
 FMinigamePlayer* AFortMinigame::FindMinigamePlayer(const AFortPlayerState* PlayerState)
 {
     if (!PlayerState || !Member_PlayerArray.IsAvailable() || !FMinigamePlayer::HasTeleportingOrRespawning() || !FMinigamePlayer::StaticStruct())
@@ -531,7 +557,7 @@ FMinigamePlayer* AFortMinigame::FindMinigamePlayer(const AFortPlayerState* Playe
     TStructArray<FMinigamePlayer>& Entries = Array.Players;
     for (int32_t Index = 0; Index < Entries.Num(); ++Index)
     {
-        if (static_cast<AFortPlayerState*>(Entries[Index].PlayerState) == PlayerState)
+        if (PlayerStateOf(Entries[Index]) == PlayerState)
         {
             return &Entries[Index];
         }
@@ -1087,7 +1113,7 @@ void AFortMinigame::AdvanceTransitionWhenArrived(bool bForce)
         TStructArray<FMinigamePlayer>& Entries = PlayerArray.Players;
         for (int32_t Index = 0; Index < Entries.Num(); ++Index)
         {
-            Teleporting += static_cast<AFortPlayerState*>(Entries[Index].PlayerState) && Entries[Index].bIsTeleportingOrRespawningForGameplay ? 1 : 0;
+            Teleporting += PlayerStateOf(Entries[Index]) && Entries[Index].bIsTeleportingOrRespawningForGameplay ? 1 : 0;
         }
     }
     if (Teleporting > 0 && !bForce)
@@ -1142,7 +1168,7 @@ void AFortMinigame::PostGameResetPlayers()
     for (int32_t Index = 0; Index < Entries.Num(); ++Index)
     {
         FMinigamePlayer& Entry = Entries[Index];
-        AFortPlayerState* PlayerState = static_cast<AFortPlayerState*>(Entry.PlayerState);
+        AFortPlayerState* PlayerState = PlayerStateOf(Entry);
         if (!PlayerState)
         {
             continue;

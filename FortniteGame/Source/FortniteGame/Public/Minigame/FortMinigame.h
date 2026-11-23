@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/NetSerialization.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "GameFramework/Info.h"
 #include "Internationalization/Text.h"
 #include "Math/Rotator.h"
@@ -47,9 +48,13 @@ struct FMinigamePlayer : public FFastArraySerializerItem
     DefineUnrealStruct(FMinigamePlayer, FortniteGame)
 
 public:
-    DefineUProperty(AFortPlayerState*, PlayerState)
+    // 8.30 (CL-5793395) keeps the player's UniquePlayerId instead of the player state (AFortMinigame::PlayerStateOf).
+    DefineOptionalUProperty(AFortPlayerState*, PlayerState)
+    DefineUStructProperty(FUniqueNetIdRepl, UniquePlayerId)
     DefineUProperty(bool, bIsTeleportingOrRespawningForGameplay)
-    static bool HasTeleportingOrRespawning() { return Member_PlayerState.IsAvailable() && Member_bIsTeleportingOrRespawningForGameplay.IsAvailable(); }
+    static bool HasPlayerState() { return Member_PlayerState.IsAvailable(); }
+    static bool HasUniquePlayerId() { return Member_UniquePlayerId.IsAvailable(); }
+    static bool HasTeleportingOrRespawning() { return (HasPlayerState() || HasUniquePlayerId()) && Member_bIsTeleportingOrRespawningForGameplay.IsAvailable(); }
     // Where the player was before the game started, which AddMinigamePlayer records (8.20 0x13185B0) for the
     // post-game reset.
     DefineUProperty(bool, bHasValidResetData)
@@ -264,6 +269,8 @@ private:
     void ClearTeleportForMinigame(AFortPlayerPawn* InPawn);
     // The player's entry in PlayerArray (as 7.40's own lookups find it, 0x11CE480), or null.
     FMinigamePlayer* FindMinigamePlayer(const AFortPlayerState* PlayerState);
+    // The entry's player state: its own member up to 8.20, from 8.30 the game state's player with its UniquePlayerId.
+    AFortPlayerState* PlayerStateOf(const FMinigamePlayer& Entry) const;
     // RespawnMinigamePlayers' move of one player on 7.40, through the travel screen. False where nothing was sent (the
     // build or the controller lacks the respawn preparation): the caller moves the pawn at once.
     bool StartTeleportForMinigameStart(AController* Controller, APawn* Pawn, const FVector& Location, const FRotator& Rotation, bool bRespawningOnGround);

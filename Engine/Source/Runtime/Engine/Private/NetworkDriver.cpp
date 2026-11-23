@@ -147,6 +147,7 @@ namespace
         std::vector<FActorId> OpenActors;
         std::map<FActorId, float> ClosedAt;
         std::unordered_map<UClass*, int32_t> ReopenedByClass;
+        std::unordered_map<UClass*, std::wstring> ReopenedExample;
         float WindowStart = -1.0f;
         int32_t Frames = 0;
         int32_t SaturatedFrames = 0;
@@ -157,7 +158,8 @@ namespace
     std::unordered_map<UNetConnection*, FConnectionReplicationStats> ConnectionReplicationStats;
 
     constexpr float ReplicationStatsWindow = 30.0f;
-    constexpr float ReopenWindow = 2.0f;
+    // Wide enough for an actor reopened every 62 frames (2.07 s at 30 Hz), as #567's hub client saw.
+    constexpr float ReopenWindow = 5.0f;
 }
 
 void UNetDriver::LogConnectionReplication()
@@ -211,7 +213,18 @@ void UNetDriver::LogConnectionReplication()
             if (Found != Stats.ClosedAt.end() && Now - Found->second <= ReopenWindow)
             {
                 ++Stats.Reopened;
-                ++Stats.ReopenedByClass[New.first->GetClass()];
+                UClass* Class = New.first->GetClass();
+                ++Stats.ReopenedByClass[Class];
+                std::wstring& Example = Stats.ReopenedExample[Class];
+                if (Example.empty())
+                {
+                    UObject* Package = New.first->GetOuter();
+                    while (Package && Package->GetOuter())
+                    {
+                        Package = Package->GetOuter();
+                    }
+                    Example = std::format(L"{} in {}", New.first->GetName().ToStdString(), Package ? Package->GetName().ToStdString() : std::wstring(L"?"));
+                }
             }
         }
         Stats.OpenActors = std::move(Actors);
@@ -227,7 +240,7 @@ void UNetDriver::LogConnectionReplication()
         std::wstring Top;
         for (size_t i = 0; i < Classes.size() && i < 6; ++i)
         {
-            Top += std::format(L"{}{} {}", i ? L", " : L"", Classes[i].first->GetName().ToStdString(), Classes[i].second);
+            Top += std::format(L"{}{} {} (e.g. {})", i ? L", " : L"", Classes[i].first->GetName().ToStdString(), Classes[i].second, Stats.ReopenedExample[Classes[i].first]);
         }
         AActor* ViewTarget = Connection->ViewTarget;
         Log::Info(L"Net (#567): {} over {:.0f}s: {} frames, {} saturated; {} actor channels open, {} opened, {} closed, {} reopened within {:.0f}s{}{}; view target {}, net speed {}",
@@ -238,6 +251,7 @@ void UNetDriver::LogConnectionReplication()
             It = Now - It->second > ReopenWindow ? Stats.ClosedAt.erase(It) : std::next(It);
         }
         Stats.ReopenedByClass.clear();
+        Stats.ReopenedExample.clear();
         Stats.WindowStart = Now;
         Stats.Frames = Stats.SaturatedFrames = Stats.Opened = Stats.Closed = Stats.Reopened = 0;
     }

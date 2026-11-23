@@ -137,7 +137,7 @@ public:
     void RaiseClientNetSpeeds();
     // Core diagnostic (CoreV2 #567): for each player's connection, every 30 s of server time, how many frames ended
     // with it saturated (IsNetReady(false) false after replicating) and how many actor channels were opened, closed, and
-    // closed then reopened within 2 s (by class), to tell channel churn (relevancy, cull distance, dormancy) from bandwidth.
+    // closed then reopened within 5 s (by class, with one actor and its level's package), to tell channel churn (relevancy, cull distance, dormancy) from bandwidth.
     void LogConnectionReplication();
 
 #if WITH_SERVER_CODE

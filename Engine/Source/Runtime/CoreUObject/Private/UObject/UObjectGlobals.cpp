@@ -14,9 +14,11 @@ UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, 
     return Natives::StaticFindObject(Class, InOuter, Name, ExactClass);
 }
 
-UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation)
+UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation, const FLinkerInstancingContext* InstancingContext)
 {
-    return Natives::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation);
+    // 8.30 (CL-5793395) added InstancingContext and passes it on to StaticLoadObjectInternal; older builds ignore the
+    // extra argument.
+    return Natives::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation, InstancingContext);
 }
 
 UObject* StaticConstructObject_Internal(UClass* Class, UObject* InOuter, FName Name, EObjectFlags SetFlags, EInternalObjectFlags InternalSetFlags, UObject* Template, bool bCopyTransientsFromClassDefaults, void* InstanceGraph, bool bAssumeTemplateIsArchetype)

@@ -435,6 +435,11 @@ namespace
             // 7.00 (CL-4629139) names the object being post-loaded, as later engines do (0x19A90F0).
             LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject during PostLoad of %s may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
         }
+        if (!LoadObject)
+        {
+            // 8.30 (CL-5793395) also names the arguments (0x1DAF5A0).
+            LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject(\"%s\", \"%s\", \"%s\") during PostLoad of %s may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
+        }
         Require(L"StaticLoadObject", Natives::StaticLoadObject, LoadObject);
 
         // StaticAllocateObject isn't a native Core calls, only how StaticConstructObject_Internal is told apart.

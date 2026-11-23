@@ -7,6 +7,7 @@
 #include "Templates/SharedPointerInternals.h"
 
 class FOutputDevice;
+class FLinkerInstancingContext;
 class IModularFeatures;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
@@ -193,7 +194,7 @@ namespace Natives
     inline void (*LowLevelFatalErrorHandler)(const char* File, int32_t Line, const wchar_t* Format, ...) = nullptr;
 
     inline UObject* (*StaticFindObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass) = nullptr;
-    inline UObject* (*StaticLoadObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation) = nullptr;
+    inline UObject* (*StaticLoadObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation, const FLinkerInstancingContext* InstancingContext) = nullptr;
     inline UObject* (*StaticConstructObject_Internal)(UClass* Class, UObject* InOuter, FName Name, int32_t SetFlags, int32_t InternalSetFlags, UObject* Template, bool bCopyTransientsFromClassDefaults, void* InstanceGraph, bool bAssumeTemplateIsArchetype) = nullptr;
     inline void (*CollectGarbage)(int32_t KeepFlags, bool bPerformFullPurge) = nullptr;
 

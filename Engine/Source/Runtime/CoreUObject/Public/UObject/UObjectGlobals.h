@@ -11,6 +11,9 @@ enum ELoadFlags : uint32_t
     LOAD_Quiet = 0x00002000,
 };
 
+// Epic's FLinkerInstancingContext (LinkerInstancingContext.h): only passed as null.
+class FLinkerInstancingContext;
+
 template <typename... ParamTypes>
 class TMulticastDelegate;
 using FSimpleMulticastDelegate = TMulticastDelegate<>;
@@ -26,7 +29,7 @@ struct FCoreUObjectDelegates
 };
 
 UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass = false);
-UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr, bool bAllowObjectReconciliation = true);
+UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr, bool bAllowObjectReconciliation = true, const FLinkerInstancingContext* InstancingContext = nullptr);
 UObject* StaticConstructObject_Internal(UClass* Class, UObject* InOuter = nullptr, FName Name = FName(), EObjectFlags SetFlags = RF_NoFlags, EInternalObjectFlags InternalSetFlags = EInternalObjectFlags::None, UObject* Template = nullptr, bool bCopyTransientsFromClassDefaults = false, void* InstanceGraph = nullptr, bool bAssumeTemplateIsArchetype = false);
 
 template <class T>

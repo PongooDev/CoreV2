@@ -134,6 +134,25 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
 
     if (Handle.IsValid())
     {
+        // Traversal emotes (8.00 on): the pawn's replicated moving-emote state takes the dance's, which the movement speed
+        // getter reads on the server and every client. Set once the ability is given, after a previous emote's
+        // K2_OnEndAbility (MovingEmoteStopped, AFortPawn) has cleared the last one's.
+        UClass* DanceClass = UAthenaDanceItemDefinition::StaticClass();
+        if (DanceClass && AFortPawn::HasTraversalEmotes() && UAthenaDanceItemDefinition::HasMovingEmote() && EmoteAsset->IsA(DanceClass))
+        {
+            const UAthenaDanceItemDefinition* Dance = static_cast<UAthenaDanceItemDefinition*>(EmoteAsset);
+            Pawn->bMovingEmote = Dance->bMovingEmote;
+            if (UAthenaDanceItemDefinition::HasMoveForwardOnly())
+            {
+                Pawn->bMovingEmoteForwardOnly = Dance->bMoveForwardOnly;
+            }
+            Pawn->EmoteWalkSpeed = Dance->WalkForwardSpeed;
+            if (Dance->bMovingEmote)
+            {
+                Log::Info(L"Emote: {} is a traversal emote (walk speed {}{})", EmoteAsset->GetName().ToStdString(), Dance->WalkForwardSpeed,
+                    UAthenaDanceItemDefinition::HasMoveForwardOnly() && Dance->bMoveForwardOnly ? L", forward only" : L"");
+            }
+        }
         Log::Info(L"Emote: {} plays {}", GetName().ToStdString(), EmoteAsset->GetName().ToStdString());
         SendEmoteStatEvent(EmoteAsset);
     }

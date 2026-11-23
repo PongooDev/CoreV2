@@ -8,6 +8,7 @@
 #include "StructArray.h"
 #include "Misc/Guid.h"
 #include "UObject/ScriptDelegates.h"
+#include "UObject/Stack.h"
 
 class AFortWeapon;
 class UAbilitySystemComponent;
@@ -56,6 +57,7 @@ class AFortPawn : public APawn
     DefineUFunction(SetHealth)
     DefineUFunction(SetMaxHealth)
     DefineUFunction(SetGravityJumpMultipliers)
+    DefineUFunction(MovingEmoteStopped)
 
 public:
     DefineUProperty(AFortWeapon*, CurrentWeapon)
@@ -100,6 +102,14 @@ public:
     // SDKs from 3.0 on; reflection decides on older builds.
     DefineBitfieldUProperty(bWeaponHolstered)
     static bool HasWeaponHolstered() { return Member_bWeaponHolstered.IsAvailable(); }
+    // Traversal emotes (replicated, server-written): while bMovingEmote is set the pawn keeps moving during its emote at
+    // EmoteWalkSpeed (the movement speed getter, 8.30 0xF98550, returns it), forward only with bMovingEmoteForwardOnly
+    // (7.00 on). Bools up to 7.30, single bits from 7.40.
+    DefineBitfieldUProperty(bMovingEmote)
+    DefineBitfieldUProperty(bMovingEmoteForwardOnly)
+    DefineUProperty(float, EmoteWalkSpeed)
+    // The members, on a build Core restores traversal emotes on (8.00 on).
+    static bool HasTraversalEmotes();
 
     bool IsDead() const;
     // AFortPawn::IsWeaponHolstered (6.20: execIsWeaponHolstered 0x1499890 -> 0xC4AA90, bWeaponHolstered). What
@@ -179,4 +189,10 @@ public:
     // SetCurrentMovementStyle, which also gives its character movement that style's speeds (MaxWalkSpeed); only
     // CurrentMovementStyle where that isn't found.
     void SetCurrentMovementStyle(uint8_t NewStyle);
+
+    // GAB_Emote_Generic's K2_OnEndAbility calls it as every emote ends: the pawn's moving-emote state is cleared.
+    void MovingEmoteStopped();
+    DECLARE_FUNCTION(execMovingEmoteStopped);
+    // 8.00 on: MovingEmoteStopped's exec reaches the shared stub; Core's body replaces it.
+    static void HookEmoteNatives();
 };

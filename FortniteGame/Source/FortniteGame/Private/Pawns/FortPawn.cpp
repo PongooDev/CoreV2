@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "Packed.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -771,4 +772,65 @@ float AFortPawn::SetCheatMoveSpeed(float Speed)
         return ApplyCheatMoveSpeed(this, Speed);
     }
     return ApplyOwnSpeedTimes(this, Multiplier);
+}
+
+// Traversal emotes (8.00 on). A dance whose UAthenaDanceItemDefinition has bMovingEmote keeps the pawn moving while it
+// plays, at the dance's WalkForwardSpeed: the movement speed getter (8.30 0xF98550) returns EmoteWalkSpeed while the
+// pawn's replicated bMovingEmote is set. Nothing in the client exe writes either (the only write of 8.30's bMovingEmote
+// bit, +0x6D9 mask 0x10, is its reflected setter 0x19DD7C0): the server sets them as the emote starts
+// (AFortPlayerController::ServerPlayEmoteItem_Implementation) and GAB_Emote_Generic's K2_OnEndAbility clears them with
+// MovingEmoteStopped, after EmoteStopped. Its exec (8.00 0x86D830, 8.20 0x91C600, 8.30 0x9C6030) steps the frame and
+// tail-jumps to the shared empty function, so the pawn kept walking at emote speed after every traversal emote.
+void AFortPawn::MovingEmoteStopped()
+{
+#if WITH_SERVER_CODE
+    bMovingEmote = false;
+    if (Member_bMovingEmoteForwardOnly.IsAvailable())
+    {
+        bMovingEmoteForwardOnly = false;
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPawn::execMovingEmoteStopped)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPawn*>(Context)->MovingEmoteStopped();
+    P_NATIVE_END;
+}
+
+bool AFortPawn::HasTraversalEmotes()
+{
+    // Core's: from 8.00 (CL-5203069) only. Builds back to 3.2 declare the same members and UFunction, but traversal
+    // emotes ship from 8.00, and older builds are left as they are.
+    constexpr uint32_t FirstTraversalEmoteChangelist = 5203069;
+    return Member_bMovingEmote.IsAvailable() && Member_EmoteWalkSpeed.IsAvailable() && Packed::Changelist() >= FirstTraversalEmoteChangelist;
+}
+
+void AFortPawn::HookEmoteNatives()
+{
+    UFunction* Function = FindStaticFunction_MovingEmoteStopped();
+    if (!Function || !HasTraversalEmotes())
+    {
+        return;
+    }
+    const uintptr_t Exec = reinterpret_cast<uintptr_t>(Function->GetNativeFunc());
+    uintptr_t ExecNative = 0;
+    for (uintptr_t Site = Exec; Exec >= Finder::TextBegin() && Site + 5 <= Exec + 0x30 && Site + 5 <= Finder::TextEnd() && !ExecNative; ++Site)
+    {
+        if (*reinterpret_cast<const uint8_t*>(Site) == 0xE9)
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            ExecNative = Target >= Finder::TextBegin() && Target < Finder::TextEnd() ? Target : 0;
+        }
+    }
+    if (!ExecNative || !Finder::IsStubFunction(ExecNative))
+    {
+        Log::Info(L"Finder: AFortPawn::MovingEmoteStopped is {} in this build (exec +0x{:X})", ExecNative ? L"native" : L"not a tail jump",
+            Exec ? Exec - Finder::ImageBase() : 0);
+        return;
+    }
+    Function->SetNativeFunc(&execMovingEmoteStopped);
+    Log::Info(L"Finder: AFortPawn::MovingEmoteStopped is stripped (exec +0x{:X}), restored as a native", Exec - Finder::ImageBase());
 }

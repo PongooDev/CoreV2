@@ -233,6 +233,20 @@ public:
     static ptrdiff_t AnimationOffset() { return Member_Animation.IsAvailable() ? Member_Animation.GetOffsetChecked() : -1; }
 };
 
+// A Battle Royale emote. Its moving-emote settings (3.2 on; bMoveForwardOnly from 7.00) are what the pawn's replicated
+// bMovingEmote, bMovingEmoteForwardOnly and EmoteWalkSpeed take while it plays (FortPlayerControllerEmote.cpp).
+class UAthenaDanceItemDefinition : public UFortMontageItemDefinitionBase
+{
+    DefineUnrealClass(UAthenaDanceItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(bool, bMovingEmote)
+    DefineUProperty(bool, bMoveForwardOnly)
+    DefineUProperty(float, WalkForwardSpeed)
+    static bool HasMovingEmote() { return Member_bMovingEmote.IsAvailable() && Member_WalkForwardSpeed.IsAvailable(); }
+    static bool HasMoveForwardOnly() { return Member_bMoveForwardOnly.IsAvailable(); }
+};
+
 // A spray (4.0, Season 4; an AthenaDanceItemDefinition in the game): the decal the spray ability places. StaticClass is
 // null on a build without the class.
 class UAthenaSprayItemDefinition : public UFortMontageItemDefinitionBase

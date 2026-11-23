@@ -72,6 +72,7 @@ public:
     DefineUProperty(int32_t, NetTag)
     DefineUProperty(float, NetUpdateFrequency)
     DefineUProperty(float, MinNetUpdateFrequency)
+    DefineOptionalUProperty(float, NetCullDistanceSquared)
     // SetLifeSpan's lifespan (0 for none).
     DefineUProperty(float, InitialLifeSpan)
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)

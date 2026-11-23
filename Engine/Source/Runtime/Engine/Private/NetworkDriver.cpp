@@ -27,12 +27,6 @@
 #include "Templates/Sorting.h"
 #include "UObject/Class.h"
 
-#include <algorithm>
-#include <format>
-#include <iterator>
-#include <map>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
 static TAutoConsoleVariable<int32_t> CVarSetNetDormancyEnabled(
@@ -139,15 +133,64 @@ void UNetDriver::RaiseClientNetSpeeds()
 
 namespace
 {
+    // Why a player's channel to an actor went, read from the actor and the connection the frame the channel is gone (the
+    // engine keeps no close reason). A destroyed or torn-off actor isn't counted.
+    enum class EChannelGoneReason : uint8_t
+    {
+        Dormant,
+        LevelNotVisible,
+        OutOfRange,
+        InRange,
+        Num,
+    };
+
+    const TCHAR* ChannelGoneReasonName(EChannelGoneReason Reason)
+    {
+        switch (Reason)
+        {
+        case EChannelGoneReason::Dormant: return TEXT("dormant");
+        case EChannelGoneReason::LevelNotVisible: return TEXT("level not visible");
+        case EChannelGoneReason::OutOfRange: return TEXT("out of range");
+        default: return TEXT("in range");
+        }
+    }
+
+    // An actor by its address and its weak pointer's hash (object index ^ serial number), so a new actor at a destroyed
+    // one's address isn't taken for it reopening.
+    struct FReplicatedActorKey
+    {
+        AActor* Actor = nullptr;
+        uint32_t WeakHash = 0;
+
+        bool operator==(const FReplicatedActorKey& Other) const { return Actor == Other.Actor && WeakHash == Other.WeakHash; }
+        friend uint32_t GetTypeHash(const FReplicatedActorKey& Key) { return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Key.Actor) >> 4) ^ Key.WeakHash; }
+    };
+
+    struct FClosedActorChannel
+    {
+        float Time = 0.0f;
+        EChannelGoneReason Reason = EChannelGoneReason::InRange;
+    };
+
+    struct FReopenedClassStats
+    {
+        int32_t Count = 0;
+        int32_t ByReason[static_cast<int32_t>(EChannelGoneReason::Num)] = {};
+        FString Example;
+    };
+
+    struct FOpenActorChannel
+    {
+        TWeakObjectPtr<AActor> Actor;
+        uint32_t SeenFrame = 0;
+    };
+
     struct FConnectionReplicationStats
     {
-        // An actor by its address and its weak pointer's hash (object index ^ serial number), so a new actor at a
-        // destroyed one's address isn't taken for it reopening.
-        using FActorId = std::pair<AActor*, uint32_t>;
-        std::vector<FActorId> OpenActors;
-        std::map<FActorId, float> ClosedAt;
-        std::unordered_map<UClass*, int32_t> ReopenedByClass;
-        std::unordered_map<UClass*, std::wstring> ReopenedExample;
+        TMap<FReplicatedActorKey, FOpenActorChannel> OpenActors;
+        TMap<FReplicatedActorKey, FClosedActorChannel> ClosedAt;
+        TMap<UClass*, FReopenedClassStats> ReopenedByClass;
+        uint32_t Frame = 0;
         float WindowStart = -1.0f;
         int32_t Frames = 0;
         int32_t SaturatedFrames = 0;
@@ -155,11 +198,53 @@ namespace
         int32_t Closed = 0;
         int32_t Reopened = 0;
     };
-    std::unordered_map<UNetConnection*, FConnectionReplicationStats> ConnectionReplicationStats;
+    // By pointer: TMap's values are copied in, and the engine's containers here don't copy.
+    TMap<UNetConnection*, FConnectionReplicationStats*> ConnectionReplicationStats;
 
     constexpr float ReplicationStatsWindow = 30.0f;
     // Wide enough for an actor reopened every 62 frames (2.07 s at 30 Hz), as #567's hub client saw.
     constexpr float ReopenWindow = 5.0f;
+
+    FName LevelPackageName(const ULevel* Level)
+    {
+        const UObject* Package = Level;
+        while (Package && Package->GetOuter())
+        {
+            Package = Package->GetOuter();
+        }
+        return Package ? Package->GetFName() : NAME_None;
+    }
+
+    bool IsStreamedLevel(const AActor* Actor, const ULevel* Level)
+    {
+        const UWorld* World = Actor->GetWorld();
+        return Level && World && Level != World->PersistentLevel;
+    }
+
+    // ClientVisibleLevelNames holds the streamed levels' package names the client said it made visible
+    // (APlayerController::ServerUpdateLevelVisibility).
+    EChannelGoneReason ClassifyChannelGone(UNetConnection* Connection, AActor* Actor, float& OutDistance)
+    {
+        OutDistance = -1.0f;
+        if (Natives::AActor_NetDormancy >= 0 && Actor->NetDormancy > DORM_Awake)
+        {
+            return EChannelGoneReason::Dormant;
+        }
+        ULevel* Level = Actor->GetLevel();
+        if (IsStreamedLevel(Actor, Level) && Natives::UNetConnection_ClientVisibleLevelNames >= 0 && !Connection->IsClientLevelVisible(LevelPackageName(Level)))
+        {
+            return EChannelGoneReason::LevelNotVisible;
+        }
+        AActor* ViewTarget = Connection->ViewTarget;
+        if (!ViewTarget)
+        {
+            return EChannelGoneReason::InRange;
+        }
+        const float DistanceSquared = FVector::DistSquared(Actor->GetTransform().GetLocation(), ViewTarget->GetTransform().GetLocation());
+        OutDistance = FMath::Sqrt(DistanceSquared);
+        const float CullDistanceSquared = Actor->NetCullDistanceSquared;
+        return CullDistanceSquared > 0.0f && DistanceSquared > CullDistanceSquared ? EChannelGoneReason::OutOfRange : EChannelGoneReason::InRange;
+    }
 }
 
 void UNetDriver::LogConnectionReplication()
@@ -170,7 +255,7 @@ void UNetDriver::LogConnectionReplication()
         return;
     }
     const float Now = Time;
-    std::vector<UNetConnection*> Live;
+    TSet<UNetConnection*> Live;
     for (UNetConnection* Connection : ClientConnections)
     {
         APlayerController* Controller = Connection ? static_cast<APlayerController*>(Connection->PlayerController) : nullptr;
@@ -178,56 +263,78 @@ void UNetDriver::LogConnectionReplication()
         {
             continue;
         }
-        Live.push_back(Connection);
-        FConnectionReplicationStats& Stats = ConnectionReplicationStats[Connection];
-        if (Stats.WindowStart < 0.0f)
+        Live.Add(Connection);
+        FConnectionReplicationStats*& StatsPtr = ConnectionReplicationStats.FindOrAdd(Connection);
+        if (!StatsPtr)
         {
-            Stats.WindowStart = Now;
+            StatsPtr = new FConnectionReplicationStats();
+            StatsPtr->WindowStart = Now;
         }
+        FConnectionReplicationStats& Stats = *StatsPtr;
+        const uint32_t Frame = ++Stats.Frame;
 
-        std::vector<FConnectionReplicationStats::FActorId> Actors;
-        Actors.reserve(Stats.OpenActors.size() + 64);
         for (auto& Pair : Connection->ActorChannels)
         {
             UActorChannel* Channel = Pair.Value;
-            if (Channel && Channel->Actor)
+            if (!Channel || !Channel->Actor)
             {
-                Actors.emplace_back(Channel->Actor, GetTypeHash(Pair.Key));
+                continue;
+            }
+            const FReplicatedActorKey Key{ Channel->Actor, GetTypeHash(Pair.Key) };
+            FOpenActorChannel& Open = Stats.OpenActors.FindOrAdd(Key);
+            const bool bNew = Open.SeenFrame == 0;
+            Open.Actor = Pair.Key;
+            Open.SeenFrame = Frame;
+            if (!bNew)
+            {
+                continue;
+            }
+            ++Stats.Opened;
+            const FClosedActorChannel* Closed = Stats.ClosedAt.Find(Key);
+            if (!Closed || Now - Closed->Time > ReopenWindow)
+            {
+                continue;
+            }
+            ++Stats.Reopened;
+            AActor* Actor = Channel->Actor;
+            FReopenedClassStats& ClassStats = Stats.ReopenedByClass.FindOrAdd(Actor->GetClass());
+            ++ClassStats.Count;
+            ++ClassStats.ByReason[static_cast<int32_t>(Closed->Reason)];
+            if (ClassStats.Example.IsEmpty())
+            {
+                float Distance = -1.0f;
+                ClassifyChannelGone(Connection, Actor, Distance);
+                ULevel* Level = Actor->GetLevel();
+                const bool bStreamed = IsStreamedLevel(Actor, Level);
+                const bool bLevelVisible = !bStreamed || Natives::UNetConnection_ClientVisibleLevelNames < 0 || Connection->IsClientLevelVisible(LevelPackageName(Level));
+                const float CullDistanceSquared = Actor->NetCullDistanceSquared;
+                ClassStats.Example = FString::Printf(TEXT("%s in %s (%s, visible to the client: %s), %.0f m away, cull %.0f m, closed while %s"),
+                    *Actor->GetName(), *LevelPackageName(Level).ToString(), bStreamed ? TEXT("streamed") : TEXT("persistent"), bLevelVisible ? TEXT("yes") : TEXT("no"),
+                    Distance / 100.0f, CullDistanceSquared > 0.0f ? FMath::Sqrt(CullDistanceSquared) / 100.0f : -1.0f, ChannelGoneReasonName(Closed->Reason));
             }
         }
-        std::sort(Actors.begin(), Actors.end());
 
-        std::vector<FConnectionReplicationStats::FActorId> Changed;
-        std::set_difference(Stats.OpenActors.begin(), Stats.OpenActors.end(), Actors.begin(), Actors.end(), std::back_inserter(Changed));
-        for (const FConnectionReplicationStats::FActorId& Gone : Changed)
+        TArray<FReplicatedActorKey> Gone;
+        for (const auto& Pair : Stats.OpenActors)
         {
-            Stats.ClosedAt[Gone] = Now;
-        }
-        Stats.Closed += static_cast<int32_t>(Changed.size());
-        Changed.clear();
-        std::set_difference(Actors.begin(), Actors.end(), Stats.OpenActors.begin(), Stats.OpenActors.end(), std::back_inserter(Changed));
-        Stats.Opened += static_cast<int32_t>(Changed.size());
-        for (const FConnectionReplicationStats::FActorId& New : Changed)
-        {
-            auto Found = Stats.ClosedAt.find(New);
-            if (Found != Stats.ClosedAt.end() && Now - Found->second <= ReopenWindow)
+            if (Pair.Value.SeenFrame != Frame)
             {
-                ++Stats.Reopened;
-                UClass* Class = New.first->GetClass();
-                ++Stats.ReopenedByClass[Class];
-                std::wstring& Example = Stats.ReopenedExample[Class];
-                if (Example.empty())
-                {
-                    UObject* Package = New.first->GetOuter();
-                    while (Package && Package->GetOuter())
-                    {
-                        Package = Package->GetOuter();
-                    }
-                    Example = std::format(L"{} in {}", New.first->GetName().ToStdString(), Package ? Package->GetName().ToStdString() : std::wstring(L"?"));
-                }
+                Gone.Add(Pair.Key);
             }
         }
-        Stats.OpenActors = std::move(Actors);
+        for (const FReplicatedActorKey& Key : Gone)
+        {
+            AActor* Actor = Stats.OpenActors.FindChecked(Key).Actor.Get();
+            Stats.OpenActors.Remove(Key);
+            ++Stats.Closed;
+            if (!Actor || Actor->bTearOff)
+            {
+                Stats.ClosedAt.Remove(Key);
+                continue;
+            }
+            float Distance = -1.0f;
+            Stats.ClosedAt.FindOrAdd(Key) = FClosedActorChannel{ Now, ClassifyChannelGone(Connection, Actor, Distance) };
+        }
         ++Stats.Frames;
         Stats.SaturatedFrames += Connection->IsNetReady(false) ? 0 : 1;
 
@@ -235,29 +342,60 @@ void UNetDriver::LogConnectionReplication()
         {
             continue;
         }
-        std::vector<std::pair<UClass*, int32_t>> Classes(Stats.ReopenedByClass.begin(), Stats.ReopenedByClass.end());
-        std::sort(Classes.begin(), Classes.end(), [](const auto& A, const auto& B) { return A.second > B.second; });
-        std::wstring Top;
-        for (size_t i = 0; i < Classes.size() && i < 6; ++i)
+        TArray<TPair<UClass*, const FReopenedClassStats*>> Classes;
+        for (const auto& Pair : Stats.ReopenedByClass)
         {
-            Top += std::format(L"{}{} {} (e.g. {})", i ? L", " : L"", Classes[i].first->GetName().ToStdString(), Classes[i].second, Stats.ReopenedExample[Classes[i].first]);
+            Classes.Add(TPair<UClass*, const FReopenedClassStats*>{ Pair.Key, &Pair.Value });
+        }
+        ::Sort(Classes.GetData(), Classes.Num(), [](const auto& A, const auto& B) { return A.Value->Count > B.Value->Count; });
+        FString Top;
+        for (int32_t i = 0; i < Classes.Num() && i < 6; ++i)
+        {
+            const FReopenedClassStats& ClassStats = *Classes[i].Value;
+            FString Reasons;
+            for (int32_t Reason = 0; Reason < static_cast<int32_t>(EChannelGoneReason::Num); ++Reason)
+            {
+                if (ClassStats.ByReason[Reason])
+                {
+                    Reasons += FString::Printf(TEXT("%s%s %d"), Reasons.IsEmpty() ? TEXT("") : TEXT(", "), ChannelGoneReasonName(static_cast<EChannelGoneReason>(Reason)), ClassStats.ByReason[Reason]);
+                }
+            }
+            Top += FString::Printf(TEXT("%s%s %d [%s] (e.g. %s)"), i ? TEXT("; ") : TEXT(""), *Classes[i].Key->GetName(), ClassStats.Count, *Reasons, *ClassStats.Example);
         }
         AActor* ViewTarget = Connection->ViewTarget;
-        Log::Info(L"Net (#567): {} over {:.0f}s: {} frames, {} saturated; {} actor channels open, {} opened, {} closed, {} reopened within {:.0f}s{}{}; view target {}, net speed {}",
-            Controller->GetName().ToStdString(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.size(), Stats.Opened, Stats.Closed, Stats.Reopened,
-            ReopenWindow, Top.empty() ? L"" : L": ", Top, ViewTarget ? ViewTarget->GetName().ToStdString() : std::wstring(L"none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1);
-        for (auto It = Stats.ClosedAt.begin(); It != Stats.ClosedAt.end();)
+        const FString Line = FString::Printf(TEXT("Net (#567): %s over %.0fs: %d frames, %d saturated; %d actor channels open, %d opened, %d closed, %d reopened within %.0fs%s%s; view target %s, net speed %d"),
+            *Controller->GetName(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.Num(), Stats.Opened, Stats.Closed, Stats.Reopened, ReopenWindow,
+            Top.IsEmpty() ? TEXT("") : TEXT(": "), *Top, ViewTarget ? *ViewTarget->GetName() : TEXT("none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1);
+        Log::Info(L"{}", Line.ToStdString());
+
+        TArray<FReplicatedActorKey> Stale;
+        for (const auto& Pair : Stats.ClosedAt)
         {
-            It = Now - It->second > ReopenWindow ? Stats.ClosedAt.erase(It) : std::next(It);
+            if (Now - Pair.Value.Time > ReopenWindow)
+            {
+                Stale.Add(Pair.Key);
+            }
         }
-        Stats.ReopenedByClass.clear();
-        Stats.ReopenedExample.clear();
+        for (const FReplicatedActorKey& Key : Stale)
+        {
+            Stats.ClosedAt.Remove(Key);
+        }
+        Stats.ReopenedByClass.Empty();
         Stats.WindowStart = Now;
         Stats.Frames = Stats.SaturatedFrames = Stats.Opened = Stats.Closed = Stats.Reopened = 0;
     }
-    for (auto It = ConnectionReplicationStats.begin(); It != ConnectionReplicationStats.end();)
+    TArray<UNetConnection*> Dead;
+    for (const auto& Pair : ConnectionReplicationStats)
     {
-        It = std::find(Live.begin(), Live.end(), It->first) == Live.end() ? ConnectionReplicationStats.erase(It) : std::next(It);
+        if (!Live.Contains(Pair.Key))
+        {
+            Dead.Add(Pair.Key);
+        }
+    }
+    for (UNetConnection* Connection : Dead)
+    {
+        delete ConnectionReplicationStats.FindChecked(Connection);
+        ConnectionReplicationStats.Remove(Connection);
     }
 #endif
 }

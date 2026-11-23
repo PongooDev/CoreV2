@@ -11959,6 +11959,44 @@ bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
         }
         break;
     }
+    // 8.30 (CL-5793395, 0x120ED20) calls an out-of-line assignment, 0x124B960 at 0x120F004, that begins with the
+    // member's address and the self-assignment test: lea rbp, [rcx+540h]; mov rsi, rdx; cmp rbp, rdx.
+    bOptionsTaken = false;
+    for (const auto& [Site, Target] : End && Natives::AFortGameState_MatchOptions < 0 ? Finder::DirectCalls(OnGivenMatchAssignment, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Target == CustomMatchOptions)
+        {
+            bOptionsTaken = true;
+            continue;
+        }
+        if (!bOptionsTaken || !IsInText(Target) || !IsInText(Target + 0x30))
+        {
+            continue;
+        }
+        for (uintptr_t Lea = Target; Lea < Target + 0x10 && Natives::AFortGameState_MatchOptions < 0; ++Lea)
+        {
+            // lea r64, [rcx+disp32], then cmp r64, rdx within the next instructions.
+            const uint8_t Rex = Byte(Lea);
+            const uint8_t ModRm = Byte(Lea + 2);
+            if ((Rex & 0xFB) != 0x48 || Byte(Lea + 1) != 0x8D || (ModRm & 0xC7) != 0x81)
+            {
+                continue;
+            }
+            const uint8_t Destination = static_cast<uint8_t>(((Rex & 0x04) << 1) | ((ModRm >> 3) & 0x07));
+            const uintptr_t Compare = FindInstruction(Lea + 7, Lea + 0x10, { static_cast<uint8_t>(Destination >= 8 ? 0x4C : 0x48), 0x3B, static_cast<uint8_t>(0xC2 | ((Destination & 0x07) << 3)) });
+            const int32_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+            if (Compare && Offset > 0 && Offset < 0x4000)
+            {
+                Natives::AFortGameState_MatchOptions = Offset;
+                Log::Info(L"Finder: AFortGameState::MatchOptions at +0x{:X} (its assignment 0x{:X}, called at 0x{:X}; the custom match options from 0x{:X})", Offset, Target - Finder::ImageBase(),
+                    Site - Finder::ImageBase(), CustomMatchOptions - Finder::ImageBase());
+            }
+        }
+        if (Natives::AFortGameState_MatchOptions >= 0)
+        {
+            break;
+        }
+    }
     if (CustomMatchOptions && Natives::AFortGameState_MatchOptions < 0)
     {
         Log::Error(L"Finder: AFortGameState::MatchOptions not found (the custom match options at 0x{:X} {}), a party's custom match options won't reach its playlist",

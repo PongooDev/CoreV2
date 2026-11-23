@@ -554,6 +554,12 @@ namespace Finder
     // builds keep; Natives::ABuildingItemCollectorActor_FinishItemSelectionSetup), off the collector's vtable and its
     // ItemSelectionHandle's offset. Null where it isn't found.
     uint8_t* ResolveItemCollectorSelectionSetupLive(void** CollectorVTable, int32_t ItemSelectionHandleOffset);
+    // From 8.30: the `lea r64, [shared empty function]` in ABuildingGameplayActorSpawnMachine's IFortInteractInterface::
+    // ServerOnAttemptInteract that binds the reboot's timer (before FTimerManager::InternalSetTimer, whose rate is read
+    // off ResurrectionStartDelayOffset). Null where it isn't found or isn't stripped.
+    uint8_t* SpawnMachineResurrectionTimerBind(UObject* SpawnMachineDefault, UClass* InteractInterface, ptrdiff_t ResurrectionStartDelayOffset);
+    // AFortGameModeAthena::AddToAlivePlayers (Natives::AFortGameModeAthena_AddToAlivePlayers), by its log line.
+    bool ResolveAddToAlivePlayersLive();
     // From 5.40 (The Getaway): AFortSpecialActorReplicationInfo::AddActorToReplicationList and the constructor and
     // destructor of the FSpecialActorInitData it takes, from AFortAthenaExitCraftSpawner::RegisterSpawnerSpecialActor
     // (the "%s_%s" function that stores Add's id into SpawnerSpecialActorIDOffset), and RemoveActorFromReplicationList,

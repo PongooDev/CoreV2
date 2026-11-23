@@ -223,6 +223,14 @@ public:
     DefineBitfieldUProperty(bUsingAnonymousMode)
     static bool HasUsingAnonymousMode() { return Member_bUsingAnonymousMode.IsAvailable(); }
 
+    // 8.30's Reboot Van: the player is being rebooted (replicated). The resurrection component sets it when the van's
+    // interaction starts (8.30 0x1008D80); ChoosePlayerStart and PlayerCanRestart (0xF04200, 0xF1F130) let such a player
+    // restart at the van, and FinishRestartPlayer (0xF08870) clears it.
+    DefineUProperty(bool, bResurrectingNow)
+    // How many times the player was rebooted (replicated). Nothing in 8.30's image writes it.
+    DefineUProperty(int32_t, RebootCounter)
+    static bool HasResurrection() { return Member_bResurrectingNow.IsAvailable() && Member_RebootCounter.IsAvailable(); }
+
 private:
     // A set can't be assigned, so it has no DefineUProperty setter: read-only.
     static inline Reflection::FMemberInfo Member_HostilePlayersDamaged{ &StaticReflectionOwner, TEXT("HostilePlayersDamaged"), sizeof(TSet<AFortPlayerStateAthena*>), Reflection::EMemberKind::Value };

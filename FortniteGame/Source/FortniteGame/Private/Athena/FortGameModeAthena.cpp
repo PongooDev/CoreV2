@@ -13,6 +13,7 @@
 #include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
+#include "Building/BuildingGameplayActorSpawnMachine.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortLootPackage.h"
@@ -540,7 +541,11 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     bool bRespawnInAir = false;
     // What the game's FinishRestartPlayer does with the pawn next, for the log.
     std::wstring GameRespawnPlace;
-    if (!Aircraft && StartSpot && NewPlayer && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
+    // 8.30's Reboot Van: a player being rebooted restarts at the start spot ChoosePlayerStart gave (the van's
+    // ResurrectionLocation), and FinishRestartPlayer (0xF08870) leaves the pawn there unless the van reboots in the air.
+    AFortPlayerStateAthena* SpawnState = NewPlayer ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(NewPlayer->PlayerState))) : nullptr;
+    const bool bRebooting = SpawnState && AFortPlayerStateAthena::HasResurrection() && SpawnState->bResurrectingNow;
+    if (!Aircraft && !bRebooting && StartSpot && NewPlayer && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
     {
         UWorld* SpotWorld = GetWorld();
         AFortGameStateAthena* GameState = SpotWorld ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(SpotWorld->GetGameState())) : nullptr;
@@ -2885,6 +2890,8 @@ namespace
                 ApplySpawnPercents(Athena);
             }
             SpawnMapLlamas(Athena);
+            // 8.30: the Reboot Vans' places, before anyone can use one.
+            ABuildingGameplayActorSpawnMachine::SetUpResurrectLocations(Athena->GetWorld());
             ClearGameModeTimer(Athena, Events.PlaylistTimer);
             SpawnWaitingVendingMachines(Athena, L"from the default tables: the bus is under way and the game state has no playlist");
         }

@@ -59,6 +59,7 @@
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingFoundation.h"
+#include "Building/BuildingGameplayActorSpawnMachine.h"
 #include "Building/BuildingItemCollectorActor.h"
 #include "Minigame/FortMinigameScoreRegistry.h"
 #include "Minigame/FortMinigameState.h"
@@ -444,6 +445,8 @@ static void InstallHooks()
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             ABuildingItemCollectorActor::HookVTables();
+            // 8.30's Reboot Van: the reboot its interaction's timer runs.
+            ABuildingGameplayActorSpawnMachine::HookNatives();
             AFortMinigameScoreRegistry::HookNatives();
             AFortMinigameState::HookNatives();
             // 7.00's Creative: the rifts, the islands' load and save, the Creative RPCs and the minigames' start.

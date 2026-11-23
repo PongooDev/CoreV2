@@ -17642,6 +17642,84 @@ uint8_t* Finder::ResolveItemCollectorSelectionSetupLive(void** CollectorVTable, 
     return Site;
 }
 
+uint8_t* Finder::SpawnMachineResurrectionTimerBind(UObject* SpawnMachineDefault, UClass* InteractInterface, ptrdiff_t ResurrectionStartDelayOffset)
+{
+    // 8.30 (CL-5793395): ABuildingGameplayActorSpawnMachine's IFortInteractInterface::ServerOnAttemptInteract (interface
+    // at +0x240, slot 5, 0x1072210) ends with the reboot's timer:
+    //   lea rax, nullsub_2 (0x1072705; the shared empty function as the delegate's method), mov [rsp+48h], rax
+    //   lea rcx, [r14+4D0h] (ResurrectionStartDelay, +0x710, off the interface pointer), call FScalableFloat::GetValueAtLevel
+    //   call FTimerManager::InternalSetTimer (0x10727F8, a local handle)
+    // The one stub lea followed within 0x100 bytes by both.
+    const auto SetTimer = reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
+    void* Interface = SpawnMachineDefault && InteractInterface && SetTimer && ResurrectionStartDelayOffset > 0 && ResolveServerOnAttemptInteractLive()
+        ? Natives::UObject_GetInterfaceAddress(SpawnMachineDefault, InteractInterface) : nullptr;
+    void** InterfaceVTable = Interface ? *reinterpret_cast<void***>(Interface) : nullptr;
+    const uintptr_t Interact = VTableEntry(InterfaceVTable, Natives::IFortInteractInterface_ServerOnAttemptInteractIndex);
+    const uintptr_t InteractEnd = IsInText(Interact) ? Finder::FunctionEnd(Interact) : 0;
+    const int32_t DelayDisplacement = Interface ? static_cast<int32_t>(ResurrectionStartDelayOffset - (static_cast<uint8_t*>(Interface) - reinterpret_cast<uint8_t*>(SpawnMachineDefault))) : 0;
+
+    std::vector<uintptr_t> Binds;
+    for (uintptr_t Lea = InteractEnd ? Interact : 0; Lea && Lea + 7 <= InteractEnd; ++Lea)
+    {
+        if ((Byte(Lea) != 0x48 && Byte(Lea) != 0x4C) || Byte(Lea + 1) != 0x8D || (Byte(Lea + 2) & 0xC7) != 0x05 || !Finder::IsStubFunction(Finder::RelativeTarget(Lea, 3, 7)))
+        {
+            continue;
+        }
+        const uintptr_t End = std::min(Lea + 0x100, InteractEnd);
+        // lea rcx, [r64+disp32]
+        bool bReadsDelay = false;
+        for (uintptr_t Site = Lea + 7; Site + 7 <= End && !bReadsDelay; ++Site)
+        {
+            bReadsDelay = (Byte(Site) == 0x48 || Byte(Site) == 0x49) && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xF8) == 0x88 && (Byte(Site + 2) & 7) != 4
+                && *reinterpret_cast<const int32_t*>(Site + 3) == DelayDisplacement;
+        }
+        bool bSetsTimer = false;
+        for (uintptr_t Call = FindRawCall(Lea, End); Call && !bSetsTimer; Call = FindRawCall(Call + 1, End))
+        {
+            bSetsTimer = Finder::RelativeTarget(Call, 1, 5) == SetTimer;
+        }
+        if (bReadsDelay && bSetsTimer)
+        {
+            Binds.push_back(Lea);
+        }
+    }
+
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    if (Binds.size() != 1)
+    {
+        Log::Error(L"Finder: ABuildingGameplayActorSpawnMachine's reboot timer not found (interact 0x{:X}, ResurrectionStartDelay +0x{:X} from the interface, {} binds)", Rva(Interact),
+            DelayDisplacement, Binds.size());
+        return nullptr;
+    }
+    Log::Info(L"Finder: ABuildingGameplayActorSpawnMachine::ServerOnAttemptInteract 0x{:X} binds the stripped reboot to its timer at 0x{:X}", Rva(Interact), Rva(Binds.front()));
+    return reinterpret_cast<uint8_t*>(Binds.front());
+}
+
+bool Finder::ResolveAddToAlivePlayersLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameModeAthena_AddToAlivePlayers || bSearched)
+    {
+        return Natives::AFortGameModeAthena_AddToAlivePlayers != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena::AddToAlivePlayers (8.30 0xF00870) logs either line, the second for a player without a team.
+    uintptr_t Add = FunctionOf(L"FortGameModeAthena: Player [%s] added to alive players list (Team [%d]).  Player count is now [%d].  Team count is now [%d]. ");
+    if (!Add)
+    {
+        Add = FunctionOf(L"FortGameModeAthena: Player [%s] doesn't have a valid PvP team, and won't be added to the alive players list.");
+    }
+    if (!Add)
+    {
+        Log::Error(L"Finder: AFortGameModeAthena::AddToAlivePlayers not found");
+        return false;
+    }
+    Natives::AFortGameModeAthena_AddToAlivePlayers = reinterpret_cast<decltype(Natives::AFortGameModeAthena_AddToAlivePlayers)>(Add);
+    Log::Info(L"Finder: AFortGameModeAthena::AddToAlivePlayers at 0x{:X}", Add - Finder::ImageBase());
+    return true;
+}
+
 namespace
 {
     // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg

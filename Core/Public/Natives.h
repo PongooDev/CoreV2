@@ -840,6 +840,9 @@ namespace Natives
     // and PawnPendingDestroy (0xC6596B) pass false. Left out, the callee read whatever the caller's stack held there, so
     // an elimination could skip the game's win check; a build without it ignores it.
     inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause, bool bTeamChange) = nullptr;
+    // AFortGameModeAthena::AddToAlivePlayers(AFortPlayerControllerAthena*) (8.30 0xF00870): the player into AlivePlayers,
+    // their team's alive count, PlayersLeft and TeamsLeft, and bMarkedAlive. Found on first use (the Reboot Van's).
+    inline void (*AFortGameModeAthena_AddToAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
     // The death cause up to 3.3 (1.9.1 0x43AE20), on the pawn.

@@ -338,6 +338,9 @@ public:
     DefineUProperty(FText, ClientIslandTravelText)
     DefineUProperty(FText, ClientTravelToCreativeHubText)
     DefineUFunction(ClientStartRespawnPreparation)
+    // RespawnPlayerAfterDeath(bool bEnterSkydiving) (8.30 0xF7E020): waits for a stored RespawnData to be ready on both
+    // sides, then ServerRestartPlayer, the skydive, and DeathInfo cleared.
+    DefineUFunction(RespawnPlayerAfterDeath)
     DefineUFunction(ServerSetRespawnData)
     static bool HasDelayedTeleport();
     bool IsDelayedTeleporting() const { return Member_bDelayedTeleporting.IsAvailable() && static_cast<bool>(bDelayedTeleporting); }

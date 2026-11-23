@@ -22,6 +22,9 @@ public:
     DefineUFunction(ClientMessage)
     DefineUFunction(ServerAcknowledgePossession)
     DefineUFunction(ClientSetViewTarget)
+    // The engine's "waiting to respawn": ServerRestartPlayer restarts a Spectating controller only with it.
+    DefineBitfieldUProperty(bPlayerIsWaiting)
+    static bool HasPlayerIsWaiting() { return Member_bPlayerIsWaiting.IsAvailable(); }
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);

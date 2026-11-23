@@ -19449,6 +19449,37 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
     {
         Index = FirstVTableIndexWhere(PawnVTable, OverrideStoresStyleItself);
     }
+    if (Index < 0 && PawnVTable)
+    {
+        // 8.30 (CL-5793395) takes the style by value: AFortPawn's (0x15CD970) is mov rbx, [rcx+2A8h]; mov rdi, rcx; mov
+        // [rcx+6E0h], dl, and the player pawn's override (0x15F74A0) keeps the old style and calls it first.
+        const auto StoresStyleByValue = [CurrentMovementStyleOffset](uintptr_t Body)
+        {
+            if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30))
+            {
+                return false;
+            }
+            for (uintptr_t Store = Body; Store < Body + 0x18; ++Store)
+            {
+                if (IsDisp32Access(Store, 0x88, 2, CurrentMovementStyleOffset) && (Byte(Store + 1) & 0x07) == 0x01)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        Index = FirstVTableIndexWhere(PawnVTable, [&StoresStyleByValue](uintptr_t Entry)
+        {
+            const uintptr_t Body = Finder::Unthunk(Entry);
+            if (StoresStyleByValue(Body))
+            {
+                return true;
+            }
+            const uintptr_t SuperCall = Body && Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30) ? FindRawCall(Body, Body + 0x28) : 0;
+            return SuperCall && StoresStyleByValue(Finder::Unthunk(Finder::RelativeTarget(SuperCall, 1, 5)));
+        });
+        Natives::bAFortPawn_SetCurrentMovementStyleByValue = Index >= 0;
+    }
     if (Index < 0)
     {
         Log::Warning(L"Finder: AFortPawn::SetCurrentMovementStyle not found (CurrentMovementStyle 0x{:X}), player bots set their movement style without its speeds",

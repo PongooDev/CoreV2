@@ -894,6 +894,8 @@ namespace Natives
     // slot 0x8C8): it sets CurrentMovementStyle and then the character movement's speeds for that style (MaxWalkSpeed and
     // the rest, from GetMovementSpeed). A bot's sprint goes through it: Finder::ResolveMovementStyleLive.
     inline int32_t AFortPawn_SetCurrentMovementStyleIndex = -1;
+    // 8.30 (CL-5793395, 0x15CD970) takes the style by value (mov [rcx+6E0h], dl), earlier builds by reference.
+    inline bool bAFortPawn_SetCurrentMovementStyleByValue = false;
     // From 6.x, the AI pawns that animate through the animation sharing system (Finder::ResolveSharedAnimLive): what the
     // build keeps of UFortAbilitySystemComponent::PlaySharedAnim (6.20 CL-4497486 0xA70D50: RepSharedAnimInfo = SharedAnim,
     // return 0; the ability and its activation info go unused), its calls in the abilities' animation tasks, and

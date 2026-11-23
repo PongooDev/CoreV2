@@ -368,6 +368,11 @@ void AFortPawn::SetCurrentMovementStyle(uint8_t NewStyle)
     if (Finder::ResolveMovementStyleLive(CurrentMovementStyleOffset()))
     {
         const uint8_t Style = NewStyle;
+        if (Natives::bAFortPawn_SetCurrentMovementStyleByValue)
+        {
+            CallVirtual<void>(this, Natives::AFortPawn_SetCurrentMovementStyleIndex, Style);
+            return;
+        }
         CallVirtual<void>(this, Natives::AFortPawn_SetCurrentMovementStyleIndex, &Style);
         return;
     }

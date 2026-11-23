@@ -829,6 +829,10 @@ namespace Natives
     // on the server, one call of it with the component (0xE2FB30: the owner's map marker in MarkerStream goes through
     // ServerRemoveMapMarker). 21.40's UAthenaMarkerComponent::LocalRemoveMapMarker. Null elsewhere.
     inline void (*UAthenaMarkerComponent_LocalRemoveMapMarker)(UAthenaMarkerComponent* This) = nullptr;
+    // 8.40+: the end of AFortPlayerControllerAthena's pawn-death handler (0xF88F12): AFortGameStateZone::
+    // IsRespawningAllowed (slot 0x124), then the controller's respawn invalidation timer (0xF97C10). -1 / null before.
+    inline int32_t AFortGameStateZone_IsRespawningAllowedIndex = -1;
+    inline void (*AFortPlayerControllerAthena_StartRespawnInvalidationTimer)(AFortPlayerControllerAthena* This) = nullptr;
     // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
     // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;

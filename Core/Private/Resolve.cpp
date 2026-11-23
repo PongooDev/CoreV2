@@ -18130,9 +18130,24 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
     // own, no death was stored or taken out of the match: a Playground respawn had no death for FinishRestartPlayer
     // (0xD62EF0) to move the new pawn from, and it stayed at the player start on the warmup island (CoreV2 #530).
     uintptr_t MarkerRemoval = 0;
-    if (!MapCursorRemoval && !ServerRemoveMapCursor && MarkerComponentOffset > 0 && AthenaEnd > Athena && AthenaEnd - Athena <= 0xA0)
+    // 8.40 (CL-6005771, slot 0x3A5, 0xF88EA0) adds a tail after the marker's removal: the world's AFortGameStateAthena
+    // and the controller's AFortPlayerState (two StaticClass calls), then "call [rax+920h]" (AFortGameStateZone::
+    // IsRespawningAllowed, slot 0x124, 0xF61DD0) and, when it says yes, the controller's respawn invalidation timer
+    // (0xF97C10, "Starting respawn invalidation timer..."), which Core's restored handler calls the same way.
+    uintptr_t RespawnInvalidationTimer = 0;
+    int32_t GameStateIsRespawningAllowedIndex = -1;
+    if (!MapCursorRemoval && !ServerRemoveMapCursor && MarkerComponentOffset > 0 && AthenaEnd > Athena && AthenaEnd - Athena <= 0x120)
     {
-        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
+        std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
+        const uintptr_t InvalidationTimer = Calls.size() == 6 ? FunctionOf(L"Starting respawn invalidation timer...") : 0;
+        const uintptr_t AllowedCall = InvalidationTimer && Calls[5].second == InvalidationTimer ? FindInstruction(Calls[4].first + 5, Calls[5].first, { 0xFF, 0x90 }) : 0;
+        const int32_t AllowedDisplacement = AllowedCall ? *reinterpret_cast<const int32_t*>(AllowedCall + 2) : -1;
+        if (AllowedDisplacement > 0 && AllowedDisplacement % 8 == 0)
+        {
+            RespawnInvalidationTimer = InvalidationTimer;
+            GameStateIsRespawningAllowedIndex = AllowedDisplacement / 8;
+            Calls.resize(3);
+        }
         // mov rcx, [reg + disp32] (REX.W 8B, mod 10, reg rcx) right before the call, its displacement the member's.
         const uintptr_t Load = Calls.size() == 3 ? Calls[2].first - 7 : 0;
         const bool bComponentThis = Load && Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04
@@ -18145,9 +18160,14 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
             bRemovalCallsRemove = bRemovalCallsRemove || Target == Remove;
         }
         if (Calls.size() == 3 && Calls[0].second != Zone && Calls[1].second == Zone && Calls[0].second != Remove && Remove && RemovalEnd > Removal
-            && RemovalEnd - Removal <= 0x200 && !bRemovalCallsRemove)
+            && RemovalEnd - Removal <= 0x200 && !bRemovalCallsRemove && (AthenaEnd - Athena <= 0xA0 || RespawnInvalidationTimer))
         {
             MarkerRemoval = Removal;
+        }
+        else
+        {
+            RespawnInvalidationTimer = 0;
+            GameStateIsRespawningAllowedIndex = -1;
         }
     }
     const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena) || MapCursorRemoval || (ServerRemoveMapCursor && SetMapIndicatorPos) || MarkerRemoval;
@@ -18168,12 +18188,15 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
     Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor)>(ServerRemoveMapCursor);
     Natives::AFortPlayerStateAthena_SetMapIndicatorPos = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_SetMapIndicatorPos)>(SetMapIndicatorPos);
     Natives::UAthenaMarkerComponent_LocalRemoveMapMarker = reinterpret_cast<decltype(Natives::UAthenaMarkerComponent_LocalRemoveMapMarker)>(MarkerRemoval);
+    Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer)>(RespawnInvalidationTimer);
+    Natives::AFortGameStateZone_IsRespawningAllowedIndex = GameStateIsRespawningAllowedIndex;
     StrippedIndex = Index;
     Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}{}), which never calls RemoveFromAlivePlayers",
         Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : (MapCursorRemoval || ServerRemoveMapCursor || MarkerRemoval) ? L"a call to " : L"a stub, not ", Zone - Finder::ImageBase(),
         MapCursorRemoval ? std::format(L" and the map marker's removal, 0x{:X}", MapCursorRemoval - Finder::ImageBase())
         : ServerRemoveMapCursor ? std::format(L", ServerRemoveMapCursor 0x{:X} and the player state's MapIndicatorPos set 0x{:X}", ServerRemoveMapCursor - Finder::ImageBase(), SetMapIndicatorPos - Finder::ImageBase())
-        : MarkerRemoval ? std::format(L" and the MarkerComponent's (+0x{:X}) LocalRemoveMapMarker 0x{:X}", MarkerComponentOffset, MarkerRemoval - Finder::ImageBase())
+        : MarkerRemoval ? std::format(L" and the MarkerComponent's (+0x{:X}) LocalRemoveMapMarker 0x{:X}{}", MarkerComponentOffset, MarkerRemoval - Finder::ImageBase(),
+            RespawnInvalidationTimer ? std::format(L", then the game state's IsRespawningAllowed (slot 0x{:X}) and the respawn invalidation timer 0x{:X}", GameStateIsRespawningAllowedIndex, RespawnInvalidationTimer - Finder::ImageBase()) : std::wstring())
         : std::wstring());
     return StrippedIndex;
 }

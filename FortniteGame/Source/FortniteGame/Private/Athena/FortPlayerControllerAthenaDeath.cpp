@@ -573,6 +573,18 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     }
 
     UWorld* World = GetWorld();
+    // 8.40 (0xF88F12) ends the handler with the respawn invalidation: when the game state lets the player respawn
+    // (AFortGameStateZone::IsRespawningAllowed, which asks its mutators and the player's stored death), the controller's
+    // timer (0xF97C10) that later checks whether the respawn is still allowed.
+    if (Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer && Natives::AFortGameStateZone_IsRespawningAllowedIndex >= 0 && World)
+    {
+        AFortGameStateAthena* InvalidationGameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+        AFortPlayerState* InvalidationPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+        if (InvalidationGameState && CallVirtual<bool>(InvalidationGameState, Natives::AFortGameStateZone_IsRespawningAllowedIndex, InvalidationPlayerState))
+        {
+            Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer(this);
+        }
+    }
     if (Role != ROLE_Authority || !World)
     {
         return;

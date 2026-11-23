@@ -462,6 +462,9 @@ public:
     // Whether the player may publish (an enabled Support-A-Creator creator on Core-Backend): bIsAllowedToPublish, which
     // the island menu shows Publish Island for. Asked as the player comes into a Creative match.
     void QueryPublishingPermission();
+    // Core's: the published island Volume holds put on the player's Creative island history (Core-Backend's
+    // /core/api/creative/history), as they arrive on it. Nothing for an island without a code.
+    void RecordCreativeIslandHistory(AFortVolume* Volume);
     static void HookCreativeIslandTools();
     // The featured rifts' codes from Core-Backend into UFortRuntimeOptions' CuratedLinkCodes, before the hub begins play.
     static void LoadCuratedLinkCodes();

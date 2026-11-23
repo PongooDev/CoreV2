@@ -707,6 +707,30 @@ void AFortPlayerControllerAthena::QueryPublishingPermission()
 #endif
 }
 
+void AFortPlayerControllerAthena::RecordCreativeIslandHistory(AFortVolume* Volume)
+{
+#if WITH_SERVER_CODE
+    // 8.20's (CL-5625478) island code screen lists the islands the player played (FortMcpUtils: GET
+    // <IslandHistoryUrl>/history/<accountId>?limit=%d, 0x144CB90, and DELETE .../history/<accountId>/<mnemonic>,
+    // 0x1457770), but neither the client nor the server sends anything that adds to it. Epic's service learned the play
+    // server side; the build only keeps the request's "history" and "%s/%s/%s/%s" strings, unreferenced. So the player
+    // is recorded as Core's restored rift teleport links them to the island (SetCreativePlotLinkedVolume, whose server
+    // calls with an island every build strips), to Core-Backend's /core/api/creative/history.
+    UFortLevelSaveComponent* Island = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
+    const FString Mnemonic = Island ? Island->GetLoadedMnemonic() : FString();
+    const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
+    if (Mnemonic.IsEmpty() || !UserId || !UserId->IsValid())
+    {
+        return;
+    }
+    const FString AccountId = UserId->ToString();
+    BackendRequest::PostJson(FString::Printf(L"island history of %s (%s)", *AccountId, *Mnemonic).ToStdString(),
+        FString::Printf(L"/core/api/creative/history/%s/%s", *AccountId, *Mnemonic).ToStdString(), std::string(),
+        FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
+    Log::Info(L"Creative: {} played the island {}", PlayerNameOf(this), Mnemonic.ToStdString());
+#endif
+}
+
 void AFortPlayerControllerAthena::PublishMyCurrentCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions)
 {
     if (This && MyPublishOptions)

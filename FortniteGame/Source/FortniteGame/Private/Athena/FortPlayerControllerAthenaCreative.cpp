@@ -380,6 +380,10 @@ void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volum
     {
         CreativePlotLinkedVolume = Volume;
     }
+    if (Volume)
+    {
+        RecordCreativeIslandHistory(Volume);
+    }
     // The setter refreshes the old island's rifts (its LinkedPortals, 7.20 0xD63370); the new island's count the player
     // once they are refreshed too. A rift's CurrentPopulation is the controllers linked to the rift's LinkedVolume
     // (AFortAthenaCreativePortal's refresh, 7.20 0xCB8CC0). The hub's rift of an island is linked to it from the map

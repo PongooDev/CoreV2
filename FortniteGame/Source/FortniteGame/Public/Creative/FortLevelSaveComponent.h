@@ -39,6 +39,17 @@ public:
     DefineUProperty(TArray<FString>, WhiteList)
 };
 
+// The published island a volume holds (from 7.10; 21.40's FCreativeLoadedLinkData): its code (Mnemonic) and, from
+// 8.00, the rest of its link. The game's mnemonic load fills it from the links service's answer and empties it for an
+// island with no link (8.20 0x11EF4D0, LoadedLinkData at +0x280).
+struct FCreativeLoadedLinkData
+{
+    DefineUnrealStruct(FCreativeLoadedLinkData, FortniteGame)
+
+public:
+    DefineUProperty(FString, Mnemonic)
+};
+
 // The MCP's answer to a profile command (UMcpProfileGroup's FMcpQueryResult): bSucceeded is its first member.
 struct FMcpQueryResult;
 
@@ -168,6 +179,10 @@ public:
         if (Tool == 2 && Member_RestoreRateLimitSeconds.IsAvailable()) return RestoreRateLimitSeconds;
         return Fallback;
     }
+
+    // The code of the published island loaded here (LoadedLinkData), empty for a player's own island and before 7.10.
+    DefineUStructProperty(FCreativeLoadedLinkData, LoadedLinkData)
+    FString GetLoadedMnemonic() const { return Member_LoadedLinkData.IsAvailable() ? static_cast<FString>(LoadedLinkData.Mnemonic) : FString(); }
 
     static bool IsAvailable() { return StaticClass() && Member_LoadedPlot.IsAvailable() && Member_AccountIdOfOwner.IsAvailable(); }
     // Whether the island's playset comes with its plot (bLoadPlaysetFromPlot: the stream component streams the plot's).

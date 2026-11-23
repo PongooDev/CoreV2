@@ -736,14 +736,16 @@ void AFortMinigame::HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolu
         Reflection::FParams(FindStaticFunction_OnRep_CurrentState(), true).Call(this);
         Log::Info(L"Minigame: {}'s island is reset after its game, and the game is back in PreGame", GetName().ToStdString());
     }
-    if (PendingRestartOffset < 0 || CurrentState != EFortMinigameState::GetPreGame())
+    // The restart only goes with the PreGame step Core restores (8.00): 7.40's own PostGameReset sets PreGame and reads
+    // neither flag, so a 7.40 game is left as Epic's 7.40 leaves it.
+    if (!bWasPostGame || PendingRestartOffset < 0)
     {
         return;
     }
     bool& bPendingRestart = *reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(this) + PendingRestartOffset);
     const bool bAutoRestart = *(reinterpret_cast<const uint8_t*>(this) + PendingRestartOffset + 1) != 0;
     const bool bRequested = bPendingRestart;
-    if (!bRequested && !(bWasPostGame && bAutoRestart))
+    if (!bRequested && !bAutoRestart)
     {
         return;
     }

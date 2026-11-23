@@ -159,9 +159,10 @@ public:
     // Core's native for the volume manager's OnVolumeStateChanged (#543), as the game's island is Ready again after
     // AFortMinigame::PostGameReset's restore. 8.00's PostGameReset (0x122AAF0) lost 7.40's step that puts the game back
     // in PreGame (0x11E350F: CurrentState = PreGame, OnRep_CurrentState), so the game stayed post-game and couldn't
-    // start (StartMinigame_Implementation needs PreGame or Warmup); a game still post-game here gets that step. Then a
-    // restart RestartMinigame_Implementation left pending (bPendingRestart; or bAutoRestart after a game, Core's restored
-    // PreGame only) starts the game, as 8.20's SetMinigameState does on PreGame (0x1341C80).
+    // start (StartMinigame_Implementation needs PreGame or Warmup); a game still post-game here gets that step, and then
+    // a restart RestartMinigame_Implementation left pending (bPendingRestart, or bAutoRestart) starts the game, as 8.20's
+    // SetMinigameState does on PreGame (0x1341C80). Builds whose PostGameReset sets PreGame itself (7.40 and older) are
+    // left alone.
     void HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolume* ChangedVolume);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);

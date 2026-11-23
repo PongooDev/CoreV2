@@ -13664,14 +13664,19 @@ bool Finder::ResolveCreateBuildingAndSpawnDecoLive()
         Log::Error(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation not found or stripped (slot {}), so a trap placed with no floor gets none", Index);
         return false;
     }
-    std::vector<uintptr_t> StubCalls;
-    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Implementation))
+    const auto StubCallsIn = [](uintptr_t Body)
     {
-        if (IsStubFunction(Target))
+        std::vector<uintptr_t> StubCalls;
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Body))
         {
-            StubCalls.push_back(Site);
+            if (IsStubFunction(Target))
+            {
+                StubCalls.push_back(Site);
+            }
         }
-    }
+        return StubCalls;
+    };
+    const std::vector<uintptr_t> StubCalls = StubCallsIn(Implementation);
     if (StubCalls.size() != 1)
     {
         Log::Info(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation (0x{:X}) has {} stub calls, none restored", Implementation - Finder::ImageBase(), StubCalls.size());
@@ -13681,6 +13686,27 @@ bool Finder::ResolveCreateBuildingAndSpawnDecoLive()
     Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = reinterpret_cast<uint8_t*>(StubCalls[0]);
     Log::Info(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation (slot 0x{:X}, 0x{:X}) makes the trap's piece with a stripped call at 0x{:X}", Index,
         Implementation - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+
+    // The context traps (Battle Royale's Chiller and Damage Trap: UFortContextTrapItemDefinition, tool
+    // AFortDecoTool_ContextTrap) override the RPC (8.00 0x15F9B60, 8.20 CL-5625478 0x1700F80 slot 0x13C). With a ContextTrapItemDefinition
+    // it takes AutoCreateAttachmentBuildingShapes from that item's FloorTrap (a floor) or WallTrap (a wall), otherwise it
+    // calls AFortDecoTool's. It makes the piece with its own copy of the same call (8.00 0x15F9D4E, 8.20 0x170117C), stripped the same way.
+    const uintptr_t ContextTrapImplementation = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortDecoTool_ContextTrap"), Index);
+    if (ContextTrapImplementation && ContextTrapImplementation != Implementation && !IsStubFunction(ContextTrapImplementation))
+    {
+        const std::vector<uintptr_t> ContextTrapStubCalls = StubCallsIn(ContextTrapImplementation);
+        if (ContextTrapStubCalls.size() == 1)
+        {
+            Natives::AFortDecoTool_ContextTrap_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = reinterpret_cast<uint8_t*>(ContextTrapStubCalls[0]);
+            Log::Info(L"Finder: AFortDecoTool_ContextTrap::ServerCreateBuildingAndSpawnDeco_Implementation (0x{:X}) makes the trap's piece with a stripped call at 0x{:X}",
+                ContextTrapImplementation - Finder::ImageBase(), ContextTrapStubCalls[0] - Finder::ImageBase());
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortDecoTool_ContextTrap::ServerCreateBuildingAndSpawnDeco_Implementation (0x{:X}) has {} stub calls, none restored",
+                ContextTrapImplementation - Finder::ImageBase(), ContextTrapStubCalls.size());
+        }
+    }
     return true;
 }
 

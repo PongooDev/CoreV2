@@ -227,6 +227,11 @@ void AFortPlayerController::HookBuildingVTables()
     {
         Hooks::RedirectCall(L"AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation -> AFortPlayerController::CreateBuildingActor",
             Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall, reinterpret_cast<void*>(&CreateBuildingActorHK));
+        if (Natives::AFortDecoTool_ContextTrap_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall)
+        {
+            Hooks::RedirectCall(L"AFortDecoTool_ContextTrap::ServerCreateBuildingAndSpawnDeco_Implementation -> AFortPlayerController::CreateBuildingActor",
+                Natives::AFortDecoTool_ContextTrap_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall, reinterpret_cast<void*>(&CreateBuildingActorHK));
+        }
     }
 }
 

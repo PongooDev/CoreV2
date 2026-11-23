@@ -253,6 +253,21 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayerByGuid(AFortPlayerController*
 #endif
 }
 
+int32_t UFortKismetLibrary::K2_RemoveFortItemFromPlayer(AFortPlayerController* PlayerController, UFortItem* Item, int32_t AmountToRemove, bool bForceRemoval)
+{
+#if WITH_SERVER_CODE
+    // Stripped as K2_RemoveItemFromPlayerByGuid was: 8.00's native (CL-5203069 0x10D6190), 8.20's (CL-5625478 0x11E2110) and 8.30's (CL-5793395
+    // 0x129F460, whose exec 0x1969D60 K2_RemoveItemFromPlayer shares) only check for a controller and an item around the
+    // shared return-0 stub. The Sneaky Snowman's weapon (B_SneakySnowman_Athena's K2_OnUnEquip) takes each of its items
+    // that is at 0 with it (-1, true): its definition keeps the last one at 0 (bPersistInInventoryWhenFinalStackEmpty)
+    // once worn, and it stayed in the inventory at 0 (#587).
+    UFortWorldItem* WorldItem = Cast<UFortWorldItem>(Item);
+    return WorldItem ? K2_RemoveItemFromPlayerByGuid(PlayerController, static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemGuid, AmountToRemove, bForceRemoval) : 0;
+#else
+    return 0;
+#endif
+}
+
 uint8_t UFortKismetLibrary::GetActorTeam(const AActor* Actor)
 {
     UFunction* Function = FindStaticFunction_GetActorTeam();
@@ -723,6 +738,29 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayerByGuid)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveFortItemFromPlayer)
+{
+    // 8.30's exec (0x1969D60) reads the four parameters and calls the native.
+    P_GET_OBJECT(AFortPlayerController, Z_Param_PlayerController);
+    P_GET_OBJECT(UFortItem, Z_Param_Item);
+    P_GET_PROPERTY(UIntProperty, Z_Param_AmountToRemove);
+    P_GET_UBOOL(Z_Param_bForceRemoval);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // As K2_RemoveItemFromPlayerByGuid's: a consumable a Blueprint spends stays for "cheat infiniteconsumables" (#155), and a
+    // gadget's charge for "cheat nocooldown" (#148), the use counting as paid.
+    UFortWorldItem* WorldItem = Cast<UFortWorldItem>(Z_Param_Item);
+    const bool bKeep = Z_Param_PlayerController && WorldItem && Z_Param_AmountToRemove > 0
+        && (UFortCheatManager::KeepsConsumable(Z_Param_PlayerController, static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemGuid)
+            || UFortCheatManager::KeepsAbilityCharge(Z_Param_PlayerController, static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemGuid));
+#else
+    const bool bKeep = false;
+#endif
+    *static_cast<int32_t*>(RESULT_PARAM) = bKeep ? Z_Param_AmountToRemove : K2_RemoveFortItemFromPlayer(Z_Param_PlayerController, Z_Param_Item, Z_Param_AmountToRemove, Z_Param_bForceRemoval);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromAllPlayers)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
@@ -900,6 +938,8 @@ void UFortKismetLibrary::HookNatives()
              std::tuple{ StaticFunction_K2_RemoveItemFromPlayer(), &execK2_RemoveItemFromPlayer, L"UFortKismetLibrary::K2_RemoveItemFromPlayer" },
              // From 5.40 (CL-4352937) only; older builds have no such UFunction.
              std::tuple{ FindStaticFunction_K2_RemoveItemFromPlayerByGuid(), &execK2_RemoveItemFromPlayerByGuid, L"UFortKismetLibrary::K2_RemoveItemFromPlayerByGuid" },
+             // From 7.30 only.
+             std::tuple{ FindStaticFunction_K2_RemoveFortItemFromPlayer(), &execK2_RemoveFortItemFromPlayer, L"UFortKismetLibrary::K2_RemoveFortItemFromPlayer" },
              std::tuple{ StaticFunction_K2_RemoveItemFromAllPlayers(), &execK2_RemoveItemFromAllPlayers, L"UFortKismetLibrary::K2_RemoveItemFromAllPlayers" },
              std::tuple{ StaticFunction_K2_SpawnPickupInWorld(), &execK2_SpawnPickupInWorld, L"UFortKismetLibrary::K2_SpawnPickupInWorld" } })
     {

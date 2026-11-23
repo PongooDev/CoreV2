@@ -19,6 +19,7 @@ class IAbilitySystemInterface;
 class UAbilitySystemComponent;
 class UClass;
 class IFortInventoryOwnerInterface;
+class UFortItem;
 class UFortWorldItemDefinition;
 class UFortAbilitySet;
 struct FFortAbilitySetHandle;
@@ -36,6 +37,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_GiveItemToAllPlayers)
     DefineUFunction(K2_RemoveItemFromPlayer)
     DefineUFunction(K2_RemoveItemFromPlayerByGuid)
+    DefineUFunction(K2_RemoveFortItemFromPlayer)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
     DefineUFunction(GetSafeZoneLocation)
@@ -70,6 +72,8 @@ public:
     static int32_t K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval = false);
     // 5.40 added it: the one stack ItemGuid names, AmountToRemove of it (all of it when negative). Returns how many went.
     static int32_t K2_RemoveItemFromPlayerByGuid(AFortPlayerController* PlayerController, const FGuid& ItemGuid, int32_t AmountToRemove, bool bForceRemoval = false);
+    // 7.30 added it: as K2_RemoveItemFromPlayerByGuid, for the stack Item is.
+    static int32_t K2_RemoveFortItemFromPlayer(AFortPlayerController* PlayerController, UFortItem* Item, int32_t AmountToRemove, bool bForceRemoval = false);
     static void K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     // The building resource item of a resource type (the game data's wood, stone, metal or permanite item), or null.
     static UFortWorldItemDefinition* K2_GetResourceItemDefinition(uint8_t ResourceType);
@@ -112,6 +116,7 @@ public:
     DECLARE_FUNCTION(execK2_GiveItemToAllPlayers);
     DECLARE_FUNCTION(execK2_RemoveItemFromPlayer);
     DECLARE_FUNCTION(execK2_RemoveItemFromPlayerByGuid);
+    DECLARE_FUNCTION(execK2_RemoveFortItemFromPlayer);
     DECLARE_FUNCTION(execK2_RemoveItemFromAllPlayers);
     DECLARE_FUNCTION(execK2_SpawnPickupInWorld);
     DECLARE_FUNCTION(execK2_GiveBuildingResource);

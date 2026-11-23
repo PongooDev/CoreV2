@@ -44,7 +44,23 @@ namespace
         const auto* Code = static_cast<const uint8_t*>(Function);
         const bool bForwards = Code[0] == 0x48 && Code[1] == 0x8B && Code[2] == 0x89 && Code[7] == 0x48 && Code[8] == 0x8B && Code[9] == 0x01 &&
             Code[10] == 0x48 && Code[11] == 0xFF && Code[12] == 0x60;
-        return bForwards ? *reinterpret_cast<const int32_t*>(Code + 3) : 0;
+        if (bForwards)
+        {
+            return *reinterpret_cast<const int32_t*>(Code + 3);
+        }
+        // 8.30 (CL-5793395) tests the payload for null first: GetContentLength (0x2400B40) is mov rcx, [rcx+98h]; test
+        // rcx, rcx; jz; mov rax, [rcx]; jmp [rax+8], and GetContent (0x2400890) loads it the same way from rbx after its
+        // empty array's static init.
+        for (int32_t Offset = 0; Offset < 0x40; ++Offset)
+        {
+            const uint8_t* At = Code + Offset;
+            if (At[0] == 0x48 && At[1] == 0x8B && (At[2] == 0x89 || At[2] == 0x8B) && At[7] == 0x48 && At[8] == 0x85 && At[9] == 0xC9 && At[10] == 0x74 &&
+                At[12] == 0x48 && At[13] == 0x8B && At[14] == 0x01)
+            {
+                return *reinterpret_cast<const int32_t*>(At + 3);
+            }
+        }
+        return 0;
     }
 
     void** RequestVTable(const wchar_t* ProcessRequestText)

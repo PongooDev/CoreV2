@@ -30,6 +30,7 @@
 #include "Weapons/FortWeapon.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -557,6 +558,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
             if (FDeathInfo::HasDeathCircumstance() && Natives::AFortPlayerPawnAthena_GetDeathCircumstance)
             {
                 DeathInfo.DeathCircumstance = Natives::AFortPlayerPawnAthena_GetDeathCircumstance(Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(DeadPawn)));
+            }
+            if (FDeathInfo::HasDeathTags())
+            {
+                // The stored info's tags are the damage's, which the store (8.30 0xF9DB30) copies into the player
+                // state's; this raw copy only points at them for that copy and is never destroyed.
+                std::memcpy(&static_cast<FGameplayTagContainer&>(DeathInfo.DeathTags), &DamageTags, sizeof(FGameplayTagContainer));
             }
             AthenaState->SetDeathInfo(DeathInfo);
             const FVector DeathLocation = FDeathInfo::HasDeathLocation() ? static_cast<FVector>(DeathInfo.DeathLocation) : FVector(0.0f, 0.0f, 0.0f);

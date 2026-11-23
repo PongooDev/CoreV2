@@ -18448,7 +18448,20 @@ bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathC
             // mov byte ptr [rcx + DeathInfo.bInitialized], 1
             bInitializes = bInitializes || (IsDisp32Access(Site, 0xC6, 0, InitializedOffset) && (Byte(Site + 1) & 0x07) == 0x01 && Byte(Site + 6) == 0x01);
         }
-        return bCopies && bInitializes;
+        if (bCopies && bInitializes)
+        {
+            return true;
+        }
+        // 8.30 (CL-5793395, 0xF9DB30) copies the info field by field ("mov [rcx+1098h], rax" first), keeps the player
+        // state in rdi, and sets bInitialized after copying the tags ("mov byte ptr [rdi+10B4h], 1" 0x8B bytes in).
+        bool bCopiesFields = false;
+        bool bInitializesLater = false;
+        for (uintptr_t Site = Callee; IsInText(Callee) && IsInText(Callee + 0x100) && Site < Callee + 0xC0; ++Site)
+        {
+            bCopiesFields = bCopiesFields || (Site < Callee + 0x40 && (Byte(Site) & 0xFB) == 0x48 && IsDisp32Access(Site + 1, 0x89, -1, DeathInfoOffset) && (Byte(Site + 2) & 0x07) == 0x01);
+            bInitializesLater = bInitializesLater || (IsDisp32Access(Site, 0xC6, 0, InitializedOffset) && Byte(Site + 6) == 0x01);
+        }
+        return bCopiesFields && bInitializesLater;
     };
     uintptr_t Handling = 0;
     uintptr_t SetDeathInfo = 0;

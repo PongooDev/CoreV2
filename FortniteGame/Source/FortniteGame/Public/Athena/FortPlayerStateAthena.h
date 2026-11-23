@@ -3,6 +3,7 @@
 #include "Containers/Set.h"
 #include "Engine/NetSerialization.h"
 #include "FortTeamInfo.h"
+#include "GameplayTagContainer.h"
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
 #include "Math/Vector2D.h"
@@ -63,12 +64,15 @@ struct FDeathInfo
     // Flags of how the player died (from 4.5; not a UENUM): what the pawn's vehicle and tags said as the death was
     // stored (Natives::AFortPlayerPawnAthena_GetDeathCircumstance). The client's kill feed reads it for a fall.
     DefineUProperty(int32_t, DeathCircumstance)
+    // 8.30 (CL-5793395) drops DeathCircumstance for the damage's tags, which its DBNO handling (0xFAD994) copies in.
+    DefineUProperty(FGameplayTagContainer, DeathTags)
 
 public:
     static bool HasDistance() { return Member_Distance.IsAvailable(); }
     static bool HasDeathLocation() { return Member_DeathLocation.IsAvailable(); }
     static bool HasInitialized() { return Member_bInitialized.IsAvailable(); }
     static bool HasDeathCircumstance() { return Member_DeathCircumstance.IsAvailable(); }
+    static bool HasDeathTags() { return Member_DeathTags.IsAvailable(); }
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();

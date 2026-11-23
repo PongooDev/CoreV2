@@ -44,7 +44,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 bool AFortPlayerControllerAthena::PlaysBattleRoyaleHeroes()
 {
-    return HasDefaultHeroes() || Member_CustomizationLoadout.IsAvailable();
+    return HasDefaultHeroes() || HasCosmeticLoadout();
 }
 
 bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
@@ -65,7 +65,8 @@ bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
 
 UFortHeroType* AFortPlayerControllerAthena::GetLoadoutHero()
 {
-    UAthenaCharacterItemDefinition* Character = Member_CustomizationLoadout.IsAvailable() ? static_cast<UAthenaCharacterItemDefinition*>(CustomizationLoadout.Character) : nullptr;
+    const FFortAthenaLoadout* Loadout = GetCosmeticLoadout();
+    UAthenaCharacterItemDefinition* Character = Loadout ? static_cast<UAthenaCharacterItemDefinition*>(Loadout->Character) : nullptr;
     return Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
 }
 
@@ -74,15 +75,15 @@ UFortWorldItemDefinition* AFortPlayerControllerAthena::GetLoadoutPickaxe()
     // The loadout is the athena profile's favorite_* items, and nothing fills an empty favorite_pickaxe in: the
     // profile's loadout (0x41B610) replaces the whole loadout (0x41B2A0), and only an empty dance gets a fallback. The
     // pickaxe is then the one Athena_PlayerController_C's default loadout has.
-    if (!Member_CustomizationLoadout.IsAvailable())
+    if (!HasCosmeticLoadout())
     {
         return nullptr;
     }
-    UAthenaPickaxeItemDefinition* Pickaxe = CustomizationLoadout.Pickaxe;
+    UAthenaPickaxeItemDefinition* Pickaxe = GetCosmeticLoadout()->Pickaxe;
     if (!Pickaxe)
     {
         const AFortPlayerControllerAthena* Default = static_cast<const AFortPlayerControllerAthena*>(GetClass()->GetDefaultObject(false));
-        Pickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->CustomizationLoadout.Pickaxe) : nullptr;
+        Pickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->GetCosmeticLoadout()->Pickaxe) : nullptr;
     }
     return Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr;
 }
@@ -96,13 +97,13 @@ void AFortPlayerControllerAthena::FillEmptyLoadout(AFortPlayerPawnAthena* Pawn)
     // controller's is the athena profile's (GetOrInitializeHero, through GetAthenaLoadoutWithOverrides, 0x827300), which
     // replaces the whole loadout and fills only an empty character: a profile with no favorite_glider, or one the game
     // doesn't know, gave none. The class default's loadout has DefaultGlider and DefaultPickaxe in it.
-    if (Role != ROLE_Authority || !Member_CustomizationLoadout.IsAvailable() || !FFortAthenaLoadout::HasGlider())
+    if (Role != ROLE_Authority || !HasCosmeticLoadout() || !FFortAthenaLoadout::HasGlider())
     {
         return;
     }
     const AFortPlayerControllerAthena* Default = static_cast<const AFortPlayerControllerAthena*>(GetClass()->GetDefaultObject(false));
-    UAthenaGliderItemDefinition* DefaultGlider = Default ? static_cast<UAthenaGliderItemDefinition*>(Default->CustomizationLoadout.Glider) : nullptr;
-    UAthenaPickaxeItemDefinition* DefaultPickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->CustomizationLoadout.Pickaxe) : nullptr;
+    UAthenaGliderItemDefinition* DefaultGlider = Default ? static_cast<UAthenaGliderItemDefinition*>(Default->GetCosmeticLoadout()->Glider) : nullptr;
+    UAthenaPickaxeItemDefinition* DefaultPickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->GetCosmeticLoadout()->Pickaxe) : nullptr;
     if (!DefaultGlider)
     {
         DefaultGlider = LoadObject<UAthenaGliderItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Gliders/DefaultGlider.DefaultGlider");
@@ -136,8 +137,8 @@ void AFortPlayerControllerAthena::FillEmptyLoadout(AFortPlayerPawnAthena* Pawn)
     };
 
     // The controller's loadout is filled too, so the pawns it possesses later get its copy whole.
-    Fill(CustomizationLoadout);
-    if (Pawn && Pawn->HasCustomizationLoadout() && Fill(Pawn->CustomizationLoadout))
+    Fill(*GetCosmeticLoadout());
+    if (Pawn && Pawn->HasCustomizationLoadout() && Fill(*Pawn->GetCosmeticLoadout()))
     {
         Pawn->ForceNetUpdate();
     }
@@ -210,11 +211,11 @@ UFortHero* AFortPlayerControllerAthena::SetupHero()
     // made before the player's athena profile had arrived kept the loadout's default banner there, while the loadout
     // itself came from the profile; every later call returns that hero first. The player state takes the loadout's
     // banner here as that call does, whenever they differ.
-    AFortPlayerStateAthena* AthenaPlayerState = AFortPlayerStateAthena::HasBanner() && Member_CustomizationLoadout.IsAvailable()
+    AFortPlayerStateAthena* AthenaPlayerState = AFortPlayerStateAthena::HasBanner() && HasCosmeticLoadout()
         ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (AthenaPlayerState && Role == ROLE_Authority)
     {
-        const FFortAthenaLoadout& Loadout = CustomizationLoadout;
+        const FFortAthenaLoadout& Loadout = *GetCosmeticLoadout();
         FPlayerBannerInfo& Banner = AthenaPlayerState->Banner;
         const FString& IconId = Loadout.BannerIconId;
         const FString& ColorId = Loadout.BannerColorId;
@@ -251,7 +252,7 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
     {
         Heroes.push_back(LoadoutHero);
     }
-    if (Heroes.empty() && Member_CustomizationLoadout.IsAvailable())
+    if (Heroes.empty() && HasCosmeticLoadout())
     {
         return;
     }

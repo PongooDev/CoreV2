@@ -1524,7 +1524,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     std::vector<UCustomCharacterPart*> HeroParts;
     if (Pawn->HasCustomizationLoadout())
     {
-        FFortAthenaLoadout& Loadout = Pawn->CustomizationLoadout;
+        FFortAthenaLoadout& Loadout = *Pawn->GetCosmeticLoadout();
         // Chosen once for the match: by the manager ahead of the bot's spawn, with its assets loaded in the background
         // (FCoreAthenaBotManager::PrepareBotLoadouts), else here.
         if (!bLoadoutChosen)
@@ -1719,7 +1719,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
             const auto PartName = [State](EFortCustomPartType Type) { UCustomCharacterPart* Part = Type < EFortCustomPartType::GetNumTypes() ? State->GetCharacterPart(Type) : nullptr; return Part ? reinterpret_cast<UObject*>(Part)->GetName().ToStdString() : std::wstring(L"none"); };
             Log::Info(L"Battle Royale bots: {} wears {}, {}, back bling {} (pickaxe {}, glider {})", BotName, PartName(EFortCustomPartType::GetHead()), PartName(EFortCustomPartType::GetBody()),
                 PartName(EFortCustomPartType::GetBackpack()), NameOf(reinterpret_cast<UObject*>(LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe())),
-                Pawn->HasCustomizationLoadout() && FFortAthenaLoadout::HasGlider() ? NameOf(reinterpret_cast<UObject*>(static_cast<UAthenaGliderItemDefinition*>(Pawn->CustomizationLoadout.Glider))) : std::wstring(L"-"));
+                Pawn->HasCustomizationLoadout() && FFortAthenaLoadout::HasGlider() ? NameOf(reinterpret_cast<UObject*>(static_cast<UAthenaGliderItemDefinition*>(Pawn->GetCosmeticLoadout()->Glider))) : std::wstring(L"-"));
         }
     }
     GivePlayerAbilities(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));

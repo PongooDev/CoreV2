@@ -159,6 +159,16 @@ public:
     DefineUProperty(TArray<UFortHeroType*>, DefaultHeroes)
     // 1.8: the player's loadout. Athena_PlayerController_C's default has DefaultGlider and DefaultPickaxe in it.
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
+    // 8.20 (CL-5625478) moves it to AFortPlayerController as CosmeticLoadoutPC (21.40's name); declared here, where
+    // FFortAthenaLoadout is, and found on the controller through the class chain.
+    DefineUStructProperty(FFortAthenaLoadout, CosmeticLoadoutPC)
+    static bool HasCosmeticLoadout() { return Member_CustomizationLoadout.IsAvailable() || Member_CosmeticLoadoutPC.IsAvailable(); }
+    // The player's loadout, whichever the build has; null where it has neither.
+    FFortAthenaLoadout* GetCosmeticLoadout() const
+    {
+        return Member_CustomizationLoadout.IsAvailable() ? &static_cast<FFortAthenaLoadout&>(CustomizationLoadout)
+            : Member_CosmeticLoadoutPC.IsAvailable() ? &static_cast<FFortAthenaLoadout&>(CosmeticLoadoutPC) : nullptr;
+    }
     // The player's team. Server: filled once, while empty, by the controller's fill (1.9 slot 0x32E, 1.11 and 2.1 0x338:
     // the game state's and the game mode's inactive player states on the controller's team, 50v50's whole 50), which the
     // team's place and the wins read. Client up to 1.10: the HUD's team list takes their talking states in this order

@@ -27,6 +27,9 @@ public:
     // 1.8: the controller's loadout, copied by its Possess (0x444480). Every client sets up the glider of every pawn's
     // (OnRep_CustomizationLoadout, 0x43D4A0), and an empty one crashes them all.
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
+    // 8.20 (CL-5625478): AFortPlayerPawn::CosmeticLoadout (OnRep_CosmeticLoadout), the same loadout; found through the
+    // class chain.
+    DefineUStructProperty(FFortAthenaLoadout, CosmeticLoadout)
     // How many teammates are reviving the pawn (AFortPlayerControllerAthena::ServerDBNOReviveStarted and Interrupted).
     DefineUProperty(uint8_t, DBNORevivalStacking)
     static bool HasDBNORevivalStacking() { return Member_DBNORevivalStacking.IsAvailable(); }
@@ -51,7 +54,15 @@ public:
     // pawn's distance (AActor::GetDistanceTo), or the fall's when the damage tags hold the falling damage tag.
     static float GetDeathInfoDistance(AFortPawn* Victim, APawn* FinisherPawn, const FGameplayTagContainer& DamageTags);
 
-    bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable(); }
+    bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable() || Member_CosmeticLoadout.IsAvailable(); }
+    // The pawn's loadout, whichever the build has; null where it has neither.
+    FFortAthenaLoadout* GetCosmeticLoadout() const
+    {
+        return Member_CustomizationLoadout.IsAvailable() ? &static_cast<FFortAthenaLoadout&>(CustomizationLoadout)
+            : Member_CosmeticLoadout.IsAvailable() ? &static_cast<FFortAthenaLoadout&>(CosmeticLoadout) : nullptr;
+    }
+    // The loadout's OnRep, by the build's name.
+    static UFunction* FindCosmeticLoadoutOnRep();
 
     // The build's BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving, 21.40's AFortPlayerPawn::BeginSkydiving),
     // which ExitAircraft calls on a player's new pawn; Core's player bots skydive through it. FortPlayerPawnAthena.cpp:

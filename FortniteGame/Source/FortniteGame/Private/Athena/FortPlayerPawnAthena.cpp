@@ -21,6 +21,13 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
+UFunction* AFortPlayerPawnAthena::FindCosmeticLoadoutOnRep()
+{
+    // 8.20 (CL-5625478) has it on AFortPlayerPawn, with the member it replicates.
+    UFunction* OnRep = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:OnRep_CustomizationLoadout");
+    return OnRep ? OnRep : FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawn:OnRep_CosmeticLoadout");
+}
+
 void AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus)
 {
 #if WITH_SERVER_CODE

@@ -2835,7 +2835,7 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
     const std::optional<FLook> OwnerLook = OwnerState && PossessorState ? std::optional<FLook>(LookOf(OwnerState)) : std::nullopt;
     AFortPlayerPawnAthena* const AthenaTarget = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Target));
     const std::shared_ptr<uint8_t> OwnerLoadout = AthenaTarget && AthenaTarget->HasCustomizationLoadout()
-        ? CopyStructValue(FFortAthenaLoadout::StaticStruct(), &static_cast<FFortAthenaLoadout&>(AthenaTarget->CustomizationLoadout)) : nullptr;
+        ? CopyStructValue(FFortAthenaLoadout::StaticStruct(), AthenaTarget->GetCosmeticLoadout()) : nullptr;
 
     ParkOriginal(Possession.Parking, OwnPawn);
     Owner->UnPossess();
@@ -2870,8 +2870,8 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
     }
     if (OwnerLoadout)
     {
-        FFortAthenaLoadout::StaticStruct()->CopyScriptStruct(&static_cast<FFortAthenaLoadout&>(AthenaTarget->CustomizationLoadout), OwnerLoadout.get());
-        if (UFunction* OnRepLoadout = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:OnRep_CustomizationLoadout"))
+        FFortAthenaLoadout::StaticStruct()->CopyScriptStruct(AthenaTarget->GetCosmeticLoadout(), OwnerLoadout.get());
+        if (UFunction* OnRepLoadout = AFortPlayerPawnAthena::FindCosmeticLoadoutOnRep())
         {
             Reflection::FParams Params(OnRepLoadout);
             Params.Call(AthenaTarget);

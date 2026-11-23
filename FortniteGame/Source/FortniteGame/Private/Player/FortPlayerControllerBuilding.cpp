@@ -175,7 +175,10 @@ void AFortPlayerController::HookBuildingVTables()
     UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
     const std::tuple<UFunction*, void*, const wchar_t*> Restorations[] = {
-        { StaticFunction_ServerCreateBuildingActor(), reinterpret_cast<void*>(&ServerCreateBuildingActor_ImplementationHK), L"AFortPlayerController::ServerCreateBuildingActor_Implementation" },
+        { StaticFunction_ServerCreateBuildingActor(), FCreateBuildingActorData::StaticStruct()
+            ? reinterpret_cast<void*>(static_cast<void (*)(AFortPlayerController*, const FCreateBuildingActorData&)>(&ServerCreateBuildingActor_ImplementationHK))
+            : reinterpret_cast<void*>(static_cast<void (*)(AFortPlayerController*, const FBuildingClassData&, const FVector&, const FRotator&, bool)>(&ServerCreateBuildingActor_ImplementationHK)),
+            L"AFortPlayerController::ServerCreateBuildingActor_Implementation" },
         { StaticFunction_ServerEditBuildingActor(), reinterpret_cast<void*>(&ServerEditBuildingActor_ImplementationHK), L"AFortPlayerController::ServerEditBuildingActor_Implementation" },
         { StaticFunction_ServerBeginEditingBuildingActor(), reinterpret_cast<void*>(&ServerBeginEditingBuildingActor_ImplementationHK), L"AFortPlayerController::ServerBeginEditingBuildingActor_Implementation" },
         { StaticFunction_ServerEndEditingBuildingActor(), reinterpret_cast<void*>(&ServerEndEditingBuildingActor_ImplementationHK), L"AFortPlayerController::ServerEndEditingBuildingActor_Implementation" },
@@ -208,12 +211,22 @@ void AFortPlayerController::HookBuildingVTables()
             Log::Error(L"Finder: {} slot not found", Name);
             continue;
         }
+        // 8.30 (CL-5793395) leaves a remnant of ServerCreateBuildingActor_Implementation (0x1640EC0, 0x62 bytes): the zone
+        // game state's cast and the handle's read, nothing built. AFortPlayerController's own body is taken as stripped
+        // there when it is that small.
+        void* StrippedBody = Natives::SharedEmptyFunction;
+        if (Function == StaticFunction_ServerCreateBuildingActor() && FCreateBuildingActorData::StaticStruct() && PlayerControllerVTable)
+        {
+            const uintptr_t Body = reinterpret_cast<uintptr_t>(PlayerControllerVTable[Index]);
+            const uintptr_t BodyEnd = Finder::FunctionEnd(Body);
+            StrippedBody = BodyEnd > Body && BodyEnd - Body < 0x80 ? PlayerControllerVTable[Index] : Natives::SharedEmptyFunction;
+        }
         for (TObjectIterator<UClass> It; It; ++It)
         {
             UClass* Class = *It;
             UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
             void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-            if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+            if (VTable && (VTable[Index] == Natives::SharedEmptyFunction || VTable[Index] == StrippedBody))
             {
                 Hooks::SwapVTable(Name, VTable, Index, Implementation);
             }
@@ -274,6 +287,31 @@ bool AFortPlayerController::HasRequiredBuildingLevel(const FBuildingClassData& B
 void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuildingClassData& InBuildingClassData, const FVector& InBuildLoc, const FRotator& InBuildRot, bool bMirrored)
 {
     CreateBuildingActor(InBuildingClassData, InBuildLoc, InBuildRot, bMirrored);
+}
+
+void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FCreateBuildingActorData& CreateBuildingData)
+{
+#if WITH_SERVER_CODE
+    // 8.30's body (0x1640EC0) keeps only the zone game state's cast and the handle's read: the class is
+    // AllPlayerBuildableClasses[BuildingClassHandle], and the rest of the data is the client's.
+    UWorld* World = GetWorld();
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState || !AFortGameStateZone::HasAllPlayerBuildableClasses())
+    {
+        return;
+    }
+    const TArray<UClass*>& BuildableClasses = GameState->AllPlayerBuildableClasses;
+    const int32_t Handle = static_cast<int32_t>(CreateBuildingData.BuildingClassHandle);
+    if (Handle < 0 || Handle >= BuildableClasses.Num())
+    {
+        UE_LOG(LogFortBuilding, Warning, TEXT("%s's build has class handle %d of %d buildable classes"), *GetName(), Handle, BuildableClasses.Num());
+        return;
+    }
+    FBuildingClassData BuildingClassData;
+    BuildingClassData.BuildingClass = BuildableClasses[Handle];
+    BuildingClassData.UpgradeLevel = static_cast<uint8_t>(CreateBuildingData.BuildingClassData.UpgradeLevel);
+    CreateBuildingActor(BuildingClassData, CreateBuildingData.BuildLoc, CreateBuildingData.BuildRot, CreateBuildingData.bMirrored);
+#endif
 }
 
 ABuildingSMActor* AFortPlayerController::CreateBuildingActor(const FBuildingClassData& InBuildingClassData, const FVector& InBuildLoc, const FRotator& InBuildRot, bool bMirrored)
@@ -585,6 +623,11 @@ void AFortPlayerController::ServerUpgradeBuildingActor_Implementation(ABuildingA
 void AFortPlayerController::ServerCreateBuildingActor_ImplementationHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored)
 {
     This->ServerCreateBuildingActor_Implementation(BuildingClassData, BuildLoc, BuildRot, bMirrored);
+}
+
+void AFortPlayerController::ServerCreateBuildingActor_ImplementationHK(AFortPlayerController* This, const FCreateBuildingActorData& CreateBuildingData)
+{
+    This->ServerCreateBuildingActor_Implementation(CreateBuildingData);
 }
 
 ABuildingSMActor* AFortPlayerController::CreateBuildingActorHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored,

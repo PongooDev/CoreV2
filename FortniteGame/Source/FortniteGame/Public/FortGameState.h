@@ -191,6 +191,10 @@ public:
     DefineUProperty(UBuildingStructuralSupportSystem*, StructuralSupportSystem)
     DefineUProperty(int32_t, TotalPlayerStructures)
     DefineUProperty(int32_t, MaxPlayerStructures)
+    // 8.30+ (CL-5793395): the classes a player can build, cached on both sides by CachePlayerBuildableClasses
+    // (0x122BCD0); ServerCreateBuildingActor's BuildingClassHandle indexes it.
+    DefineUProperty(TArray<UClass*>, AllPlayerBuildableClasses)
+    static bool HasAllPlayerBuildableClasses() { return Member_AllPlayerBuildableClasses.IsAvailable(); }
     // 5.0+: the gameplay votes (Mission Control's mission activation and difficulty increase votes).
     DefineUStructArrayProperty(FVoteData, GameplayVotesArray)
     DefineUFunction(OnRep_GameplayVotes)

@@ -1381,6 +1381,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortOctopusVehicle.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaSKPushCannon.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortGameModeAthena.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
@@ -1688,6 +1691,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Public\UI\FrontEnd</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeapon.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeaponRangedMountedCannon.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
     </ClInclude>
     <ClInclude Include="..\ThirdParty\Memcury\memcury.h">
@@ -2433,6 +2439,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeapon.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeaponRangedMountedCannon.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>
     </ClCompile>
     <ClCompile Include="..\ThirdParty\MinHook\src\buffer.c">

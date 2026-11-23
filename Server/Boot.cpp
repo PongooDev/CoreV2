@@ -91,6 +91,7 @@
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "VivoxVoiceChatToken.h"
+#include "Weapons/FortWeaponRangedMountedCannon.h"
 
 namespace
 {
@@ -441,6 +442,8 @@ static void InstallHooks()
             ABGAConsumableSpawner::HookNatives();
             AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();
+            // 8.30's Pirate Cannon: firing the passenger (ServerFireActorInCannon_Implementation, stripped).
+            AFortWeaponRangedMountedCannon::HookVTables();
             AFortOctopusVehicle::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();

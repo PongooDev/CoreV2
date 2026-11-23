@@ -7302,6 +7302,42 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
     return Index;
 }
 
+int32_t Finder::WrappedImplementationIndex(UFunction* Function)
+{
+    // 8.30 (CL-5793395): execPossess 0x2F8CA00 ends with "call 0x2A74320" (AController::Possess), whose only virtual
+    // call is OnPossess (call [rax+6A0h], slot 0xD4) before ReceivePossess; execUnPossess 0x2F8CCD0 is a leaf that
+    // jumps to UnPossess 0x2A7C730 (call [rax+6A8h], OnUnPossess slot 0xD5).
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    if (!IsInText(Exec))
+    {
+        return -1;
+    }
+    const uintptr_t ExecEnd = Finder::FunctionEnd(Exec) ? Finder::FunctionEnd(Exec) : Exec + 0x20;
+    if (FindVirtualCall(Exec, ExecEnd))
+    {
+        return -1;
+    }
+    uintptr_t Wrapper = 0;
+    for (uintptr_t Site = Exec; Site + 5 <= ExecEnd; ++Site)
+    {
+        if ((Byte(Site) == 0xE8 || Byte(Site) == 0xE9) && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+        {
+            Wrapper = Finder::RelativeTarget(Site, 1, 5);
+        }
+    }
+    const uintptr_t WrapperEnd = Wrapper ? Finder::FunctionEnd(Wrapper) : 0;
+    int32_t Index = -1;
+    for (uintptr_t Site = WrapperEnd ? FindVirtualCall(Wrapper, WrapperEnd) : 0; Site; Site = FindVirtualCall(Site + 1, WrapperEnd))
+    {
+        if (Index >= 0 && VirtualSlot(Site) != Index)
+        {
+            return -1;
+        }
+        Index = VirtualSlot(Site);
+    }
+    return Index;
+}
+
 int32_t Finder::ValidateIndex(UFunction* Function)
 {
     // The exec steps the parameters, calls _Validate and tests it (7.20 ServerLoadPlotForPortal's 0x175C530: call
@@ -8657,7 +8693,7 @@ bool Finder::ResolveGoalDetectionLive(void** AIControllerVTable)
     // AFortAIController's Possess (6.21 0xA9F360, slot 0xD1) calls it on GetCurrent's result, or (3.2 0x87BE10) calls the
     // small function that does (0x87D9A0).
     UFunction* Possess = FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:Possess");
-    const int32_t PossessIndex = Possess ? Finder::ImplementationIndex(Possess) : -1;
+    const int32_t PossessIndex = !Possess ? -1 : Finder::ImplementationIndex(Possess) >= 0 ? Finder::ImplementationIndex(Possess) : Finder::WrappedImplementationIndex(Possess);
     const uintptr_t AIPossess = VTableEntry(AIControllerVTable, PossessIndex);
     uintptr_t Register = GoalManagerCallAfterGetCurrent(AIPossess, LooksUpAssignments);
     const bool bPossessReadable = AIPossess && Finder::FunctionStart(AIPossess) == AIPossess && Finder::FunctionEnd(AIPossess) > AIPossess;
@@ -9900,7 +9936,7 @@ bool Finder::ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffs
     bTried = true;
     void** ControllerVTable = AIControllersOffset > 0 ? CdoVTable(L"/Script/FortniteGame.AthenaAIController") : nullptr;
     UFunction* UnPossess = ControllerVTable ? FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:UnPossess") : nullptr;
-    const int32_t UnPossessIndex = UnPossess ? Finder::ImplementationIndex(UnPossess) : -1;
+    const int32_t UnPossessIndex = !UnPossess ? -1 : Finder::ImplementationIndex(UnPossess) >= 0 ? Finder::ImplementationIndex(UnPossess) : Finder::WrappedImplementationIndex(UnPossess);
     const uintptr_t AthenaUnPossess = VTableEntry(ControllerVTable, UnPossessIndex);
     const bool bReadable = AthenaUnPossess && Finder::FunctionStart(AthenaUnPossess) == AthenaUnPossess && Finder::FunctionEnd(AthenaUnPossess) > AthenaUnPossess;
     std::vector<uintptr_t> Unregisters;

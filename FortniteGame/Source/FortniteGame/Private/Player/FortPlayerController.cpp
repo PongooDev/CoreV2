@@ -2196,7 +2196,9 @@ void AFortPlayerController::HookVTables()
     UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
 
-    const int32_t PossessIndex = Finder::ImplementationIndex(AController::StaticFunction_Possess());
+    // 8.30 on: the slot is AController::OnPossess, which the non-virtual Possess calls before ReceivePossess.
+    const int32_t ExecPossessIndex = Finder::ImplementationIndex(AController::StaticFunction_Possess());
+    const int32_t PossessIndex = ExecPossessIndex >= 0 ? ExecPossessIndex : Finder::WrappedImplementationIndex(AController::StaticFunction_Possess());
     void* const PlayerControllerPossess = PlayerControllerVTable && PossessIndex >= 0 ? PlayerControllerVTable[PossessIndex] : nullptr;
     if (PlayerControllerPossess)
     {

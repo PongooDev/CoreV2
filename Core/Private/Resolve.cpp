@@ -11922,10 +11922,25 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
             continue;
         }
         const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
-        bool bAnswerLoop = false;
-        for (uintptr_t Site = AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 ? FindVirtualCall(Athena, AthenaEnd) : 0; Site && !bAnswerLoop; Site = FindVirtualCall(Site + 1, AthenaEnd))
+        const auto HasAnswerLoop = [](uintptr_t Begin, uintptr_t End)
         {
-            bAnswerLoop = Site + 8 <= AthenaEnd && Byte(Site + 6) == 0x3C && Byte(Site + 7) == 0x02;
+            bool bLoop = false;
+            for (uintptr_t Site = End > Begin && End - Begin <= 0x200 ? FindVirtualCall(Begin, End) : 0; Site && !bLoop; Site = FindVirtualCall(Site + 1, End))
+            {
+                bLoop = Site + 8 <= End && Byte(Site + 6) == 0x3C && Byte(Site + 7) == 0x02;
+            }
+            return bLoop;
+        };
+        bool bAnswerLoop = HasAnswerLoop(Athena, AthenaEnd);
+        // 8.20 (CL-5625478, slot 0x349, 0xEDD000) hands the answer to a game state function of its own (0xEB2F70, each
+        // mutator's call [rax+790h], then cmp al, 2), as 6.10 did: the loop is in the override's direct callee.
+        for (const auto& [Call, Target] : !bAnswerLoop && AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 ? Finder::DirectCalls(Athena, AthenaEnd) : decltype(Finder::DirectCalls(0, 0)){})
+        {
+            bAnswerLoop = IsInText(Target) && Finder::FunctionStart(Target) == Target && HasAnswerLoop(Target, Finder::FunctionEnd(Target));
+            if (bAnswerLoop)
+            {
+                break;
+            }
         }
         if (bAnswerLoop && ++AnswerLoops == 1)
         {

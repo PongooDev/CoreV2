@@ -498,15 +498,19 @@ void AFortPlayerController::ServerEditBuildingActor_Implementation(ABuildingSMAc
 
 void AFortPlayerController::ExecuteEditTool(ABuildingSMActor* EditActor)
 {
-    // The edit tool comes out (UFortGameData::EditToolItem's world item) and edits EditActor, or nothing.
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UFortWorldItemDefinition* EditTool = GameData ? GameData->EditToolItem.LoadSynchronous() : nullptr;
-    UFortWorldItem* Item = FindItemForDefinition(WorldInventory, EditTool);
-    if (!Item || !EditTool || !EditTool->ServerExecute(Item, this))
-    {
-        return;
-    }
+    // The edit tool comes out (UFortGameData::EditToolItem's world item) and edits EditActor. Held already (an edit
+    // started from the edit tool), it isn't equipped again.
     AFortPawn* Pawn = MyFortPawn;
+    if (!Pawn || !Cast<AFortWeap_EditingTool>(static_cast<AFortWeapon*>(Pawn->CurrentWeapon)))
+    {
+        UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+        UFortWorldItemDefinition* EditTool = GameData ? GameData->EditToolItem.LoadSynchronous() : nullptr;
+        UFortWorldItem* Item = FindItemForDefinition(WorldInventory, EditTool);
+        if (!Item || !EditTool || !EditTool->ServerExecute(Item, this))
+        {
+            return;
+        }
+    }
     if (AFortWeap_EditingTool* Weapon = Pawn ? Cast<AFortWeap_EditingTool>(static_cast<AFortWeapon*>(Pawn->CurrentWeapon)) : nullptr)
     {
         Weapon->SetEditActor(EditActor);
@@ -542,7 +546,17 @@ void AFortPlayerController::ServerEndEditingBuildingActor_Implementation(ABuildi
     }
 
     SetEditingPlayer(Building, nullptr);
-    ExecuteEditTool(nullptr);
+    // The edit tool lets go of the piece, wherever it is: ending an edit equips nothing. A player who leaves edit mode
+    // by switching weapons sends this after the new weapon's ServerExecuteInventoryItem, and equipping the edit tool
+    // here put it back in their hands.
+    const TArray<AFortWeapon*>& Weapons = MyFortPawn->CurrentWeaponList;
+    for (int32_t Index = 0; Index < Weapons.Num(); ++Index)
+    {
+        if (AFortWeap_EditingTool* Weapon = Cast<AFortWeap_EditingTool>(Weapons[Index]))
+        {
+            Weapon->SetEditActor(nullptr);
+        }
+    }
 #endif
 }
 

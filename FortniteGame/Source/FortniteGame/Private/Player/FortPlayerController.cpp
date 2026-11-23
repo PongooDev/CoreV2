@@ -1670,9 +1670,51 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
             Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
             // Said, so a drop the player didn't make (#344: ammo "appearing" at a player) shows in the server log.
             Log::Info(L"Drop: {} drops {} {} as {}", GetName().ToStdString(), DropCount, ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
+            // 8.20 (CL-5625478) registers Athena.NotifyPickupSpawned as a native tag (FFortGameplayTags +0x1718, set up
+            // at 0x11A30AF) that no code left reads, and nothing broadcasts OnItemDropSpawned (+0x24E0; only the
+            // constructor 0x113B6E7 touches it): the stripped drop told the controller's listeners here.
+            AFortPlayerControllerAthena* AthenaController = AFortPlayerControllerAthena::HasItemDropSpawned() ? Cast<AFortPlayerControllerAthena>(this) : nullptr;
+            const FGameplayTagContainer& ItemTags = ItemDefinition->GameplayTags;
+            if (AthenaController && ItemTags.HasTag(FGameplayTag{ FName(L"Athena.NotifyPickupSpawned") }))
+            {
+                struct
+                {
+                    AFortPickup* Pickup;
+                    UFortItemDefinition* ItemDef;
+                    FGameplayTagContainer ItemTags;
+                } Parms{ Pickup, ItemDefinition, ItemTags };
+                const FMulticastScriptDelegate& ItemDropSpawned = AthenaController->OnItemDropSpawned;
+                ItemDropSpawned.ProcessMulticastDelegate(&Parms);
+            }
         }
     }
     EntryStruct->DestroyStruct(DropEntry);
+#endif
+}
+
+// From 7.00. 8.20's exec (0x1749610, folded with AAthenaFillFloor::execOnLavaOverlap) steps DropItemDef and calls the
+// empty 0x2C3B30, so GA_Athena_Booty_Active's ForceDrop (sent by Prop_Athena_Booty when its chest is opened) kept the
+// treasure map in the inventory (#565).
+void AFortPlayerController::DropSpecificItem(const UFortItemDefinition* DropItemDef)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    if (!Inventory || !DropItemDef)
+    {
+        return;
+    }
+
+    TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        if (ItemEntry && static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition) == DropItemDef && ItemEntry->Count > 0)
+        {
+            const FGuid ItemGuid = ItemEntry->ItemGuid;
+            ServerSpawnInventoryDrop_Implementation(ItemGuid, static_cast<int32_t>(ItemEntry->Count));
+            return;
+        }
+    }
 #endif
 }
 
@@ -2198,6 +2240,19 @@ void AFortPlayerController::HookVTables()
         GivePlayerAmmoFunction->SetNativeFunc(&execGivePlayerAmmo);
         Log::Info(L"Hook AFortPlayerController::GivePlayerAmmo: native");
     }
+    if (UFunction* DropSpecificFunction = FindStaticFunction_DropSpecificItem(); DropSpecificFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        const uint8_t* DropCall = Finder::ImplementationCall(DropSpecificFunction);
+        if (DropCall && !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(DropCall), 1, 5)))
+        {
+            Log::Info(L"Hook AFortPlayerController::DropSpecificItem: the build's own (not stripped)");
+        }
+        else
+        {
+            DropSpecificFunction->SetNativeFunc(&execDropSpecificItem);
+            Log::Info(L"Hook AFortPlayerController::DropSpecificItem: native");
+        }
+    }
     // SwapQuickBarFocus is stripped only where its exec calls a stub (Cert's, 0xA313C0). Other builds keep their own
     // (3.3 0xED0250: QuickBars->SwapQuickBarFocus(InQuickBar, -1)), and 5.10 adds SlotOverride to it (5.30 0x11D3170,
     // 5.41 0x11E0640, 6.00 0x1230E00); those stay. Core's took their place too, and stepped only InQuickBar (#405).
@@ -2598,6 +2653,15 @@ void AFortPlayerController::ClientEquipItem(const FGuid& ItemGuid, bool bForceEx
     Params.Set(L"ItemGuid", ItemGuid);
     Params.Set(L"bForceExecution", bForceExecution);
     Params.Call(this);
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execDropSpecificItem)
+{
+    P_GET_OBJECT(UFortItemDefinition, Z_Param_DropItemDef);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->DropSpecificItem(Z_Param_DropItemDef);
+    P_NATIVE_END;
 }
 
 DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)

@@ -153,6 +153,8 @@ public:
     DefineUFunction(ServerAttemptInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ServerDropAllItems)
+    // From 7.00: a Blueprint drops one item of the player's by its definition (GA_Athena_Booty_Active's ForceDrop).
+    DefineUFunction(DropSpecificItem)
     // From 5.10 (CL-4240749): the inventory's quick bar slotting puts a stack onto a slot that holds the same item.
     DefineUFunction(ServerCombineInventoryItems)
     DefineUFunction(ServerRemoveInventoryStateValue)
@@ -245,6 +247,7 @@ public:
     // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.
     void DropAllItems(const UFortItemDefinition* IgnoreItemDef);
     void ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef);
+    void DropSpecificItem(const UFortItemDefinition* DropItemDef);
     void ServerCombineInventoryItems_Implementation(const FGuid& TargetItemGuid, const FGuid& SourceItemGuid);
     // The game's own virtual (from 6.01, CL-4424678 slot 0x31D; the mutators' side of it is 21.40's
     // FortGameStateAthena_ShouldDropItem): whether the player's death drops an item of this definition, bShouldDrop
@@ -346,6 +349,7 @@ public:
 
     DECLARE_FUNCTION(execActivateSlot);
     DECLARE_FUNCTION(execGivePlayerAmmo);
+    DECLARE_FUNCTION(execDropSpecificItem);
     DECLARE_FUNCTION(execSwapQuickBarFocus);
     DECLARE_FUNCTION(execCheat);
     DECLARE_FUNCTION(execOnRep_CheatMovement);

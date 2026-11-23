@@ -295,6 +295,10 @@ public:
     // Core's UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete does that part.
     DefineUProperty(FMulticastScriptDelegate, OnCreativePermissionsChanged)
     static bool HasCreativePermissionsChanged() { return Member_OnCreativePermissionsChanged.IsAvailable(); }
+    // 8.00 and 8.20: (Pickup, ItemDef, ItemTags) for each item the player drops that carries Athena.NotifyPickupSpawned
+    // (AGID_Athena_Booty). GA_Athena_Booty_Active binds it: the map dropped after its chest was searched is destroyed.
+    DefineUProperty(FMulticastScriptDelegate, OnItemDropSpawned)
+    static bool HasItemDropSpawned() { return Member_OnItemDropSpawned.IsAvailable(); }
     DefineUFunction(ServerGiveCreativeItem)
     DefineUFunction(ServerLoadPlotForPortal)
     DefineUFunction(ServerReloadCreativePlot)

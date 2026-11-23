@@ -695,6 +695,16 @@ void AFortPlayerController::Possess(APawn* InPawn)
         ApplyHarvestingTool();
         ApplyHomebaseGadgets();
         LogHomebaseStats(this);
+
+        // 7.40: the layout InitializeInventory cached at login (RestorePlayerQuickBars) goes to the client now. Sent from
+        // Login it was lost, as the controller had no connection yet (#533: the client never built its quickbars).
+        // The client takes only the first (ClientUpdateQuickBarRecordsCache_Implementation 0x13F4D20 checks
+        // bHasReceivedQuickBarRecords), then runs UpdateQuickBars (slot 0x338, 0x143CC30), which builds the quickbars.
+        if (!HasQuickBars() && HasQuickBarRecordsCache() && FindStaticFunction_ClientUpdateQuickBarRecordsCache())
+        {
+            ClientUpdateQuickBarRecordsCache(CachedPrimaryQuickBarRecord, CachedSecondaryQuickBarRecord);
+            UE_LOG(LogFort, Log, TEXT("Possess: %s is sent its quickbar layout"), *GetNameSafe(this));
+        }
     }
 
     if (Role == ROLE_Authority && Bars && MyFortPawn)
@@ -856,7 +866,7 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
     }
 
     // 7.40 (CL-5046157): the client builds its quickbars once it has the saved layout (RestorePlayerQuickBars, above,
-    // handed it over) and both of these are set (AFortPlayerController's 0x1409670, which its quickbar setup 0x1431460
+    // caches it and Possess hands it over) and both of these are set (AFortPlayerController's 0x1409670, which its quickbar setup 0x1431460
     // asks; they replicate with UpdateQuickBars as their RepNotify). Nothing in the exe sets them: the server's code is
     // stripped. Core's: both here, once the world inventory has its items; later items (the hero's kit) reach the client's
     // quickbars as any item it gains.

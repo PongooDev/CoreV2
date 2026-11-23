@@ -7,6 +7,7 @@
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
 #include "StructArray.h"
+#include "UObject/ScriptDelegates.h"
 
 #include <cstdint>
 
@@ -87,6 +88,10 @@ public:
     DefineUProperty(int32_t, StartingGoalLevel)
     // From 6.20: the collector's row of an ItemCollectorRow table (Playground's machines: ItemCollectorData).
     DefineUStructProperty(FDataTableRowHandle, ItemCollectorHandle)
+    // From 8.20: broadcast for each pickup the collector gives. B_Athena_VendingMachine binds PickupSpawned_Bind to it,
+    // which counts the pickups and, at MaxItemsToSpawn (Default.VendingMachine.MaxItemsToDrop, 1), plays DoVendDeath and
+    // destroys the machine.
+    DefineUProperty(FMulticastScriptDelegate, PickupSpawned)
 
     static bool HasOutputItems() { return Member_ItemCollections.IsAvailable() && Member_StartingGoalLevel.IsAvailable() && FCollectorUnitInfo::StaticStruct(); }
     // The collector's ItemCollectorHandle row, or null (no handle on this build, or none set).

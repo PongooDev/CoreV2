@@ -284,6 +284,11 @@ void ABuildingItemCollectorActor::GrantOutput(AFortPlayerController* PlayerContr
             Pickup->TossPickup(Floor, nullptr, 0);
         }
         ++Spawned;
+        if (Member_PickupSpawned.IsAvailable())
+        {
+            const FMulticastScriptDelegate& PickupSpawnedDelegate = PickupSpawned;
+            PickupSpawnedDelegate.ProcessMulticastDelegate(nullptr);
+        }
     }
     if (!DefinedStorage.empty())
     {

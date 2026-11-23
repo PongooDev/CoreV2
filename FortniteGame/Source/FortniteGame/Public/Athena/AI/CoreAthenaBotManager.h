@@ -113,7 +113,7 @@ public:
     static void Create(AFortGameModeAthena* GameMode);
     static FCoreAthenaBotManager* Get();
 
-    // Whether the build has Epic's own player bots (AFortAthenaAIBotController, 8.x on).
+    // Whether the build has Epic's own player bots (8.30 on).
     static bool HasNativePlayerBots();
 
     // The server process's reads from files and page faults so far (FCoreProcessIo), for the slow-frame lines (#427).

@@ -17,6 +17,7 @@
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "Packed.h"
 #include "FortTeamInfo.h"
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameStateBase.h"
@@ -810,9 +811,18 @@ std::wstring FCoreAthenaBotManagerTickFunction::DiagnosticMessage() const
 
 bool FCoreAthenaBotManager::HasNativePlayerBots()
 {
-    // 8.x's own bot controller class (the backport's rename to Core names took this lookup with it: it looked for Core's
-    // class name, which no build has, so a native-bot build would have run the backport too).
-    static const bool bNative = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController") != nullptr;
+    // Epic's player bots go live in 8.30 (CL-5793395); 8.20 already has the bot classes (AFortAthenaAIBotController,
+    // UFortServerBotManagerAthena) but doesn't run them, so the classes alone don't mark native bots. A build with no
+    // changelist in its version string falls back to the class.
+    static const bool bNative = []
+    {
+        const uint32_t Changelist = Packed::Changelist();
+        if (Changelist)
+        {
+            return Changelist >= 5793395;
+        }
+        return FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController") != nullptr;
+    }();
     return bNative;
 }
 

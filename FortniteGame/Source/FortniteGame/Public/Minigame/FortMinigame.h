@@ -74,6 +74,56 @@ public:
     DefineUStructArrayProperty(FMinigamePlayer, Players)
 };
 
+// 8.30 (CL-5793395)'s minigame stats (21.40 names): a stat filter's count, grouped for the whole game, per player and
+// per player bucket in an FFortMinigameStatCollection (AFortMinigame::RoundStats and GameStats).
+struct FFortMinigameStat
+{
+    DefineUnrealStruct(FFortMinigameStat, FortniteGame)
+
+public:
+    DefineUProperty(UClass*, Filter)
+    DefineUProperty(int32_t, Count)
+};
+
+struct FFortMinigameGroupStats
+{
+    DefineUnrealStruct(FFortMinigameGroupStats, FortniteGame)
+
+public:
+    DefineUStructArrayProperty(FFortMinigameStat, Stats)
+    // The filter's count goes up by Value; a filter not counted yet starts at Value.
+    void AddStat(UClass* Filter, int32_t Value);
+};
+
+struct FFortMinigamePlayerStats : public FFortMinigameGroupStats
+{
+    DefineUnrealStruct(FFortMinigamePlayerStats, FortniteGame)
+
+public:
+    DefineUStructProperty(FUniqueNetIdRepl, Player)
+};
+
+struct FFortMinigamePlayerBucketStats : public FFortMinigameGroupStats
+{
+    DefineUnrealStruct(FFortMinigamePlayerBucketStats, FortniteGame)
+
+public:
+    DefineUProperty(int32_t, BucketIndex)
+};
+
+struct FFortMinigameStatCollection
+{
+    DefineUnrealStruct(FFortMinigameStatCollection, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortMinigameGroupStats, GroupStats)
+    DefineUStructArrayProperty(FFortMinigamePlayerStats, PlayerStats)
+    DefineUStructArrayProperty(FFortMinigamePlayerBucketStats, PlayerBucketStats)
+    // The player's entry (Player is the player state's UniqueId), added when the player has none yet.
+    FFortMinigamePlayerStats* FindOrAddPlayerStats(const FUniqueNetIdRepl& PlayerId);
+    FFortMinigamePlayerBucketStats& FindOrAddPlayerBucketStats(int32_t BucketIndex);
+};
+
 // What a game's warmup does with its players (7.10: Stasis, Respawn; the island games' Minigame_PlayerCreated has
 // Respawn and a 6 s WarmupDuration).
 class EFortMinigameWarmupType
@@ -98,8 +148,8 @@ class EFortMinigamePostGameSpawnLocationSetting
 // A Creative game (from 7.00, which moves 6.20's minigame state and its leaderboard into this one class): the game an
 // island's devices set up (its stats, end conditions and teams), started and ended from the island menu
 // (ServerStartMinigame and ServerEndMinigame, which call StartMinigame and EndMinigame). Its scores are its stats
-// (AddStatToPlayer and the rest, intact natives): 7.00 has no score registry of its own (SpawnOrGetMinigameScoreRegistry
-// is gone).
+// (AddStatToPlayer and the rest, intact natives up to 8.20; 8.30 strips the adds): 7.00 has no score registry of its own
+// (SpawnOrGetMinigameScoreRegistry is gone).
 class AFortMinigame : public AInfo
 {
     DefineUnrealClass(AFortMinigame, FortniteGame)
@@ -226,6 +276,22 @@ public:
     // (SpectatingPlayerArray) become its players again first and are restarted, so they go back with the others.
     void PostGameResetPlayers();
     DECLARE_FUNCTION(execPostGameResetPlayers);
+
+    // Restored natives (8.30 strips AddStatToPlayer, AddStatToGroup and AddStatToPlayerBucket: their execs read the
+    // parameters and call the shared empty function, 0x199CBB0, 0x1849C10, 0x199CCB0). As the intact SetStatFor*
+    // (0x1401450, 0x1401400, 0x14015A0) and NotifyStatEvent's (0x13F2770) do: on the server, outside PreGame, the
+    // count goes into RoundStats and StatChangedDelegate is broadcast. The island devices' Blueprints score through them.
+    DefineUStructProperty(FFortMinigameStatCollection, RoundStats)
+    DefineUProperty(FMulticastScriptDelegate, StatChangedDelegate)
+    DefineUFunction(AddStatToPlayer)
+    DefineUFunction(AddStatToGroup)
+    DefineUFunction(AddStatToPlayerBucket)
+    void AddStatToPlayer(AFortPlayerState* InPlayer, UClass* InFilter, int32_t InValue);
+    void AddStatToGroup(UClass* InFilter, int32_t InValue);
+    void AddStatToPlayerBucket(int32_t BucketIndex, UClass* InFilter, int32_t InValue);
+    DECLARE_FUNCTION(execAddStatToPlayer);
+    DECLARE_FUNCTION(execAddStatToGroup);
+    DECLARE_FUNCTION(execAddStatToPlayerBucket);
     DECLARE_FUNCTION(execHandleStateChangedForTransition);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);

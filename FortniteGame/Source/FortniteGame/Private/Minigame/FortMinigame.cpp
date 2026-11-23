@@ -312,6 +312,140 @@ DEFINE_FUNCTION(AFortMinigame::execClearPlayerInventory)
     P_NATIVE_END;
 }
 
+void FFortMinigameGroupStats::AddStat(UClass* Filter, int32_t Value)
+{
+    TStructArray<FFortMinigameStat>& Entries = Stats;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        if (Entries[Index].Filter == Filter)
+        {
+            Entries[Index].Count = Entries[Index].Count + Value;
+            return;
+        }
+    }
+    FFortMinigameStat& Entry = Entries.AddDefaulted();
+    Entry.Filter = Filter;
+    Entry.Count = Value;
+}
+
+FFortMinigamePlayerStats* FFortMinigameStatCollection::FindOrAddPlayerStats(const FUniqueNetIdRepl& PlayerId)
+{
+    if (!PlayerId.IsValid() || !FUniqueNetIdRepl::StaticStruct())
+    {
+        return nullptr;
+    }
+    // 8.30 matches the entry's Player with FUniqueNetIdRepl's operator== (0x4170F0); Core compares the ids' strings,
+    // as AFortMinigame::PlayerStateOf does.
+    const FString Id = PlayerId.ToString();
+    TStructArray<FFortMinigamePlayerStats>& Entries = PlayerStats;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        const FUniqueNetIdRepl& EntryId = Entries[Index].Player;
+        if (EntryId.IsValid() && std::wcscmp(*EntryId.ToString(), *Id) == 0)
+        {
+            return &Entries[Index];
+        }
+    }
+    FFortMinigamePlayerStats& Entry = Entries.AddDefaulted();
+    FUniqueNetIdRepl::StaticStruct()->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(Entry.Player), &PlayerId);
+    return &Entry;
+}
+
+FFortMinigamePlayerBucketStats& FFortMinigameStatCollection::FindOrAddPlayerBucketStats(int32_t BucketIndex)
+{
+    TStructArray<FFortMinigamePlayerBucketStats>& Entries = PlayerBucketStats;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        if (BucketIndex != -1 && Entries[Index].BucketIndex == BucketIndex)
+        {
+            return Entries[Index];
+        }
+    }
+    FFortMinigamePlayerBucketStats& Entry = Entries.AddDefaulted();
+    Entry.BucketIndex = BucketIndex;
+    return Entry;
+}
+
+namespace
+{
+    // 8.30's SetStatFor* gate (0x1401450: Role == ROLE_Authority and CurrentState != PreGame).
+    bool CanChangeStats(const AFortMinigame* Minigame, uint8_t Role, uint8_t State)
+    {
+        return Minigame && Role == ROLE_Authority && State != EFortMinigameState::GetPreGame();
+    }
+}
+
+void AFortMinigame::AddStatToPlayer(AFortPlayerState* InPlayer, UClass* InFilter, int32_t InValue)
+{
+#if WITH_SERVER_CODE
+    if (!InPlayer || !CanChangeStats(this, Role, CurrentState))
+    {
+        return;
+    }
+    if (FFortMinigamePlayerStats* Entry = static_cast<FFortMinigameStatCollection&>(RoundStats).FindOrAddPlayerStats(static_cast<const FUniqueNetIdRepl&>(InPlayer->UniqueId)))
+    {
+        Entry->AddStat(InFilter, InValue);
+        StatChangedDelegate.ProcessMulticastDelegate(nullptr);
+    }
+#endif
+}
+
+void AFortMinigame::AddStatToGroup(UClass* InFilter, int32_t InValue)
+{
+#if WITH_SERVER_CODE
+    if (!CanChangeStats(this, Role, CurrentState))
+    {
+        return;
+    }
+    static_cast<FFortMinigameGroupStats&>(static_cast<FFortMinigameStatCollection&>(RoundStats).GroupStats).AddStat(InFilter, InValue);
+    StatChangedDelegate.ProcessMulticastDelegate(nullptr);
+#endif
+}
+
+void AFortMinigame::AddStatToPlayerBucket(int32_t BucketIndex, UClass* InFilter, int32_t InValue)
+{
+#if WITH_SERVER_CODE
+    if (!CanChangeStats(this, Role, CurrentState))
+    {
+        return;
+    }
+    static_cast<FFortMinigameStatCollection&>(RoundStats).FindOrAddPlayerBucketStats(BucketIndex).AddStat(InFilter, InValue);
+    StatChangedDelegate.ProcessMulticastDelegate(nullptr);
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execAddStatToPlayer)
+{
+    P_GET_OBJECT(AFortPlayerState, Z_Param_InPlayer);
+    P_GET_OBJECT(UClass, Z_Param_InFilter);
+    P_GET_PROPERTY(UIntProperty, Z_Param_InValue);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->AddStatToPlayer(Z_Param_InPlayer, Z_Param_InFilter, Z_Param_InValue);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortMinigame::execAddStatToGroup)
+{
+    P_GET_OBJECT(UClass, Z_Param_InFilter);
+    P_GET_PROPERTY(UIntProperty, Z_Param_InValue);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->AddStatToGroup(Z_Param_InFilter, Z_Param_InValue);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortMinigame::execAddStatToPlayerBucket)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_BucketIndex);
+    P_GET_OBJECT(UClass, Z_Param_InFilter);
+    P_GET_PROPERTY(UIntProperty, Z_Param_InValue);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->AddStatToPlayerBucket(Z_Param_BucketIndex, Z_Param_InFilter, Z_Param_InValue);
+    P_NATIVE_END;
+}
+
 bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation, bool* bOutRespawningOnGround)
 {
     // The island game's answer in the game's respawn path (the volume manager's respawn place, 7.10 0xDBAD80, asks it for
@@ -1492,6 +1626,26 @@ void AFortMinigame::HookNatives()
     else if (AFortVolumeManager::HasOnVolumeStateChanged())
     {
         Log::Info(L"Finder: AFortMinigame's post-game reset end not restored (the volume manager's OnVolumeStateChanged signature {})", VolumeSignature ? L"found" : L"not found");
+    }
+
+    // 8.30 (CL-5793395): the stat adds' execs end in a call to the shared empty function. 8.20 and older have the
+    // bodies (8.20 0x1319700, 0x13196E0) and keep them; their stats are laid out differently (no RoundStats).
+    if (StaticClass() && Member_RoundStats.IsAvailable() && Member_StatChangedDelegate.IsAvailable() && FFortMinigameStatCollection::StaticStruct()
+        && FFortMinigamePlayerStats::StaticStruct() && FFortMinigamePlayerBucketStats::StaticStruct() && FFortMinigameStat::StaticStruct())
+    {
+        const std::pair<UFunction*, FNativeFuncPtr> StatAdds[] = { { FindStaticFunction_AddStatToPlayer(), &execAddStatToPlayer },
+            { FindStaticFunction_AddStatToGroup(), &execAddStatToGroup }, { FindStaticFunction_AddStatToPlayerBucket(), &execAddStatToPlayerBucket } };
+        int32_t Restored = 0;
+        for (const auto& [StatAdd, Exec] : StatAdds)
+        {
+            uint8_t* Call = StatAdd ? Finder::ImplementationCall(StatAdd) : nullptr;
+            if (Call && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Call), 1, 5)))
+            {
+                StatAdd->SetNativeFunc(Exec);
+                ++Restored;
+            }
+        }
+        Log::Info(L"Finder: AFortMinigame's stat adds (AddStatToPlayer, AddStatToGroup, AddStatToPlayerBucket): {} stripped, restored", Restored);
     }
 
     // #581: the starting health and shield a game's start gives (ApplyStartingHealthAndShield), found here to be logged.

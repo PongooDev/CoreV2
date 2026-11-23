@@ -8,6 +8,7 @@
 
 class FOutputDevice;
 class FLinkerInstancingContext;
+class UFortAssetManager;
 class IModularFeatures;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
@@ -299,6 +300,8 @@ namespace Natives
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
     // UGameEngine::GameViewportWindow (TWeakPtr<SWindow>); GameViewportWidget is 0x20 after it. 0 when not found.
     inline ptrdiff_t UGameEngine_GameViewportWindow = 0;
+    inline void (*UFortAssetManager_SetGameFeatureState)(UFortAssetManager* This, uint8_t Feature, uint8_t State, bool bBroadcast) = nullptr;
+    inline int32_t UFortAssetManager_StartInitialLoadingIndex = -1;
     inline bool (*UEngine_CreateNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition) = nullptr;
     inline UNetDriver* (*UEngine_FindNamedNetDriver)(UEngine* This, const UWorld* InWorld, FName NetDriverName) = nullptr;
     inline void (*UEngine_DestroyNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName) = nullptr;

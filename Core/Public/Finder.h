@@ -193,6 +193,8 @@ namespace Finder
     // FBaseServiceMcp::GetBasicAuth, which every MCP service's vtable holds (packed builds, FFortMcpConfig).
     bool ResolveMcpBasicAuth();
     bool ResolveVoiceHandshake();
+    // 8.30+: UFortAssetManager's StartInitialLoading slot and its game feature state setter.
+    bool ResolveFortAssetManagerGameFeatures();
     bool ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplementation);
     bool ResolveAssetManagerLive();
     bool ResolveProcessEvent();

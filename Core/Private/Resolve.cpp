@@ -16785,6 +16785,39 @@ bool Finder::ResolveOnlineVoice()
     return true;
 }
 
+bool Finder::ResolveFortAssetManagerGameFeatures()
+{
+    if (Natives::UFortAssetManager_SetGameFeatureState)
+    {
+        return true;
+    }
+    // 8.30 (CL-5793395): UFortAssetManager's StartInitialLoading (0x11A4B30, slot 0x7A) readies the Frontend feature
+    // with the state setter: mov r9b, 1; mov r8b, 7 (Loading); mov dl, 5 (Frontend); call 0x11871F0 (0x11A5596). The
+    // class's own slots are searched for that call; builds before 8.30 have no game features.
+    void** const VTable = CdoVTable(L"/Script/FortniteGame.FortAssetManager");
+    void** const BaseVTable = CdoVTable(L"/Script/Engine.AssetManager");
+    for (int32_t Index = 0; VTable && BaseVTable && Index < 0x100; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(VTable, Index);
+        if (!Entry || Entry == VTableEntry(BaseVTable, Index) || Finder::FunctionStart(Entry) != Entry)
+        {
+            continue;
+        }
+        const uintptr_t End = Finder::FunctionEnd(Entry);
+        const uintptr_t Setup = End ? FindInstruction(Entry, End, { 0x41, 0xB1, 0x01, 0x41, 0xB0, 0x07, 0xB2, 0x05, 0xE8 }) : 0;
+        const uintptr_t Setter = Setup ? Finder::RelativeTarget(Setup + 8, 1, 5) : 0;
+        if (IsInText(Setter))
+        {
+            Natives::UFortAssetManager_StartInitialLoadingIndex = Index;
+            Natives::UFortAssetManager_SetGameFeatureState = reinterpret_cast<decltype(Natives::UFortAssetManager_SetGameFeatureState)>(Setter);
+            Log::Info(L"Finder: UFortAssetManager::StartInitialLoading is slot 0x{:X} (0x{:X}), its game feature state setter 0x{:X}", Index, Entry - Finder::ImageBase(), Setter - Finder::ImageBase());
+            return true;
+        }
+    }
+    Log::Error(L"Finder: UFortAssetManager's game feature state setter not found, so a dedicated server never loads its map");
+    return false;
+}
+
 bool Finder::ResolveVoiceHandshake()
 {
     if (Natives::APlayerController_VoiceHandshakeCompletedOffset >= 0)

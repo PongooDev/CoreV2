@@ -21,6 +21,7 @@
 #include "AI/Navigation/NavCollision.h"
 #include "UObject/Linker.h"
 #include "UObject/Object.h"
+#include "FortAssetManager.h"
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
@@ -301,6 +302,7 @@ static void InstallHooks()
     AActor::Hook();
     UGameInstance::Hook();
     UFortGameInstance::Hook();
+    UFortAssetManager::Hook();
     UFortHotfixManager::Hook();
     FOnlineSubsystemImpl::Hook();
     FOnlineVoiceImpl::Hook();

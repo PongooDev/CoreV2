@@ -1483,6 +1483,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolume.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolumeTimeOfDayComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Customization</Filter>
     </ClInclude>
@@ -2257,6 +2260,12 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolume.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolumeTimeOfDayComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortMutatorListComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\DeployableBases\FortDeployableBaseLibrary.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\DeployableBases</Filter>

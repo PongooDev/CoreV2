@@ -412,6 +412,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortCreativePortalManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortLevelSaveComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolume.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolumeTimeOfDayComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\DeployableBases\FortDeployableBaseLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\DeployableBases\FortDeployableBaseManager.h" />
@@ -678,6 +679,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortAthenaCreativePortal.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortLevelSaveComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolume.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolumeTimeOfDayComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortMutatorListComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\DeployableBases\FortDeployableBaseLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\DeployableBases\FortDeployableBaseManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHero.cpp" />

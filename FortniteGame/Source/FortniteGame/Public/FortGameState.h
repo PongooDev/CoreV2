@@ -12,6 +12,7 @@
 
 class AFortMissionManager;
 class AFortPlayerState;
+class AFortTimeOfDayManager;
 class AFortVisibilityManager;
 class IAbilitySystemInterface;
 class AFortWorldManager;
@@ -153,6 +154,8 @@ public:
     DefineUProperty(AFortWorldManager*, WorldManager)
     DefineUProperty(int32_t, WorldLevel)
     DefineUProperty(AFortVisibilityManager*, VisibilityManager)
+    // AFortGameStateBase's: the world's time of day.
+    DefineOptionalUProperty(AFortTimeOfDayManager*, FortTimeOfDayManager)
     DefineUProperty(EFortGameplayState, GameplayState)
     DefineUFunction(Client_RefreshEventCalendar)
     // The playlist's AdditionalLevels that have streamed in, by package name: OnFinishedStreamingAdditionalPlaylistLevel

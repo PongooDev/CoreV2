@@ -43,6 +43,7 @@
 #include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortLevelSaveComponent.h"
+#include "Creative/FortVolumeTimeOfDayComponent.h"
 #include "Minigame/FortMinigame.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
@@ -464,6 +465,8 @@ static void InstallHooks()
             // Creative's creature spawner (8.00 on, #566): its rift, the rift's RiftCreated event and the settings its knobs pick.
             ABuildingProp_DeimosSpawner::HookVTables();
             AAthenaCreativeRift::HookVTables();
+            // 8.00+ Creative (#596): an island's Time of Day setting, its own time of day manager.
+            UFortVolumeTimeOfDayComponent::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameStateAthena::HookCallSites();

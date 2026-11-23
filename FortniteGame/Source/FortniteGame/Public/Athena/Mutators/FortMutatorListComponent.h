@@ -3,6 +3,15 @@
 #include "Components/ActorComponent.h"
 #include "Containers/Array.h"
 #include "Reflection.h"
+#include "UObject/ScriptDelegates.h"
+
+class UClass;
+
+// The settings a mutator list puts into its mutators by property name (8.00+); only passed along here.
+struct FPropertyOverrideData
+{
+    DefineUnrealStruct(FPropertyOverrideData, FortniteGame)
+};
 
 // 7.20's (CL-4727874) home of the gameplay mutators, which replaces AFortGameModeAthena's and AFortGameStateAthena's
 // GameplayMutators: each of them makes one as a default subobject (the game mode's ctor 0xCF7821 into +0x11E8, the game
@@ -18,4 +27,14 @@ public:
     static bool HasMutators() { return Member_Mutators.IsAvailable(); }
     // Where the game's mutator loops read the list (7.20 +0x110: the iterator's 0xD6780F), -1 where there is none.
     static ptrdiff_t MutatorsOffset() { return Member_Mutators.IsAvailable() ? Member_Mutators.GetOffsetChecked() : -1; }
+
+    // 8.00+ (a Creative island's list, CreativeIslandMutatorList_C): SetPropertyOverrides (8.40 0xF6A3D0) puts the new
+    // settings into PropertyOverrideArray and its mutators, then broadcasts OnSettingsChanged with them.
+    DefineUProperty(FMulticastScriptDelegate, OnSettingsInitialized)
+    DefineUProperty(FMulticastScriptDelegate, OnSettingsChanged)
+    DefineUStructProperty(FPropertyOverrideData, PropertyOverrideArray)
+    DefineUFunction(GetMutatorByClass)
+    static bool HasSettingsChanged() { return Member_OnSettingsInitialized.IsAvailable() && Member_OnSettingsChanged.IsAvailable() && Member_PropertyOverrideArray.IsAvailable(); }
+
+    UObject* GetMutatorByClass(UClass* MutatorClass) const;
 };

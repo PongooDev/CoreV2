@@ -245,7 +245,7 @@ void UFortGameplayAbility::HookNatives()
         Hooks::RedirectCall(L"UFortGameplayAbility::EndAbility -> RemoveAbilityWeapon", Call, reinterpret_cast<void*>(&EndAbilityCleanupCall));
 
         // AbilityGrantedWeapon follows AbilityGrantedWeaponItem (21.40's layout). A build whose cleanup hands both weak
-        // pointers to their helpers (lea rcx, [rdi+8E8h] and lea rsi, [rdi+8F0h] on 7.00 and 7.10) gives the weapon its
+        // pointers to their helpers (lea rcx, [rdi+8E8h] and lea rsi, [rdi+8F0h] on 7.00 to 8.00; add rdi, 8F0h on 8.20) gives the weapon its
         // lifespan (RemoveAbilityWeapon above); one whose cleanup doesn't keeps Core's destroy.
         const ptrdiff_t AbilityGrantedWeaponOffset = AbilityGrantedWeaponItemOffset + static_cast<ptrdiff_t>(sizeof(FWeakObjectPtr));
         const uintptr_t Cleanup = reinterpret_cast<uintptr_t>(EndAbilityCleanupOG);

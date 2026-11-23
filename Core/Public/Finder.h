@@ -146,7 +146,7 @@ namespace Finder
     // native that gained a parameter in a later build (UFortLevelSaveComponent::LoadPlaysetAsync's playset, 7.10+).
     bool KeepsSecondArgument(uintptr_t Function);
     // Whether the function takes the address of a member at [reg+Displacement] (lea, disp32): what it hands a helper, a
-    // TWeakObjectPtr's Get or IsValid among them.
+    // TWeakObjectPtr's Get or IsValid among them. Also add r64, imm32 (Displacement), the object pointer moved onto it.
     bool TakesMemberAddressAt(uintptr_t Function, int32_t Displacement);
     std::vector<uintptr_t> CallsTo(uintptr_t Target, bool bIncludeJumps);
 

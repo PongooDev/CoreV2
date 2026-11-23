@@ -747,7 +747,10 @@ bool Finder::TakesMemberAddressAt(uintptr_t Function, int32_t Displacement)
     ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
     {
         const bool bLea = Instruction.opcode == 0x8D && (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 5;
-        bTakes = bTakes || (bLea && static_cast<int32_t>(Instruction.disp.disp32) == Displacement);
+        // add r64, imm32: the object pointer itself moved onto the member (8.20 0xC16FA9 add rdi, 8F0h, where 8.00 has lea).
+        const bool bAddImm = Instruction.opcode == 0x81 && (Instruction.flags & F_MODRM) && Instruction.rex_w && Instruction.modrm_mod == 3 && Instruction.modrm_reg == 0;
+        bTakes = bTakes || (bLea && static_cast<int32_t>(Instruction.disp.disp32) == Displacement)
+            || (bAddImm && static_cast<int32_t>(Instruction.imm.imm32) == Displacement);
     });
     return bTakes;
 }

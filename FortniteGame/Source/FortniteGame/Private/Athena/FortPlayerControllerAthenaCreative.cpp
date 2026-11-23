@@ -852,10 +852,14 @@ void AFortPlayerControllerAthena::PostLobbyIslandTeleport(AFortPlayerPawn* Playe
     {
         return;
     }
-    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
-    SetCreativePlotLinkedVolume(nullptr);
     const FFortRespawnData& RespawnData = AthenaState->RespawnData;
     TeleportPawnTo(RespawnData.RespawnLocation, RespawnData.RespawnRotation, L"the Creative hub");
+    // The player has left their island: the link goes (CreativePlotLinkedVolume), and the setter recounts the island's
+    // rifts. After the move (#569): 8.20's count (AFortAthenaCreativePortal::UpdateStatus, 0xE2F970) takes the
+    // controller's GetCurrentVolume first (the volume manager's VolumeActivePlayers, which loses the player when the
+    // pawn's overlap with the island ends) and the link only without one, so a recount before the move still counted
+    // the player and the island's rift kept "1/x" with nobody on it. 7.x count the link alone.
+    SetCreativePlotLinkedVolume(nullptr);
     // The same pawn arrives, where Epic's stripped trip would have given a new one: no island speed or flight in the hub.
     ResetCreativeMovementState();
     // What they picked up or took from the Creative inventory stays on the island (#499): a game's end resets its
@@ -1173,18 +1177,18 @@ void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland_Implemen
             });
             return;
         }
-        // A build without the respawn preparation: at once.
-        SetCreativePlotLinkedVolume(nullptr);
+        // A build without the respawn preparation: at once (the link after the move, as in PostLobbyIslandTeleport).
         TeleportPawnTo(Location, Rotation, L"the Creative hub");
+        SetCreativePlotLinkedVolume(nullptr);
         return;
     }
-    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
-    SetCreativePlotLinkedVolume(nullptr);
     // A hub without the tagged starts: the rift's own way to the hub (BGA_IslandPortal's TeleportToLobbyIsland: over the
-    // rift, at the hub's StarterIslandTeleportHeight).
+    // rift, at the hub's StarterIslandTeleportHeight). The link goes after the move, as in PostLobbyIslandTeleport.
     UFunction* TeleportToLobby = Portal ? reinterpret_cast<UObject*>(Portal)->FindFunction(FName(L"TeleportToLobbyIsland", FNAME_Find)) : nullptr;
     Reflection::FParams Params(TeleportToLobby, true);
-    if (TeleportToLobby && Params.Set(L"RequestingController", static_cast<AFortPlayerController*>(this)) && Params.Call(Portal))
+    const bool bTeleportedToLobby = TeleportToLobby && Params.Set(L"RequestingController", static_cast<AFortPlayerController*>(this)) && Params.Call(Portal);
+    SetCreativePlotLinkedVolume(nullptr);
+    if (bTeleportedToLobby)
     {
         Log::Info(L"Creative: {} goes to the Creative hub through their rift's TeleportToLobbyIsland", PlayerNameOf(this));
         return;

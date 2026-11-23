@@ -1183,6 +1183,13 @@ namespace Natives
     // marks it dirty and puts it in the high scores; true when it ranks there.
     inline bool (*AFortMinigameScoreRegistry_RecordScore)(UObject* This, const FString& PlayerName, float Score) = nullptr;
 
+    // From 7.40 (Creative's creature spawner), Finder::ResolveEncounterOverrideCategoryLive: the build's own helper that
+    // adds an encounter difficulty option's category option to an FFortEncounterSettings' InjectedOverrideCategories
+    // (8.20 0x11CD310, 8.00 0x10B6EA0; not named in 21.40's PDB): the option class's default object makes the category
+    // option (an instance of its CategoryClass), which goes on the end of the array. UFortKismetLibrary::
+    // ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings calls it for each override its wave data has.
+    inline void (*FFortEncounterSettings_InjectOverrideCategory)(UClass* OptionClass, void* EncounterSettings) = nullptr;
+
     // From 3.5 (vending machines), Finder::ResolveItemCollectorSelectionSetupLive, off the collector's BeginPlay (6.21
     // slot 0x5F, 0xD52510): FinishItemSelectionSetup (6.21 0xD5B380), the client half the builds keep: it unbinds the
     // playlist-tables delegate, sets bHasFinishedSelectionSetup and picks the first active input. BeginPlay calls it at

@@ -129,6 +129,24 @@ private:
     DefineUProperty(FScriptArray, PawnUpgrades)
 };
 
+// What a mission or a rift overrides in the AI encounters it starts.
+struct FFortEncounterSettings
+{
+    DefineUnrealStruct(FFortEncounterSettings, FortniteGame)
+
+public:
+    DefineUProperty(bool, bRiftsDestroyPlayerBuiltBuildings)
+    // 8.20 (not in 8.00).
+    DefineOptionalUProperty(float, AIDespawnDistanceOverride)
+    // UFortDifficultyOptionCategoryEncounters: the encounter's difficulty options these override (a Creative creature
+    // spawner's creature type, count, timing and limit).
+    DefineUProperty(TArray<UObject*>, InjectedOverrideCategories)
+
+    // Adds OptionClass's category option (a UFortDifficultyOptionEncounter subclass's) to InjectedOverrideCategories, with
+    // the build's own code (Natives::FFortEncounterSettings_InjectOverrideCategory). False where that isn't found.
+    bool InjectOverrideCategory(UClass* OptionClass);
+};
+
 class UFortAIEncounterInfo : public UObject
 {
     DefineUnrealClass(UFortAIEncounterInfo, FortniteGame)

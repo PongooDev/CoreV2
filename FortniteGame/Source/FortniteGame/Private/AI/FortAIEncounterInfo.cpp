@@ -22,6 +22,16 @@ namespace
     FSpawnGroupUpgradeCapture* Capture = nullptr;
 }
 
+bool FFortEncounterSettings::InjectOverrideCategory(UClass* OptionClass)
+{
+    if (!OptionClass || (!Natives::FFortEncounterSettings_InjectOverrideCategory && !Finder::ResolveEncounterOverrideCategoryLive()))
+    {
+        return false;
+    }
+    Natives::FFortEncounterSettings_InjectOverrideCategory(OptionClass, this);
+    return true;
+}
+
 bool UFortAIEncounterInfo::SpawnAIGroup(const UFortAISpawnGroup* SpawnGroupToSpawn, const FVector& SpawnLocation, const FRotator& SpawnRotation, bool bAllowAssigningToExternalSpawners)
 {
     // The native (1.7.2 0x2D74B0) adds the group to ActiveSpawnGroups and queues one pending spawn per enemy with the

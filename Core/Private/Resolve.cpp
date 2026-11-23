@@ -9585,6 +9585,48 @@ bool Finder::ResolveAIDirectorLive()
     return true;
 }
 
+bool Finder::ResolveEncounterOverrideCategoryLive()
+{
+    // UFortKismetLibrary::ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings' native (8.20 0x11CC6D0, its exec's
+    // call after the parameters) loads each of the wave data's nine override classes that is set and hands it, with the
+    // settings, to one helper (8.20 0x11CD310, 8.00 0x10B6EA0): the callee it calls most, once per override.
+    static bool bResolved = false;
+    static bool bLogged = false;
+    if (bResolved || bLogged)
+    {
+        return bResolved;
+    }
+    UFunction* Apply = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortKismetLibrary:ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings");
+    const uintptr_t Call = Apply && (Natives::FFrame_Step || Finder::ResolveScriptFrame()) ? reinterpret_cast<uintptr_t>(Finder::ImplementationCall(Apply)) : 0;
+    const uintptr_t Body = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    std::vector<std::pair<uintptr_t, int32_t>> Counts;
+    for (const auto& [Site, Target] : IsInText(Body) ? Finder::DecodedDirectCalls(Body) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        const auto Found = std::find_if(Counts.begin(), Counts.end(), [Target](const std::pair<uintptr_t, int32_t>& Entry) { return Entry.first == Target; });
+        if (Found != Counts.end())
+        {
+            ++Found->second;
+        }
+        else
+        {
+            Counts.emplace_back(Target, 1);
+        }
+    }
+    std::sort(Counts.begin(), Counts.end(), [](const std::pair<uintptr_t, int32_t>& A, const std::pair<uintptr_t, int32_t>& B) { return A.second > B.second; });
+    if (Counts.empty() || Counts[0].second < 5 || (Counts.size() > 1 && Counts[1].second == Counts[0].second))
+    {
+        bLogged = true;
+        Log::Error(L"Finder: the encounter settings' override category helper not found off ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings (native 0x{:X}, {} callees)",
+            Body ? Body - Finder::ImageBase() : 0, Counts.size());
+        return false;
+    }
+    Natives::FFortEncounterSettings_InjectOverrideCategory = reinterpret_cast<decltype(Natives::FFortEncounterSettings_InjectOverrideCategory)>(Counts[0].first);
+    bResolved = true;
+    Log::Info(L"Finder: the encounter settings' override category helper 0x{:X} ({} calls in ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings 0x{:X})",
+        Counts[0].first - Finder::ImageBase(), Counts[0].second, Body - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset)
 {
     // 6.20 (CL-4497486) gives Battle Royale an AI of its own for the Fortnitemares Cube Monsters (the Deimos playlists'

@@ -24,6 +24,10 @@ public:
     DefineUProperty(TEnumAsByte<EComponentMobility::Type>, Mobility)
     DefineUProperty(USceneComponent*, AttachParent)
     DefineUProperty(FVector, RelativeLocation)
+    DefineUFunction(K2_GetComponentLocation)
+
+    // The component's location in world space (K2_GetComponentLocation); the origin where the build has no such function.
+    FVector GetComponentLocation() const;
 
     // The component's world space bounds. Not reflected: SceneComponent.h declares it right before RelativeLocation
     // (3.5.1: Bounds +0x140, RelativeLocation +0x15C).

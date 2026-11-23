@@ -38,6 +38,8 @@
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "McpProfileGroup.h"
+#include "Building/BuildingProp_DeimosSpawner.h"
+#include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortLevelSaveComponent.h"
 #include "Minigame/FortMinigame.h"
@@ -450,6 +452,9 @@ static void InstallHooks()
             // 7.30's island edit permissions: the players on the island told of a change (the Creative phone).
             UFortLevelSaveComponent::HookPermissions();
             AFortMinigame::HookNatives();
+            // Creative's creature spawner (8.00 on, #566): its rift, the rift's RiftCreated event and the settings its knobs pick.
+            ABuildingProp_DeimosSpawner::HookVTables();
+            AAthenaCreativeRift::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameStateAthena::HookCallSites();

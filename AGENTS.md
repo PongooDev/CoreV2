@@ -68,7 +68,8 @@ These protect the owner's machine, builds and live setup. They apply to every ag
   multi-player tests). Boot-only headless servers are allowed (section 4).
 - Headless servers only against a **test backend port** (5711 or another free one). **Never use port 5595**: it is
   the owner's live backend.
-- Run **one game server at a time**, and only while no `FortniteClient*` process that you didn't start is running.
+- Run **one game server at a time**: never while another test server runs. Building and booting while the owner
+  plays is allowed (owner, 2026-11-23).
   Put the check and the launch in one command (see `docs/agents/headless-server-testing.md`).
 - **Never** modify, copy, hard-link or overlay anything in `F:\Builds` or `D:\Fortnite Builds`. Copied builds raise
   invisible Windows Firewall prompts that get stuck and dim the owner's screen. Run servers straight from the
@@ -301,7 +302,7 @@ Each of these happened in this repo and had to be reverted or redone.
     changed `.cpp` and check the DLL's timestamp.
 13. **Leftover WIP branches and worktrees.** Unmerged branches and worktrees were left behind. **Do** remove your
     worktree and branch when done; record unfinished work in `HANDOFF.md`, never in a pushed WIP branch.
-14. **Unsafe test runs.** An agent launched a client unasked; another booted while a `FortniteClient` ran; copied
+14. **Unsafe test runs.** An agent launched a client unasked; two agents booted test servers at once; copied
     build folders raised stuck firewall prompts. **Do** follow section 2 exactly.
 
 ## 9. Tools: MCP servers

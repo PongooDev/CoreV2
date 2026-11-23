@@ -9,7 +9,8 @@ as such.
 
 - Boot-only. **Never** launch a client. **Never** play out a match. Don't pass `-CoreBotMatch` (it plays a bots-only
   match) unless the owner asked for it.
-- **One game server at a time**, and only while no `FortniteClient*` process you didn't start is running. Put the
+- **One game server at a time**: never while another test server (a headless `FortniteClient*` not on 5595) runs.
+  The owner's own game may be running; booting while they play is allowed (owner, 2026-11-23). Put the
   check and the launch in **one** command (an agent once printed the process list and booted anyway).
 - **Test backend port only** (5711 by default). **Never 5595.**
 - Run straight from the installed build folder. **Never** copy, hard-link, junction or overlay a build, and never
@@ -40,7 +41,7 @@ just that `job_id` until it reports the result. Then `server_log_summary` (log p
    to the script as `--backend-port <port>`.
 4. Boot, gated, in one PowerShell command (build folder first; game arguments after `--`):
    ```
-   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --backend-port 5711 --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
+   if (Get-CimInstance Win32_Process -Filter "Name LIKE 'FortniteClient%'" | Where-Object { $_.CommandLine -match '-nullrhi' -and $_.CommandLine -notmatch '5595' }) { "Another test server is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --backend-port 5711 --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
    ```
    - Battle Royale: `-- -CoreMode=BattleRoyale`. Without it the server stays on `FortniteEmptyDedicated` and the
      Battle Royale code (loot, POIs) never runs.

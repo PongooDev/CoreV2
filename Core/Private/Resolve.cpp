@@ -2582,8 +2582,10 @@ namespace
             }
         }
         // 5.30 (CL-4305896): slot 5, after GetUObject and the new GetObjectForTimerManager (DelegateInstance::
-        // SlotsWithTimerManagerObject).
-        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 8)
+        // SlotsWithTimerManagerObject). 8.20 (CL-5625478): slot 6, after GetBoundProgramCounterForTimerManager
+        // (DelegateInstance::SlotsWithProgramCounter); slot 8 there would run the console's autocomplete instances at
+        // the wrong slots (#558).
+        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 6 || GetHandleIndex == 8)
         {
             Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
             Natives::IDelegateInstance_GetHandleIndexResolved = true;
@@ -2774,6 +2776,25 @@ namespace
             {
                 if ((Byte(Load) & 0xFB) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Load, 3, 7) == GEngine
                     && FindInstruction(Load + 7, Load + 0x14, { 0x48, 0x81, 0xC0 | ((Byte(Load + 2) >> 3) & 0x07) }))
+                {
+                    const uintptr_t Function = Finder::FunctionStart(Store);
+                    if (Function && Function != Setup)
+                    {
+                        Setup = Function;
+                        ++Matches;
+                    }
+                    break;
+                }
+            }
+        }
+        // 8.20 (CL-5625478 0x29E8260) schedules more between them: mov byte ptr [rcx+70h], 0 (0x29E8266), the GEngine load
+        // into rdi at +0x23 (0x29E8289), and its add rdi, 990h at +0x1A from that (0x29E82A3), past the 5.0 windows (#558).
+        for (uintptr_t Store = GEngine && Matches == 0 ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00 }) : 0; Store; Store = FindInstruction(Store + 1, Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00 }))
+        {
+            for (uintptr_t Load = Store + 4; Load < Store + 0x40; ++Load)
+            {
+                if ((Byte(Load) & 0xFB) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Load, 3, 7) == GEngine
+                    && FindInstruction(Load + 7, Load + 0x30, { 0x48, 0x81, 0xC0 | ((Byte(Load + 2) >> 3) & 0x07) }))
                 {
                     const uintptr_t Function = Finder::FunctionStart(Store);
                     if (Function && Function != Setup)

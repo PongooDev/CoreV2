@@ -112,6 +112,8 @@ public:
     DefineUProperty(uint8_t, Tier)
     static bool HasTier() { return Member_Tier.IsAvailable(); }
     DefineUProperty(uint8_t, Rarity)
+    DefineUProperty(int32_t, MinLevel)
+    static bool HasMinLevel() { return Member_MinLevel.IsAvailable(); }
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
 

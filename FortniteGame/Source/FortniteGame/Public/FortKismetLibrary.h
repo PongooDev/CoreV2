@@ -120,9 +120,12 @@ public:
 
 private:
     static bool HasForceRemoval();
+    // 8.20 (CL-5625478) added GiveItemToInventoryOwner's ItemLevel.
+    static bool HasItemLevel();
     // The folded native's callers (ABuildingItemCollectorActor's deposit): 3.2's native takes bForceRemoval, older ones
     // leave the register unset.
     static int32_t K2_RemoveItemFromPlayerHK(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval);
-    // The stripped native's callers (6.00's AFortPlayerControllerGameplay::StartGhostMode): the game's four parameters.
-    static void GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
+    // The stripped native's callers (6.00's AFortPlayerControllerGameplay::StartGhostMode): the game's four parameters,
+    // and from 8.20 ItemLevel (its StartGhostMode, 0x15B4F40, passes -1); older callers leave that stack slot unset.
+    static void GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t ItemLevel);
 };

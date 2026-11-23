@@ -70,6 +70,12 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     {
         return;
     }
+    // As CreateTemporaryItemInstanceBP (8.20: 0x12C5A40): a level of -1 or less is the definition's MinLevel. The entry
+    // below takes it unchanged, and an existing stack only takes more of the same level.
+    if (Level <= -1)
+    {
+        Level = UFortItemDefinition::HasMinLevel() ? static_cast<int32_t>(ItemDefinition->MinLevel) : 1;
+    }
 
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
@@ -358,9 +364,15 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayerHK(AFortPlayerController* Pla
     return K2_RemoveItemFromPlayer(PlayerController, ItemDefinition, AmountToRemove, HasForceRemoval() && bForceRemoval);
 }
 
-void UFortKismetLibrary::GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer)
+bool UFortKismetLibrary::HasItemLevel()
 {
-    GiveItemToInventoryOwner(InventoryOwner, ItemDefinition, NumberToGive, bNotifyPlayer);
+    static const bool bHasItemLevel = StaticFunction_GiveItemToInventoryOwner()->FindPropertyByName(FName(L"ItemLevel", FNAME_Find)) != nullptr;
+    return bHasItemLevel;
+}
+
+void UFortKismetLibrary::GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t ItemLevel)
+{
+    GiveItemToInventoryOwner(InventoryOwner, ItemDefinition, NumberToGive, bNotifyPlayer, HasItemLevel() ? ItemLevel : 1);
 }
 
 void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove)
@@ -616,13 +628,23 @@ DEFINE_FUNCTION(UFortKismetLibrary::execGetAIGoalManager)
 
 DEFINE_FUNCTION(UFortKismetLibrary::execGiveItemToInventoryOwner)
 {
+    // 8.20 added ItemLevel (CL-5625478's exec, 0x1892310, reads five parameters). Reading four left the call's bytecode
+    // on it: P_FINISH stepped over its EX_IntConst token and the script ran the -1 that Blueprints pass as code ("Unknown
+    // code token FF"). Creative's Athena_PlayerController GrantItem (entering an island, #556) and the item spawner's
+    // GiveAdditionalAmmo (picking up from it, #561) killed the server that way.
     P_GET_TINTERFACE(IFortInventoryOwnerInterface, Z_Param_InventoryOwner);
     P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
     P_GET_PROPERTY(UIntProperty, Z_Param_NumberToGive);
     P_GET_UBOOL(Z_Param_bNotifyPlayer);
+    int32_t Z_Param_ItemLevel = 1;
+    if (HasItemLevel())
+    {
+        P_GET_PROPERTY(UIntProperty, Z_Param_ItemLevelParam);
+        Z_Param_ItemLevel = Z_Param_ItemLevelParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    GiveItemToInventoryOwner(Z_Param_InventoryOwner, Z_Param_ItemDefinition, Z_Param_NumberToGive, Z_Param_bNotifyPlayer);
+    GiveItemToInventoryOwner(Z_Param_InventoryOwner, Z_Param_ItemDefinition, Z_Param_NumberToGive, Z_Param_bNotifyPlayer, Z_Param_ItemLevel);
     P_NATIVE_END;
 }
 

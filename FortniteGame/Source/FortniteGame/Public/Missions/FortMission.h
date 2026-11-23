@@ -97,3 +97,20 @@ private:
     static inline void (*HandleDeferredMissionEventOG)(AFortMission* This, const FFortMissionEvent& MissionEvent) = nullptr;
     static void HandleDeferredMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
 };
+
+class AFortAIPawn;
+class UFortAIEncounterInfo;
+
+// The Cube Monsters' rift mission (6.20's Fortnitemares, and Creative's creature spawners from 8.00).
+class AFortMission_RiftSpawners : public AFortMission
+{
+    DefineUnrealClass(AFortMission_RiftSpawners, FortniteGame)
+    DefineUFunction(HandleAISpawned)
+
+public:
+    // Bound to each rift encounter's OnEncounterEnemySpawned (the mission's encounter start, 8.20 0x136AC70).
+    void HandleAISpawned(UFortAIEncounterInfo* Encounter, AFortAIPawn* SpawnedEnemy);
+    DECLARE_FUNCTION(execHandleAISpawned);
+
+    static void HookNatives();
+};

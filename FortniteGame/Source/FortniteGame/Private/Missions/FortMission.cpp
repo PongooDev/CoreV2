@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Missions/FortMission.h"
+#include "Creative/FortLevelSaveComponent.h"
+#include "Creative/FortVolume.h"
 #include "AI/FortAIDirector.h"
 #include "Finder.h"
 #include "Hooks.h"
@@ -496,4 +498,56 @@ void AFortMission::HookVTables()
             Hooks::SwapVTable(L"AFortMission::HandleDeferredMissionEvent", VTable, DeferredIndex, reinterpret_cast<void*>(&HandleDeferredMissionEventHK));
         }
     }
+}
+
+void AFortMission_RiftSpawners::HandleAISpawned(UFortAIEncounterInfo* Encounter, AFortAIPawn* SpawnedEnemy)
+{
+#if WITH_SERVER_CODE
+    // 8.20 (CL-5625478) strips the body: execHandleAISpawned (0x18DEB60) reads its two parameters and calls the shared
+    // empty function (8.30's 0x19B5750 too). The island's rollback after a Creative game (ULevelSaveBaseComponent's
+    // creation set, which the volume's clear empties at PostGameReset, 0x1322260 -> 0x1012DC0: an AI pawn is killed) is
+    // where the game removes what was made during the game; the volume adds its trackable actors, AI pawns among them
+    // (0x100EE20), as they enter it while it is read-only (AFortVolumeManager's HandleActorEnteredVolume, 0x101E0C0), but a
+    // Creative rift's creatures outlived the game on 8.20. Core's: a creature a rift spawns inside an island goes into that
+    // island's creation set (a headless 8.20 server's Deimos_Fiend so registered was killed by the island's rollback,
+    // MinigameExitReadOnlyForVolume, within 5 s).
+    AActor* Enemy = reinterpret_cast<AActor*>(SpawnedEnemy);
+    if (Role != ROLE_Authority || !Enemy)
+    {
+        return;
+    }
+    AFortVolumeManager* Manager = AFortVolumeManager::Get(this);
+    AFortVolume* Volume = Manager ? Manager->GetVolumeForActor(Enemy) : nullptr;
+    UFortLevelSaveComponent* LevelSave = Volume ? UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume)) : nullptr;
+    if (LevelSave)
+    {
+        LevelSave->RegisterCreationToRollback(Enemy);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortMission_RiftSpawners::execHandleAISpawned)
+{
+    P_GET_OBJECT(UFortAIEncounterInfo, Z_Param_Encounter);
+    P_GET_OBJECT(AFortAIPawn, Z_Param_SpawnedEnemy);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMission_RiftSpawners*>(Context)->HandleAISpawned(Z_Param_Encounter, Z_Param_SpawnedEnemy);
+    P_NATIVE_END;
+}
+
+void AFortMission_RiftSpawners::HookNatives()
+{
+#if WITH_SERVER_CODE
+    // Only where the build strips it and has the island rollback's UFunction (6.20 on has the level save component; the
+    // Creative rifts come with 8.00).
+    UFunction* Function = StaticClass() ? FindStaticFunction_HandleAISpawned() : nullptr;
+    uint8_t* NativeCall = Function ? Finder::ImplementationCall(Function) : nullptr;
+    if (!NativeCall || !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)) || !ULevelSaveBaseComponent::HasRegisterCreationToRollback())
+    {
+        return;
+    }
+    Function->SetNativeFunc(&execHandleAISpawned);
+    Log::Info(L"Finder: AFortMission_RiftSpawners::HandleAISpawned is stripped, restored");
+#endif
 }

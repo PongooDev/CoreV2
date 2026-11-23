@@ -117,6 +117,7 @@ class ULevelSaveBaseComponent : public UActorComponent
     DefineUFunction(SaveOutLevelRecord)
     DefineUFunction(StartPeriodicSaveTimer)
     DefineUFunction(StopPeriodicSaveTimer)
+    DefineUFunction(RegisterCreationToRollback)
 
 public:
     // 7.00: the record is applied as soon as it is read (OnFinishedRecordRead). 7.10 (CL-4667333) drops it, and its
@@ -129,6 +130,10 @@ public:
     void SaveOutLevelRecord();
     void StartPeriodicSaveTimer();
     void StopPeriodicSaveTimer();
+    // An actor made during a game, which the island's rollback after the game destroys (the volume's clear: an AI pawn is
+    // killed). False where the build has no RegisterCreationToRollback.
+    bool RegisterCreationToRollback(AActor* Actor);
+    static bool HasRegisterCreationToRollback() { return FindStaticFunction_RegisterCreationToRollback() != nullptr; }
     // Whether the record the component reads is applied by the read's own end (7.00 with bApplySaveAfterLoad).
     bool AppliesSaveAfterLoad() const { return Member_bApplySaveAfterLoad.IsAvailable() && bApplySaveAfterLoad; }
 };

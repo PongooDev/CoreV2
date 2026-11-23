@@ -202,6 +202,12 @@ void ULevelSaveBaseComponent::StopPeriodicSaveTimer()
     CallNoParams(this, FindStaticFunction_StopPeriodicSaveTimer());
 }
 
+bool ULevelSaveBaseComponent::RegisterCreationToRollback(AActor* Actor)
+{
+    Reflection::FParams Params(FindStaticFunction_RegisterCreationToRollback(), true);
+    return Params.Set(L"Actor", reinterpret_cast<UObject*>(Actor)) && Params.Call(this);
+}
+
 AFortVolume* UFortLevelSaveComponent::GetVolume() const
 {
     return Cast<AFortVolume>(reinterpret_cast<UObject*>(GetOwner()));

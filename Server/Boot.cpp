@@ -374,6 +374,7 @@ static void InstallHooks()
         ABuildingActor::HookVTables();
         UFortMissionLibrary::HookNatives();
         AFortMission::HookNatives();
+        AFortMission_RiftSpawners::HookNatives();
         UFortGameplayAbility::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();

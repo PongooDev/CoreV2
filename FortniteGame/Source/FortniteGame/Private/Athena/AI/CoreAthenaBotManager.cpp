@@ -3014,6 +3014,7 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
         && static_cast<uint8_t>(KillerState->TeamIndex) != static_cast<uint8_t>(State->TeamIndex))
     {
         GameState->OnPostEarnedKill(KillerState);
+        AFortPlayerControllerAthena::SendEarnedEliminationEvent(KillerState, Bot->GetPawn());
     }
     // A playlist that brings its players back (Playground, CoreV2 #344): the bot is still in the match, as a respawning
     // player stays among the alive players; no place, no outlive events, the counts stay.

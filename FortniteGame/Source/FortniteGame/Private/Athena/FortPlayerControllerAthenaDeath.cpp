@@ -6,6 +6,8 @@
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortTeamInfo.h"
@@ -93,6 +95,65 @@ namespace
     {
         return Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
     }
+
+    // The members of FGameplayEventData the earned elimination's event fills in, in place in SendGameplayEventToActor's
+    // parameter (the engine owns the struct's handles).
+    struct FEarnedEliminationEventData
+    {
+        DefineUnrealStruct(FGameplayEventData, GameplayAbilities)
+        DefineUProperty(AActor*, Instigator)
+        DefineUProperty(AActor*, Target)
+        DefineUProperty(FGameplayTagContainer, InstigatorTags)
+        DefineUProperty(FGameplayTagContainer, TargetTags)
+    };
+}
+
+void AFortPlayerControllerAthena::SendEarnedEliminationEvent(AFortPlayerStateAthena* KillerPlayerState, AFortPawn* EliminatedPawn)
+{
+#if WITH_SERVER_CODE
+    // Core's: no build has the sender left (7.40, 8.00 and 8.20 register Event.EarnedElimination in FFortGameplayTags,
+    // +0xA0/+0xA8, and nothing reads it), so it went with the stripped death code. GAS_DefaultPlayer's
+    // GA_SiphonEffect_OnKillGrant (from 7.40) triggers on it: the eliminator from the event's Instigator
+    // (GetFortPlayerControllerFromActor, then its pawn), and on 7.40 the TargetRequiredTags Class.IsCommando, which an
+    // event's activation checks against the payload's TargetTags. AthenaGameData's Default.Siphon rows decide what it
+    // gives (50 health or shield, the 50 of each material), the hotfix's on the builds Epic turned them on by hotfix.
+    static const FName EarnedEliminationTag(L"Event.EarnedElimination", FNAME_Find);
+    AFortPlayerControllerAthena* KillerController = KillerPlayerState ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(KillerPlayerState->GetOwner())) : nullptr;
+    AFortPawn* KillerPawn = KillerController ? static_cast<AFortPawn*>(KillerController->MyFortPawn) : nullptr;
+    if (EarnedEliminationTag.IsNone() || !KillerPawn || KillerPawn->bTearOff)
+    {
+        return;
+    }
+    static UFunction* Send = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:SendGameplayEventToActor");
+    UObject* Library = UAbilitySystemBlueprintLibrary::StaticClass() ? UAbilitySystemBlueprintLibrary::StaticClass()->GetDefaultObject() : nullptr;
+    Reflection::FParams Event(Send, true);
+    FEarnedEliminationEventData* Payload = Send ? static_cast<FEarnedEliminationEventData*>(Event.GetAddress(L"Payload")) : nullptr;
+    if (!Library || !Payload || !Event.Set(L"Actor", static_cast<AActor*>(KillerPawn)) || !Event.Set(L"EventTag", FGameplayTag{ EarnedEliminationTag }))
+    {
+        static bool bWarned = false;
+        if (!std::exchange(bWarned, true))
+        {
+            UE_LOG(LogFortDeath, Warning, TEXT("SendEarnedEliminationEvent: SendGameplayEventToActor isn't usable, so eliminations don't trigger Event.EarnedElimination (siphon)"));
+        }
+        return;
+    }
+    Payload->Instigator = KillerController;
+    Payload->Target = EliminatedPawn;
+    if (UAbilitySystemComponent* KillerAbilitySystem = KillerPawn->AbilitySystemComponent)
+    {
+        KillerAbilitySystem->GetOwnedGameplayTags(Payload->InstigatorTags);
+    }
+    if (UAbilitySystemComponent* EliminatedAbilitySystem = EliminatedPawn ? static_cast<UAbilitySystemComponent*>(EliminatedPawn->AbilitySystemComponent) : nullptr)
+    {
+        EliminatedAbilitySystem->GetOwnedGameplayTags(Payload->TargetTags);
+    }
+    Event.Call(Library);
+    static bool bLogged = false;
+    if (!std::exchange(bLogged, true))
+    {
+        UE_LOG(LogFortDeath, Log, TEXT("SendEarnedEliminationEvent: %s earned an elimination (Event.EarnedElimination on its pawn)"), *KillerController->GetName());
+    }
+#endif
 }
 
 bool FDeathInfo::FinisherOrDownerIsAnyActor()
@@ -562,6 +623,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     if (KillerState)
     {
         GameState->OnPostEarnedKill(KillerState);
+        SendEarnedEliminationEvent(KillerState, DeadPawn);
     }
     if (bRespawning)
     {

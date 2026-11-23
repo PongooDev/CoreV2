@@ -197,6 +197,9 @@ public:
     // death's spectate timer goes and the player state stops watching anyone (Core's: the game's RespawnPlayerAfterDeath,
     // 4.5 0xAA8410, leaves both alone, and SpectateOnDeath only returns early for a view target that is alive).
     void StopSpectatingOnDeath();
+    // FortPlayerControllerAthenaDeath.cpp: the earned elimination's Event.EarnedElimination on the eliminator's pawn
+    // (GAS_DefaultPlayer's GA_SiphonEffect_OnKillGrant triggers on it), from OnPawnDied and a bot's death.
+    static void SendEarnedEliminationEvent(AFortPlayerStateAthena* KillerPlayerState, AFortPawn* EliminatedPawn);
     // AFortPlayerControllerZone's: the report of the player's last death, which ClientOnPawnDied sends.
     DefineUStructProperty(FFortPlayerDeathReport, PlayerDeathReport)
     // 1.10: the player's report of their match (AthenaPlayerMatchReport.h), made in BeginPlay on the server too.

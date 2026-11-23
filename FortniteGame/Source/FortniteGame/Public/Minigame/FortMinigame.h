@@ -30,6 +30,12 @@ class EFortMinigameState
     DefineUEnumValue(InProgress)
     DefineUEnumValue(PostGameEnd)
     DefineUEnumValue(PostGameAbandon)
+    // 8.20 (CL-5625478): PreGame, Setup, Transitioning, WaitingForCameras, Warmup, InProgress, PostGameEnd,
+    // PostGameAbandon, PostGameReset. Read these only where HasTransitioning() says the build has them.
+    DefineUEnumValue(Setup)
+    DefineUEnumValue(Transitioning)
+    DefineUEnumValue(PostGameReset)
+    static bool HasTransitioning() { return StaticEnumInfo().FindValue(L"Transitioning") != Reflection::InvalidEnumValue; }
 };
 
 // A player of a Creative game (from 7.00), in the game's PlayerArray. 7.40 (CL-5046157) reads
@@ -44,6 +50,15 @@ public:
     DefineUProperty(AFortPlayerState*, PlayerState)
     DefineUProperty(bool, bIsTeleportingOrRespawningForGameplay)
     static bool HasTeleportingOrRespawning() { return Member_PlayerState.IsAvailable() && Member_bIsTeleportingOrRespawningForGameplay.IsAvailable(); }
+    // Where the player was before the game started, which AddMinigamePlayer records (8.20 0x13185B0) for the
+    // post-game reset.
+    DefineUProperty(bool, bHasValidResetData)
+    DefineUProperty(uint8_t, TeamBeforeMinigameStarted)
+    DefineUProperty(FVector, LocationBeforeMinigameStarted)
+    DefineUProperty(FRotator, RotationBeforeMinigameStarted)
+    DefineUProperty(bool, bIsLocationBeforeGameStartedBlocked)
+    static bool HasResetData() { return Member_bHasValidResetData.IsAvailable() && Member_TeamBeforeMinigameStarted.IsAvailable() && Member_LocationBeforeMinigameStarted.IsAvailable()
+        && Member_RotationBeforeMinigameStarted.IsAvailable() && Member_bIsLocationBeforeGameStartedBlocked.IsAvailable(); }
 };
 
 struct FMinigamePlayers : public FFastArraySerializer
@@ -66,6 +81,13 @@ class EFortMinigamePlayerSpawnLocationSetting
 {
     DefineUnrealEnum(EFortMinigamePlayerSpawnLocationSetting, FortniteGame)
     DefineUEnumValue(Air)
+    DefineUEnumValue(CurrentLocation)
+};
+
+class EFortMinigamePostGameSpawnLocationSetting
+{
+    DefineUnrealEnum(EFortMinigamePostGameSpawnLocationSetting, FortniteGame)
+    DefineUEnumValue(PreGameLocation)
 };
 
 // A Creative game (from 7.00, which moves 6.20's minigame state and its leaderboard into this one class): the game an
@@ -165,6 +187,35 @@ public:
     // left alone.
     void HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolume* ChangedVolume);
 
+    // 8.20 (CL-5625478)'s state machine: SetMinigameState (0x13419C0) and AdvanceState (0x1319BC0, intact) run
+    // PreGame -> Setup -> Transitioning -> WaitingForCameras -> Warmup -> InProgress, and EndMinigame (0x1323CE0) and
+    // PostGameReset (0x1336860) PostGameEnd or PostGameAbandon -> PostGameReset. Its stripped steps: Transitioning's
+    // case is empty (nobody is sent to their start and nothing advances it), PostGameResetPlayers and
+    // ClearPlayerInventory have the shared empty exec, and OnVolumeStateChanged (0x1335AD0) only unbinds itself once
+    // the island is Ready, so nothing takes PostGameReset back to PreGame.
+    DefineUFunction(AdvanceState)
+    DefineUFunction(PostGameResetPlayers)
+    DefineUFunction(SetTeamForPlayer)
+    DefineUFunction(GetSpawnLocationSetting)
+    DefineUProperty(FName, MinigameStartCameraBehavior)
+    DefineUProperty(FName, MinigameEndCameraBehavior)
+    DefineUProperty(FText, ClientMinigameEndedText)
+    DefineUProperty(EFortMinigamePostGameSpawnLocationSetting, PostGameSpawnLocationSetting)
+    void AdvanceState();
+    // Core's native for StateChangedDelegate on 8.20: Setup resets the players' inventories, Transitioning sends them to
+    // their start (TransitionPlayersToMinigameStart), PostGameReset runs PostGameResetPlayers.
+    void HandleStateChangedForTransition(uint8_t NewState);
+    // Core's name for Transitioning's stripped case: each player not starting where they stand goes to the start
+    // DetermineSpawnLocation picks, through the travel screen (MinigameStartCameraBehavior, ClientMinigameStartedText);
+    // once none is still teleporting, AdvanceState (WaitingForCameras).
+    void TransitionPlayersToMinigameStart();
+    // Restored native (8.20 strips it): each player gets their team from before the game back, loses the game's items,
+    // and goes back as PostGameSpawnLocationSetting says (PreGameLocation: where they were; IslandStart: the island's
+    // start), through the travel screen (MinigameEndCameraBehavior, ClientMinigameEndedText).
+    void PostGameResetPlayers();
+    DECLARE_FUNCTION(execPostGameResetPlayers);
+    DECLARE_FUNCTION(execHandleStateChangedForTransition);
+
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
     DECLARE_FUNCTION(execClearPlayerInventories);
     DECLARE_FUNCTION(execClearPlayerInventory);
@@ -183,6 +234,12 @@ private:
     static inline UFunction* ClearPlayerInventoriesFunction = nullptr;
     static inline UFunction* HandleStateChangedForWarmupFunction = nullptr;
     static inline UFunction* HandleVolumeStateChangedForResetFunction = nullptr;
+    static inline UFunction* HandleStateChangedForTransitionFunction = nullptr;
+    // AdvanceState once Transitioning has no player still teleporting (or bForce, the failsafe's).
+    void AdvanceTransitionWhenArrived(bool bForce);
+    void AdvanceTransitionNextTick();
+    uint8_t GetSpawnLocationSetting(const AFortPlayerState* PlayerState);
+    bool SetTeamForPlayer(AFortPlayerState* PlayerState, uint8_t NewTeam);
     // bPendingRestart, the unreflected flag after MinigameStarter (-1 without it).
     static inline ptrdiff_t PendingRestartOffset = -1;
 

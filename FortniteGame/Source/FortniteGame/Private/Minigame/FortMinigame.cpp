@@ -42,6 +42,14 @@ namespace
     // (RespawnMinigamePlayers, ClearPlayerInventories).
     std::vector<std::pair<TWeakObjectPtr<AFortMinigame>, TWeakObjectPtr<AFortPlayerControllerAthena>>> PlayersResetForStart;
 
+    // 8.20: each game's Transitioning failsafe timer (TransitionPlayersToMinigameStart), cleared as the game advances.
+    struct FTransitionFailsafe
+    {
+        TWeakObjectPtr<AFortMinigame> Minigame;
+        FTimerHandle Handle;
+    };
+    TArray<FTransitionFailsafe> TransitionFailsafes;
+
     // The build's shared empty exec: the one exec many UFunctions have is the empty native the build gives the
     // server-only UFunctions it strips (7.00 0x1470620, 7.10 0x14BB380 for those without parameters and 0x14D99A0 for
     // those with one object, which only steps over it).
@@ -562,7 +570,10 @@ bool AFortMinigame::StartTeleportForMinigameStart(AController* Controller, APawn
         Entry->bIsTeleportingOrRespawningForGameplay = true;
     }
     const FText* Text = Member_ClientMinigameStartedText.IsAvailable() ? &GetMember_ClientMinigameStartedText() : nullptr;
-    if (!AthenaController->StartDelayedTeleport(Location, Rotation, L"MinigameStart", Text))
+    // 8.20 names the row in the game (MinigameStartCameraBehavior; WaitingForCameras waits on the same row's time).
+    const FName CameraName = Member_MinigameStartCameraBehavior.IsAvailable() ? static_cast<FName>(MinigameStartCameraBehavior) : FName();
+    const FString Camera = CameraName.IsNone() ? FString(L"MinigameStart") : CameraName.ToString();
+    if (!AthenaController->StartDelayedTeleport(Location, Rotation, *Camera, Text))
     {
         if (Entry)
         {
@@ -601,10 +612,33 @@ void AFortMinigame::DelayedTeleportPlayer(AFortPlayerControllerAthena* PlayerCon
         {
             Entry->bIsTeleportingOrRespawningForGameplay = false;
         }
+        if (EFortMinigameState::HasTransitioning())
+        {
+            AdvanceTransitionNextTick();
+        }
         return;
     }
     const bool bMoved = reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
     const bool bSkydive = bMoved && !bRespawningOnGround;
+    if (EFortMinigameState::HasTransitioning())
+    {
+        // 8.20's OnClientFinishTeleportingForMinigame (0x1334160) is the end for both: it looks for the floor under the
+        // pawn and skydives it when there is none, clears the player's teleport, resets their DeathInfo, holds them in
+        // stasis before InProgress, and broadcasts OnPawnTeleportedForMinigame.
+        if (bMoved)
+        {
+            OnClientFinishTeleportingForMinigame(PlayerPawn);
+        }
+        else
+        {
+            ClearTeleportForMinigame(PlayerPawn);
+        }
+        APlayerState* ArrivedState = static_cast<APlayerState*>(reinterpret_cast<AController*>(PlayerController)->PlayerState);
+        Log::Info(L"Minigame: {}'s player {} {} their start ({:.0f}, {:.0f}, {:.0f})", GetName().ToStdString(), ArrivedState ? ArrivedState->GetPlayerName().ToStdString() : std::wstring(L"?"),
+            bMoved ? L"arrives at" : L"couldn't be moved to", Location.X, Location.Y, Location.Z);
+        AdvanceTransitionNextTick();
+        return;
+    }
     if (bSkydive)
     {
         OnClientFinishTeleportingForMinigame(PlayerPawn);
@@ -729,6 +763,17 @@ void AFortMinigame::HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolu
         return;
     }
     const uint8_t State = CurrentState;
+    // 8.20: the game's own AdvanceState takes PostGameReset to PreGame, whose SetMinigameState starts a pending or auto
+    // restart itself (0x1341C80).
+    if (EFortMinigameState::HasTransitioning())
+    {
+        if (State == EFortMinigameState::GetPostGameReset())
+        {
+            Log::Info(L"Minigame: {}'s island is reset after its game, and the game goes back to PreGame", GetName().ToStdString());
+            AdvanceState();
+        }
+        return;
+    }
     const bool bWasPostGame = State == EFortMinigameState::GetPostGameEnd() || State == EFortMinigameState::GetPostGameAbandon();
     if (bWasPostGame)
     {
@@ -773,6 +818,318 @@ DEFINE_FUNCTION(AFortMinigame::execHandleVolumeStateChangedForReset)
     P_NATIVE_END;
 }
 
+void AFortMinigame::AdvanceState()
+{
+    Reflection::FParams(FindStaticFunction_AdvanceState(), true).Call(this);
+}
+
+uint8_t AFortMinigame::GetSpawnLocationSetting(const AFortPlayerState* PlayerState)
+{
+    Reflection::FParams Params(FindStaticFunction_GetSpawnLocationSetting(), true);
+    const uint8_t* Setting = Params.Set(L"PlayerState", reinterpret_cast<UObject*>(const_cast<AFortPlayerState*>(PlayerState))) && Params.Call(this) ? Params.Get<uint8_t>(L"ReturnValue") : nullptr;
+    return Setting ? *Setting : static_cast<uint8_t>(SpawnLocationSetting);
+}
+
+bool AFortMinigame::SetTeamForPlayer(AFortPlayerState* PlayerState, uint8_t NewTeam)
+{
+    Reflection::FParams Params(FindStaticFunction_SetTeamForPlayer(), true);
+    if (!Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) || !Params.Set(L"NewTeam", NewTeam) || !Params.Call(this))
+    {
+        return false;
+    }
+    const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
+    return ReturnValue && *ReturnValue;
+}
+
+void AFortMinigame::HandleStateChangedForTransition(uint8_t NewState)
+{
+#if WITH_SERVER_CODE
+    // OnRep_CurrentState (0x13351B0) broadcasts the new state from SetMinigameState, before the state's own case.
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    if (NewState == EFortMinigameState::GetSetup())
+    {
+        // Core's moment for ClearPlayerInventory at a game's start: Setup comes before anyone is sent to their start,
+        // where the Game Starting Inventory gives its items (OnPawnTeleportedForMinigame). The stripped caller is gone.
+        int32_t Reset = 0;
+        for (AFortPlayerState* PlayerState : GetParticipatingPlayers())
+        {
+            AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
+            if (AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr)
+            {
+                ClearPlayerInventory(Controller);
+                ++Reset;
+            }
+        }
+        Log::Info(L"Minigame: {} sets up its game and resets the inventories of {} players", GetName().ToStdString(), Reset);
+    }
+    else if (NewState == EFortMinigameState::GetTransitioning())
+    {
+        TransitionPlayersToMinigameStart();
+    }
+    else if (NewState == EFortMinigameState::GetPostGameReset())
+    {
+        PostGameResetPlayers();
+        // PostGameReset starts the island's restore before it sets this state; one that is done already broadcast its
+        // Ready before the game could hear it.
+        AFortVolume* GameVolume = Volume;
+        if (GameVolume && GameVolume->VolumeState == EVolumeState::Ready)
+        {
+            if (UWorld* World = GetWorld())
+            {
+                const TWeakObjectPtr<AFortMinigame> WeakThis(this);
+                World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]()
+                {
+                    AFortMinigame* Minigame = WeakThis.Get();
+                    if (Minigame && Minigame->CurrentState == EFortMinigameState::GetPostGameReset())
+                    {
+                        Log::Info(L"Minigame: {}'s island was reset already, and the game goes back to PreGame", Minigame->GetName().ToStdString());
+                        Minigame->AdvanceState();
+                    }
+                }));
+            }
+        }
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execHandleStateChangedForTransition)
+{
+    P_GET_PROPERTY(UByteProperty, Z_Param_NewState);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->HandleStateChangedForTransition(Z_Param_NewState);
+    P_NATIVE_END;
+}
+
+void AFortMinigame::TransitionPlayersToMinigameStart()
+{
+#if WITH_SERVER_CODE
+    // The players Setup sent here are those whose spawn setting isn't CurrentLocation (Setup's own test in SetMinigameState;
+    // with all of them on CurrentLocation it goes straight to Warmup). Each is marked teleporting while the client streams the
+    // start in (FMinigamePlayer::bIsTeleportingOrRespawningForGameplay, which OnClientFinishTeleportingForMinigame clears),
+    // the way AddMinigamePlayer sends a player who joins in progress (DelayedTeleportPlayer, 0x1321C30, whose move is
+    // stripped too).
+    const uint8_t CurrentLocation = EFortMinigamePlayerSpawnLocationSetting::GetCurrentLocation();
+    int32_t Travelling = 0;
+    int32_t Moved = 0;
+    const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
+    for (AFortPlayerState* PlayerState : Players)
+    {
+        AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
+        AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+        if (!Pawn || GetSpawnLocationSetting(PlayerState) == CurrentLocation)
+        {
+            continue;
+        }
+        FVector Location;
+        FRotator Rotation;
+        bool bSkydive = false;
+        if (!DetermineSpawnLocation(reinterpret_cast<AController*>(Controller), Location, Rotation, bSkydive))
+        {
+            continue;
+        }
+        if (Controller->IsDelayedTeleporting())
+        {
+            Log::Info(L"Minigame: {}'s player {} is travelling already and starts where they arrive", GetName().ToStdString(),
+                reinterpret_cast<APlayerState*>(PlayerState)->GetPlayerName().ToStdString());
+            continue;
+        }
+        if (StartTeleportForMinigameStart(reinterpret_cast<AController*>(Controller), Pawn, Location, Rotation, !bSkydive))
+        {
+            ++Travelling;
+            continue;
+        }
+        DelayedTeleportPlayer(Controller, Location, Rotation, !bSkydive);
+        ++Moved;
+    }
+    Log::Info(L"Minigame: {} sends {} of its {} players to their start through the travel screen{}", GetName().ToStdString(), Travelling, Players.Num(),
+        Moved ? std::format(L", {} moved at once", Moved) : std::wstring());
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    if (Travelling == 0)
+    {
+        AdvanceTransitionNextTick();
+        return;
+    }
+    const TWeakObjectPtr<AFortMinigame> WeakThis(this);
+    // Core's failsafe (21.40 keeps a WaitingForPlayersReadyFailsafeTimer): a player who leaves on the way never arrives.
+    // FinishDelayedTeleportWhenReady moves a silent client after 10 s, so this only catches the ones who are gone.
+    constexpr float FailsafeSeconds = 15.0f;
+    FTimerHandle Handle;
+    World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakThis]()
+    {
+        if (AFortMinigame* Minigame = WeakThis.Get())
+        {
+            Minigame->AdvanceTransitionWhenArrived(true);
+        }
+    }), FailsafeSeconds, false);
+    TransitionFailsafes.Add(FTransitionFailsafe{ WeakThis, Handle });
+#endif
+}
+
+void AFortMinigame::AdvanceTransitionNextTick()
+{
+#if WITH_SERVER_CODE
+    // Never from inside SetMinigameState (its Transitioning case runs after the broadcast that started the trips), nor
+    // before every player of the game has been sent.
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    const TWeakObjectPtr<AFortMinigame> WeakThis(this);
+    World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]()
+    {
+        if (AFortMinigame* Minigame = WeakThis.Get())
+        {
+            Minigame->AdvanceTransitionWhenArrived(false);
+        }
+    }));
+#endif
+}
+
+void AFortMinigame::AdvanceTransitionWhenArrived(bool bForce)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || CurrentState != EFortMinigameState::GetTransitioning())
+    {
+        return;
+    }
+    int32_t Teleporting = 0;
+    if (Member_PlayerArray.IsAvailable() && FMinigamePlayer::HasTeleportingOrRespawning())
+    {
+        TStructArray<FMinigamePlayer>& Entries = PlayerArray.Players;
+        for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+        {
+            Teleporting += static_cast<AFortPlayerState*>(Entries[Index].PlayerState) && Entries[Index].bIsTeleportingOrRespawningForGameplay ? 1 : 0;
+        }
+    }
+    if (Teleporting > 0 && !bForce)
+    {
+        return;
+    }
+    UWorld* World = GetWorld();
+    for (int32_t Index = TransitionFailsafes.Num() - 1; Index >= 0; --Index)
+    {
+        AFortMinigame* Owner = TransitionFailsafes[Index].Minigame.Get();
+        if (!Owner || Owner == this)
+        {
+            if (Owner && World)
+            {
+                World->GetTimerManager().ClearTimer(TransitionFailsafes[Index].Handle);
+            }
+            TransitionFailsafes.RemoveAtSwap(Index);
+        }
+    }
+    if (Teleporting > 0)
+    {
+        Log::Warning(L"Minigame: {} goes on without {} players who never reached their start", GetName().ToStdString(), Teleporting);
+    }
+    AdvanceState();
+#endif
+}
+
+void AFortMinigame::PostGameResetPlayers()
+{
+#if WITH_SERVER_CODE
+    // 8.00's PostGameReset (0x122AAF0) did this itself after the island's restore began: each player with reset data
+    // gets their team back (SetTeamForPlayer with TeamBeforeMinigameStarted), with its FName "MinigameEnd" left of the
+    // stripped trip back. 8.20's PostGameReset (0x1336860) has neither; this UFunction took them. The trip, the
+    // inventory reset and the clearing of the reset data are Core's reconstruction.
+    if (Role != ROLE_Authority || !Member_PlayerArray.IsAvailable() || !FMinigamePlayer::HasResetData())
+    {
+        return;
+    }
+    const bool bToPreGameLocation = Member_PostGameSpawnLocationSetting.IsAvailable() && PostGameSpawnLocationSetting == EFortMinigamePostGameSpawnLocationSetting::GetPreGameLocation();
+    AFortVolume* GameVolume = Volume;
+    AFortPlayerStartCreative* IslandStart = GameVolume ? GameVolume->FindIslandStart() : nullptr;
+    const FName CameraName = Member_MinigameEndCameraBehavior.IsAvailable() ? static_cast<FName>(MinigameEndCameraBehavior) : FName();
+    const FString Camera = CameraName.IsNone() ? FString(L"MinigameEnd") : CameraName.ToString();
+    const FText* Text = Member_ClientMinigameEndedText.IsAvailable() ? &GetMember_ClientMinigameEndedText() : nullptr;
+    int32_t Teams = 0;
+    int32_t Travelling = 0;
+    int32_t Players = 0;
+    TStructArray<FMinigamePlayer>& Entries = PlayerArray.Players;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FMinigamePlayer& Entry = Entries[Index];
+        AFortPlayerState* PlayerState = static_cast<AFortPlayerState*>(Entry.PlayerState);
+        if (!PlayerState)
+        {
+            continue;
+        }
+        ++Players;
+        const bool bHasResetData = Entry.bHasValidResetData;
+        if (bHasResetData && SetTeamForPlayer(PlayerState, Entry.TeamBeforeMinigameStarted))
+        {
+            ++Teams;
+        }
+        AActor* Owner = reinterpret_cast<AActor*>(PlayerState)->GetOwner();
+        AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        if (Controller)
+        {
+            ClearPlayerInventory(Controller);
+        }
+        FVector Location;
+        FRotator Rotation;
+        bool bDestination = false;
+        if (bToPreGameLocation && bHasResetData && !Entry.bIsLocationBeforeGameStartedBlocked)
+        {
+            Location = Entry.LocationBeforeMinigameStarted;
+            Rotation = Entry.RotationBeforeMinigameStarted;
+            bDestination = true;
+        }
+        else if (IslandStart)
+        {
+            const FTransform Transform = IslandStart->GetTransform();
+            Location = Transform.GetLocation();
+            Rotation = FRotator(0.0f, Transform.Rotation.Rotator().Yaw, 0.0f);
+            bDestination = true;
+        }
+        Entry.bHasValidResetData = false;
+        APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+        if (!bDestination || !Pawn || Controller->IsDelayedTeleporting())
+        {
+            continue;
+        }
+        if (Controller->StartDelayedTeleport(Location, Rotation, *Camera, Text))
+        {
+            const TWeakObjectPtr<APawn> WeakPawn(Pawn);
+            Controller->FinishDelayedTeleportWhenReady([WeakPawn](AFortPlayerControllerAthena* Ready, const FVector& ReadyLocation, const FRotator& ReadyRotation)
+            {
+                APawn* ReadyPawn = WeakPawn.Get();
+                if (ReadyPawn && Ready->GetPawn() == ReadyPawn)
+                {
+                    reinterpret_cast<AActor*>(ReadyPawn)->TeleportTo(ReadyLocation, ReadyRotation);
+                }
+            });
+            ++Travelling;
+        }
+        else
+        {
+            reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
+        }
+    }
+    Log::Info(L"Minigame: {} resets its {} players after the game: {} back on their team, {} sent back to {} through the travel screen", GetName().ToStdString(), Players, Teams, Travelling,
+        bToPreGameLocation ? L"where they were before it" : L"the island's start");
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execPostGameResetPlayers)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->PostGameResetPlayers();
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(AFortMinigame::execRespawnMinigamePlayers)
 {
     P_FINISH;
@@ -811,6 +1168,11 @@ void AFortMinigame::BindGameEvents(AFortMinigame* Minigame)
         FMulticastScriptDelegate& StateChanged = Minigame->StateChangedDelegate;
         StateChanged.AddUniqueDynamic(Minigame, HandleStateChangedForWarmupFunction->GetFName());
     }
+    if (HandleStateChangedForTransitionFunction)
+    {
+        FMulticastScriptDelegate& StateChanged = Minigame->StateChangedDelegate;
+        StateChanged.AddUniqueDynamic(Minigame, HandleStateChangedForTransitionFunction->GetFName());
+    }
     // The world's volume manager relays every island volume's state (its HandleVolumeStateChanged is bound to each as
     // the volume registers, 8.00 0xEE7910); each game keeps to its own Volume.
     AFortVolumeManager* Manager = HandleVolumeStateChangedForResetFunction ? AFortVolumeManager::Get(Minigame) : nullptr;
@@ -837,7 +1199,8 @@ void AFortMinigame::BindWorld(UWorld* World)
     // spawns its minigame (MinigameClass), so the world's spawns from now on are bound, and those already up.
     // RespawnMinigamePlayers likewise (its only caller was StartMinigame's Respawn warmup): the game's broadcast at that
     // moment is the minigame's StateChangedDelegate with Warmup.
-    if (!World || (!ClearPlayerInventoriesFunction && !HandleStateChangedForWarmupFunction && !HandleVolumeStateChangedForResetFunction) || InventoryResetWorld.Get() == World)
+    if (!World || (!ClearPlayerInventoriesFunction && !HandleStateChangedForWarmupFunction && !HandleVolumeStateChangedForResetFunction && !HandleStateChangedForTransitionFunction)
+        || InventoryResetWorld.Get() == World)
     {
         return;
     }
@@ -856,9 +1219,10 @@ void AFortMinigame::BindWorld(UWorld* World)
             ++Existing;
         }
     }
-    const std::wstring What = std::format(L"{}{}{}{}", ClearPlayerInventoriesFunction ? L"reset their players' inventories as their games start and end (MinigameStartedDelegate, MinigameEndedDelegate)" : L"",
+    const std::wstring What = std::format(L"{}{}{}{}{}", ClearPlayerInventoriesFunction ? L"reset their players' inventories as their games start and end (MinigameStartedDelegate, MinigameEndedDelegate)" : L"",
         ClearPlayerInventoriesFunction && HandleStateChangedForWarmupFunction ? L" and " : L"",
         HandleStateChangedForWarmupFunction ? L"respawn their players for a Respawn warmup (StateChangedDelegate)" : L"",
+        HandleStateChangedForTransitionFunction ? L"send their players to their start, reset them after the game and set up their inventories (StateChangedDelegate)" : L"",
         HandleVolumeStateChangedForResetFunction ? L"; they return to PreGame and restart once their island is reset after a game (AFortVolumeManager::OnVolumeStateChanged)" : L"");
     Log::Info(L"Minigame: the minigames {} ({} already up)", Handle.IsValid() ? What + L", bound as they spawn (UWorld::OnActorSpawned)"
         : std::wstring(L"can't be bound as they spawn: the world's OnActorSpawned wasn't found"), Existing);
@@ -893,6 +1257,12 @@ void AFortMinigame::HookNatives()
     {
         Log::Error(L"Hook AFortMinigame::ClearPlayerInventories: not restored (the minigame's MinigameStartedDelegate and MinigameEndedDelegate not found), so a Creative game doesn't reset its players' inventories");
     }
+    else if (!ClearInventories && StaticClass() && FindStaticFunction_ClearPlayerInventory() && HasStrippedExec(FindStaticFunction_ClearPlayerInventory()))
+    {
+        // 8.20 (CL-5625478) drops ClearPlayerInventories; ClearPlayerInventory's exec is the shared empty one (0x1749610).
+        FindStaticFunction_ClearPlayerInventory()->SetNativeFunc(&execClearPlayerInventory);
+        Log::Info(L"Hook AFortMinigame::ClearPlayerInventory: native");
+    }
     else if (ClearInventories && ClearInventory)
     {
         ClearInventories->SetNativeFunc(&execClearPlayerInventories);
@@ -918,7 +1288,37 @@ void AFortMinigame::HookNatives()
         HandleStateChangedForWarmupFunction = Signature && bReflected ? StaticClass()->AddNativeFunction(L"HandleStateChangedForWarmup", &execHandleStateChangedForWarmup, Signature) : nullptr;
         return HandleStateChangedForWarmupFunction != nullptr;
     };
-    if (Respawn && !HasStrippedExec(Respawn))
+    if (!Respawn && StaticClass() && EFortMinigameState::HasTransitioning())
+    {
+        // 8.20 (CL-5625478): no warmup types; the start's move is Transitioning's (see HandleStateChangedForTransition).
+        const UProperty* Property = Finder::ResolveClassFunctionMap() ? StaticClass()->FindPropertyByName(FName(L"StateChangedDelegate")) : nullptr;
+        const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+        const bool bReflected = FindStaticFunction_AdvanceState() && FindStaticFunction_DetermineSpawnLocation() && FindStaticFunction_GetSpawnLocationSetting()
+            && FindStaticFunction_OnClientFinishTeleportingForMinigame() && FindStaticFunction_ClearTeleportForMinigame() && Member_PlayerArray.IsAvailable()
+            && FMinigamePlayer::HasTeleportingOrRespawning();
+        HandleStateChangedForTransitionFunction = Signature && bReflected
+            ? StaticClass()->AddNativeFunction(L"HandleStateChangedForTransition", &execHandleStateChangedForTransition, Signature) : nullptr;
+        if (HandleStateChangedForTransitionFunction)
+        {
+            Log::Info(L"Finder: AFortMinigame's Transitioning is stripped in this build (SetMinigameState's case is empty): restored from the minigames' StateChangedDelegate, "
+                L"through the travel screen (the delayed teleport {}, MinigameStartCameraBehavior {})", AFortPlayerControllerAthena::HasDelayedTeleport() ? L"found" : L"not found (moved at once)",
+                Member_MinigameStartCameraBehavior.IsAvailable() ? L"found" : L"not found");
+        }
+        else
+        {
+            Log::Error(L"Hook AFortMinigame Transitioning: not restored (StateChangedDelegate's signature {}, the game's natives and PlayerArray {}), so a Creative game's start sends nobody to their start and stays in Transitioning",
+                Signature ? L"found" : L"not found", bReflected ? L"found" : L"not found");
+        }
+        UFunction* ResetPlayers = FindStaticFunction_PostGameResetPlayers();
+        if (ResetPlayers && HasStrippedExec(ResetPlayers))
+        {
+            ResetPlayers->SetNativeFunc(&execPostGameResetPlayers);
+            Log::Info(L"Hook AFortMinigame::PostGameResetPlayers: native (reset data {}, SetTeamForPlayer {})", FMinigamePlayer::HasResetData() ? L"found" : L"not found",
+                FindStaticFunction_SetTeamForPlayer() ? L"found" : L"not found");
+        }
+    }
+    else if (Respawn && !HasStrippedExec(Respawn))
     {
         Log::Info(L"Finder: AFortMinigame::RespawnMinigamePlayers is native in this build");
     }

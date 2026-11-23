@@ -23,7 +23,8 @@ public:
     // Server, Creative: turns invites and join in progress back on after the match assignment turned them off
     // (OnServerMatchAssignment, 8.20 0x13DCC70, keeps them only on a mesh node), with the game's own
     // UpdateSessionJoinability, which updates the session and sends the flags to the players. Without invites the
-    // players' presence has no GameSessionJoinKey, so friends get no server tile (Core-Backend #411).
+    // players' presence has no GameSessionJoinKey (7.00: "SessionKey", SendPresenceUpdate 0x62C120), so friends get no
+    // server tile (Core-Backend #411, #375).
     void AllowFriendsToJoin();
 
 private:

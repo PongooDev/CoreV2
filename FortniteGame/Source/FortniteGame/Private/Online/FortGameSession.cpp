@@ -87,8 +87,8 @@ void AFortGameSession::AllowFriendsToJoin()
     // NAME_GameSession, the session the dedicated server made (AFortGameSessionDedicated::CreateDedicatedSession).
     const FName SessionName(L"GameSession");
     FJoinabilitySettings Settings;
-    // Only where the assignment turned invites off (8.20 and 7.30 do; 5.21 has no such step), so other builds' sessions
-    // aren't updated again.
+    // Only where the assignment turned invites off (OnServerMatchAssignment: 7.00 0x11194E0, 7.10 0x114A3D0, 7.20
+    // 0x121B9B0, 7.30 and 8.20; 5.21 has no such step), so other builds' sessions aren't updated again.
     if (!Finder::ResolveSessionJoinabilityLive(MaxPlayersOffset()) || !GetSessionJoinability(SessionName, Settings) || Settings.bAllowInvites)
     {
         return;

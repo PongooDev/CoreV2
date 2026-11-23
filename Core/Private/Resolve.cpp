@@ -15957,7 +15957,9 @@ bool Finder::ResolveSessionJoinabilityLive(ptrdiff_t MaxPlayersOffset)
     // AGameSession::GetSessionJoinability (8.20 0x29D5600, slot 0xD5; 7.40, 8.00 and 8.30 the same slot) copies MaxPlayers
     // into the settings ("mov edx, [rdi+244h]") and ends in the online engine interface's GetSessionJoinability ("jmp
     // [r10+2C8h]"); UpdateSessionJoinability, the next slot (0x29EC550), calls the interface's next one ("call
-    // [rsi+2D0h]"). The engine's own vtable has them; the game session classes override the second.
+    // [rsi+2D0h]"). The engine's own vtable has them; the game session classes override the second. 7.00 to 7.20 have
+    // MaxPlayers at +0x334 and the interface's pair one slot lower ("jmp [r10+2C0h]", "call [rsi+2C8h]"; 7.00
+    // 0x271A530/0x27321A0, 7.10 0x277F4A0/0x27972D0, 7.20 0x2866890/0x287E6A0), which the slot search takes as found.
     void** SessionVTable = CdoVTable(L"/Script/Engine.GameSession");
     void** InterfaceVTable = CdoVTable(L"/Script/OnlineSubsystemUtils.OnlineEngineInterfaceImpl");
     // The last virtual call's slot in the function's first 0x90 bytes, or whether one calls Slot.
@@ -16000,9 +16002,10 @@ bool Finder::ResolveSessionJoinabilityLive(ptrdiff_t MaxPlayersOffset)
         }
     }
 
-    // UOnlineEngineInterfaceImpl::UpdateSessionJoinability (8.20 0x6665B0; 7.40 0x47F5C0, 8.30 0x44D340): its first call is
-    // Online::GetSessionInterface(World, NAME_None), then "call [rax+2D8h]", the session's GetSessionSettings(SessionName),
-    // whose result takes bAllowInvites ("mov [rax+15h], cl"). Its GetSessionJoinability makes the same two calls.
+    // UOnlineEngineInterfaceImpl::UpdateSessionJoinability (8.20 0x6665B0; 7.00 0x455830, 7.10 0x4603C0, 7.20 0x46A390,
+    // 7.40 0x47F5C0, 8.30 0x44D340): its first call is Online::GetSessionInterface(World, NAME_None), then "call
+    // [rax+2D8h]", the session's GetSessionSettings(SessionName), whose result takes bAllowInvites ("mov [rax+15h], cl").
+    // Its GetSessionJoinability makes the same two calls.
     const uintptr_t Update = Matches == 1 ? VTableEntry(InterfaceVTable, InterfaceSlot + 1) : 0;
     const uintptr_t Get = Matches == 1 ? VTableEntry(InterfaceVTable, InterfaceSlot) : 0;
     const auto FirstCallThenSlot = [](uintptr_t Function, uintptr_t& OutCall)

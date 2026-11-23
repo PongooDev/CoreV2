@@ -90,18 +90,34 @@ void ABuildingFoundation::SetDynamicFoundationEnabled(bool bEnabled)
     //   is set, and the island scripting turns it on after that (its calendar events come after the world is up), so the
     //   stream-in happens here too when PostUpdate has been and gone: as SetDynamicFoundationTransform does, without
     //   which a client near the plot streams a level the server doesn't have and is kicked (#401).
+    // - 8.20 (CL-5625478) replaces the bool with FoundationEnabledState (Unknown, Enabled, Disabled) and its OnRep
+    //   (0xF88DE0) takes no old value; its PostUpdate (0xF91CC0) streams a StartDisabled plot only while it is Enabled.
     if (Role != ROLE_Authority || !HasFoundationEnabled() || DynamicFoundationType == static_cast<uint8_t>(EDynamicFoundationType::Static))
     {
         return;
     }
-    const bool bOldEnabled = bFoundationEnabled;
-    if (bOldEnabled == bEnabled)
+    if (HasFoundationEnabledState())
     {
-        return;
+        const EDynamicFoundationEnabledState NewState = bEnabled ? EDynamicFoundationEnabledState::GetEnabled() : EDynamicFoundationEnabledState::GetDisabled();
+        if (FoundationEnabledState == NewState)
+        {
+            return;
+        }
+        FlushNetDormancy();
+        FoundationEnabledState = NewState;
+        OnRep_FoundationEnabledState();
     }
-    FlushNetDormancy();
-    bFoundationEnabled = bEnabled;
-    OnRep_FoundationEnabled(bOldEnabled);
+    else
+    {
+        const bool bOldEnabled = bFoundationEnabled;
+        if (bOldEnabled == bEnabled)
+        {
+            return;
+        }
+        FlushNetDormancy();
+        bFoundationEnabled = bEnabled;
+        OnRep_FoundationEnabled(bOldEnabled);
+    }
 
     const bool bStreamIn = bEnabled && Natives::ABuildingFoundation_bPostUpdateCalled >= 0 && bPostUpdateCalled && !bConditionalFoundation && !LevelStreamInfo;
     if (bStreamIn)
@@ -141,6 +157,12 @@ void ABuildingFoundation::OnRep_FoundationEnabled(bool bOldEnabled)
 {
     Reflection::FParams Params(StaticFunction_OnRep_FoundationEnabled());
     Params.Set(L"bOldEnabled", bOldEnabled);
+    Params.Call(this);
+}
+
+void ABuildingFoundation::OnRep_FoundationEnabledState()
+{
+    Reflection::FParams Params(StaticFunction_OnRep_FoundationEnabledState());
     Params.Call(this);
 }
 
@@ -211,9 +233,9 @@ void ABuildingFoundation::HookNatives()
     }
     if (bEnabledStripped)
     {
-        if (!HasFoundationEnabled() || !FindStaticFunction_OnRep_FoundationEnabled())
+        if (!HasFoundationEnabled())
         {
-            Log::Error(L"Hook ABuildingFoundation::SetDynamicFoundationEnabled: not restored (bFoundationEnabled or OnRep_FoundationEnabled not found), so Loot Lake's plots never stream in");
+            Log::Error(L"Hook ABuildingFoundation::SetDynamicFoundationEnabled: not restored (bFoundationEnabled and OnRep_FoundationEnabled, or FoundationEnabledState and its OnRep, not found), so Loot Lake's plots never stream in");
             return;
         }
         Enabled->SetNativeFunc(&execSetDynamicFoundationEnabled);

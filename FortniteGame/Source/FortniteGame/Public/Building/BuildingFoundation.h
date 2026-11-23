@@ -12,12 +12,21 @@ class ULevelStreaming;
 // 6.00's EDynamicFoundationType: a Static plot stays where it was placed; a Dynamic_StartEnabled one (the floating
 // island's, Athena_POI_Foundations' LF_Athena_StreamingTest13) is moved by its DynamicFoundationTransform. 6.20 adds
 // Dynamic_StartDisabled: the plot streams its level only once SetDynamicFoundationEnabled(true) (6.20's and 6.21's Loot
-// Lake: LF_Lake1, LF_Lake2 and LF_FloatingIsland).
+// Lake: LF_Lake1, LF_Lake2 and LF_FloatingIsland). Core compares only Static, which stays 0; 8.20 renumbers the rest
+// (StartEnabled_Stationary 1, StartEnabled_Dynamic 2, StartDisabled 3).
 enum class EDynamicFoundationType : uint8_t
 {
     Static = 0,
     Dynamic_StartEnabled = 1,
     Dynamic_StartDisabled = 2,
+};
+
+// 8.20's (CL-5625478) dynamic plot state, which replaces bFoundationEnabled: Unknown until it is first set.
+class EDynamicFoundationEnabledState
+{
+    DefineUnrealEnum(EDynamicFoundationEnabledState, FortniteGame)
+    DefineUEnumValue(Enabled)
+    DefineUEnumValue(Disabled)
 };
 
 // A building's or a POI's plot: its static mesh is the plot, and the level it streams in (a building or POI sublevel,
@@ -29,6 +38,7 @@ class ABuildingFoundation : public ABuildingSMActor
     DefineUFunction(SetDynamicFoundationTransform)
     DefineUFunction(SetDynamicFoundationEnabled)
     DefineUFunction(OnRep_FoundationEnabled)
+    DefineUFunction(OnRep_FoundationEnabledState)
 
 public:
     // The streamed level's package (/Temp/Game/Athena/Maps/POI/Athena_POI_City_001_43); None until it streams.
@@ -46,7 +56,16 @@ public:
     // From 6.20: whether a dynamic plot is on (replicated; OnRep_FoundationEnabled streams its level in or out on each
     // client). A Dynamic_StartDisabled plot is off until SetDynamicFoundationEnabled(true).
     DefineBitfieldUProperty(bFoundationEnabled)
-    static bool HasFoundationEnabled() { return Member_bFoundationEnabled.IsAvailable(); }
+    // 8.20: the same as an EDynamicFoundationEnabledState, with OnRep_FoundationEnabledState (no parameter).
+    DefineUProperty(EDynamicFoundationEnabledState, FoundationEnabledState)
+    static bool HasFoundationEnabledState()
+    {
+        return Member_FoundationEnabledState.IsAvailable() && FindStaticFunction_OnRep_FoundationEnabledState() && EDynamicFoundationEnabledState::StaticEnum();
+    }
+    static bool HasFoundationEnabled()
+    {
+        return (Member_bFoundationEnabled.IsAvailable() && FindStaticFunction_OnRep_FoundationEnabled()) || HasFoundationEnabledState();
+    }
     // The level streaming object for the plot's level, once StreamInMyBuilding has made it.
     DefineUProperty(ULevelStreaming*, LevelStreamInfo)
     // Unreflected (21.40's names; Finder::ResolveBuildingFoundationLive): the transform has been set, and the plot's
@@ -68,6 +87,9 @@ public:
     // The build's own OnRep (6.21 0xD645E0): with the plot begun play and the state changed, streams its level in (shows
     // it and its LOD actors) or out.
     void OnRep_FoundationEnabled(bool bOldEnabled);
+    // 8.20's (0xF88DE0, through its exec's jmp): on a dynamic plot that has begun play, shows its level and LOD actors for
+    // Enabled or streams them out.
+    void OnRep_FoundationEnabledState();
     // Picks the plot's level (the world manager's saved one, else its own pick) and streams it in (6.00 0xD142E0).
     bool SelectAndSetupMyBuildingLevel(FFortBuildingRandomList* RandomList);
 

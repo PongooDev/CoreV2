@@ -248,6 +248,17 @@ void AFortPlayerController::HookBuildingVTables()
     }
 }
 
+int32_t FBuildingClassData::GetGameUpgradeLevel() const
+{
+    static const bool bByteLevel = []
+    {
+        UScriptStruct* Struct = StaticStruct();
+        const UProperty* Property = Struct ? Struct->FindPropertyByName(FName(L"UpgradeLevel", FNAME_Find)) : nullptr;
+        return Property && Property->ElementSize == 1;
+    }();
+    return bByteLevel ? static_cast<int32_t>(*reinterpret_cast<const uint8_t*>(&UpgradeLevel)) : UpgradeLevel;
+}
+
 bool AFortPlayerController::ValidateBuildingClassData(FBuildingClassData& BuildingClassData)
 {
     // 1.8's check (0x826370, gone from 1.8.1): a building actor class. A client places the class of its CurrentResourceLevel
@@ -309,7 +320,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FCrea
     }
     FBuildingClassData BuildingClassData;
     BuildingClassData.BuildingClass = BuildableClasses[Handle];
-    BuildingClassData.UpgradeLevel = static_cast<uint8_t>(CreateBuildingData.BuildingClassData.UpgradeLevel);
+    BuildingClassData.UpgradeLevel = CreateBuildingData.BuildingClassData.GetGameUpgradeLevel();
     CreateBuildingActor(BuildingClassData, CreateBuildingData.BuildLoc, CreateBuildingData.BuildRot, CreateBuildingData.bMirrored);
 #endif
 }
@@ -644,9 +655,11 @@ void AFortPlayerController::ServerCreateBuildingActor_ImplementationHK(AFortPlay
     This->ServerCreateBuildingActor_Implementation(CreateBuildingData);
 }
 
-ABuildingSMActor* AFortPlayerController::CreateBuildingActorHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored,
+ABuildingSMActor* AFortPlayerController::CreateBuildingActorHK(AFortPlayerController* This, const FBuildingClassData& InBuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored,
     float SyncKey)
 {
+    FBuildingClassData BuildingClassData = InBuildingClassData;
+    BuildingClassData.UpgradeLevel = InBuildingClassData.GetGameUpgradeLevel();
     // The trap's owner's controller (7.40 0x15B0710), null when the tool's owner isn't a player's pawn. The client's sync
     // key (the world's time here) only pairs a predicted piece with the server's; Core's pieces aren't predicted.
     AFortPlayerController* Placer = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(This));

@@ -44,9 +44,15 @@ class ABuildingSMActor;
 // The class to build and the levels it is built at (ServerCreateBuildingActor's first parameter).
 struct FBuildingClassData
 {
+    DefineUnrealStruct(FBuildingClassData, FortniteGame)
+
     UClass* BuildingClass = nullptr;
     int32_t PreviousBuildingLevel = -1;
     int32_t UpgradeLevel = 0;
+
+    // UpgradeLevel of a struct the game filled: 8.30 (CL-5793395) made it a uint8 and leaves the three bytes after it
+    // as they were (AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation 0x17D2C8D writes one byte).
+    int32_t GetGameUpgradeLevel() const;
 };
 
 static_assert(sizeof(FBuildingClassData) == 0x10);

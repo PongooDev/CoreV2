@@ -3830,6 +3830,12 @@ void AFortGameModeAthena::OnGivenMatchAssignment(bool bSuccess, const void* Matc
             GameState->SetCurrentPlaylistId(static_cast<int32_t>(CurrentPlaylistId));
         }
     }
+    // Core's choice, not Epic's call site (owner, 2026-11-23): Creative servers take friends again after the assignment.
+    AFortGameSession* FortSession = AFortPlayerControllerAthena::IsCreativeMatch(this) ? Cast<AFortGameSession>(reinterpret_cast<UObject*>(static_cast<AGameSession*>(GameSession))) : nullptr;
+    if (FortSession)
+    {
+        FortSession->AllowFriendsToJoin();
+    }
 
     // The match is the players the assignment reserved (configuring the beacon left the game session's MaxPlayers at
     // them), and its warmup waits for a tenth of them. Not with -nomcp (nor in the editor).

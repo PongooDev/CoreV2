@@ -15825,6 +15825,92 @@ bool Finder::ResolveGameSessionKickLive()
     return true;
 }
 
+bool Finder::ResolveSessionJoinabilityLive(ptrdiff_t MaxPlayersOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AGameSession_UpdateSessionJoinabilityIndex >= 0 && Natives::Online_GetSessionInterface;
+    }
+    bSearched = true;
+
+    // AGameSession::GetSessionJoinability (8.20 0x29D5600, slot 0xD5; 7.40, 8.00 and 8.30 the same slot) copies MaxPlayers
+    // into the settings ("mov edx, [rdi+244h]") and ends in the online engine interface's GetSessionJoinability ("jmp
+    // [r10+2C8h]"); UpdateSessionJoinability, the next slot (0x29EC550), calls the interface's next one ("call
+    // [rsi+2D0h]"). The engine's own vtable has them; the game session classes override the second.
+    void** SessionVTable = CdoVTable(L"/Script/Engine.GameSession");
+    void** InterfaceVTable = CdoVTable(L"/Script/OnlineSubsystemUtils.OnlineEngineInterfaceImpl");
+    // The last virtual call's slot in the function's first 0x90 bytes, or whether one calls Slot.
+    const auto LastVirtualSlot = [](uintptr_t Function)
+    {
+        int32_t Last = -1;
+        for (uintptr_t Site = FindVirtualCall(Function, Function + 0x90); Site; Site = FindVirtualCall(Site + 1, Function + 0x90))
+        {
+            Last = VirtualSlot(Site);
+        }
+        return Last;
+    };
+    const auto CallsVirtualSlot = [](uintptr_t Function, int32_t Slot)
+    {
+        for (uintptr_t Site = FindVirtualCall(Function, Function + 0x90); Site; Site = FindVirtualCall(Site + 1, Function + 0x90))
+        {
+            if (VirtualSlot(Site) == Slot)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const uint32_t MaxPlayers = static_cast<uint32_t>(MaxPlayersOffset);
+    int32_t Index = -1;
+    int32_t InterfaceSlot = -1;
+    int32_t Matches = 0;
+    for (int32_t Candidate = 0x80; SessionVTable && InterfaceVTable && MaxPlayersOffset > 0 && Candidate < 0x140; ++Candidate)
+    {
+        const uintptr_t Get = VTableEntry(SessionVTable, Candidate);
+        const uintptr_t Update = VTableEntry(SessionVTable, Candidate + 1);
+        const bool bReadsMaxPlayers = Get && FindInstruction(Get, Get + 0x60, { 0x8B, -1, static_cast<int32_t>(MaxPlayers & 0xFF), static_cast<int32_t>((MaxPlayers >> 8) & 0xFF),
+            static_cast<int32_t>((MaxPlayers >> 16) & 0xFF), static_cast<int32_t>(MaxPlayers >> 24) });
+        const int32_t GetSlot = bReadsMaxPlayers && Update ? LastVirtualSlot(Get) : -1;
+        if (GetSlot > 0 && CallsVirtualSlot(Update, GetSlot + 1))
+        {
+            Index = Candidate;
+            InterfaceSlot = GetSlot;
+            ++Matches;
+        }
+    }
+
+    // UOnlineEngineInterfaceImpl::UpdateSessionJoinability (8.20 0x6665B0; 7.40 0x47F5C0, 8.30 0x44D340): its first call is
+    // Online::GetSessionInterface(World, NAME_None), then "call [rax+2D8h]", the session's GetSessionSettings(SessionName),
+    // whose result takes bAllowInvites ("mov [rax+15h], cl"). Its GetSessionJoinability makes the same two calls.
+    const uintptr_t Update = Matches == 1 ? VTableEntry(InterfaceVTable, InterfaceSlot + 1) : 0;
+    const uintptr_t Get = Matches == 1 ? VTableEntry(InterfaceVTable, InterfaceSlot) : 0;
+    const auto FirstCallThenSlot = [](uintptr_t Function, uintptr_t& OutCall)
+    {
+        const auto Calls = Function ? Finder::DirectCalls(Function, Function + 0x40) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        OutCall = Calls.empty() ? 0 : Calls.front().second;
+        return Calls.empty() ? -1 : VirtualSlot(FindVirtualCall(Calls.front().first + 5, Calls.front().first + 0x40));
+    };
+    uintptr_t GetSessionInterface = 0;
+    uintptr_t GetSessionInterfaceAgain = 0;
+    const int32_t SettingsSlot = FirstCallThenSlot(Update, GetSessionInterface);
+    const bool bAgree = SettingsSlot > 0 && GetSessionInterface && FirstCallThenSlot(Get, GetSessionInterfaceAgain) == SettingsSlot && GetSessionInterfaceAgain == GetSessionInterface
+        && FindInstruction(Update, Update + 0x80, { 0x88, -1, 0x15 });
+    if (!bAgree)
+    {
+        Log::Warning(L"Finder: AGameSession::UpdateSessionJoinability not found ({} candidate slots, GetSessionSettings slot {}), so Creative's server stays closed to friends",
+            Matches, SettingsSlot);
+        return false;
+    }
+    Natives::AGameSession_GetSessionJoinabilityIndex = Index;
+    Natives::AGameSession_UpdateSessionJoinabilityIndex = Index + 1;
+    Natives::Online_GetSessionInterface = reinterpret_cast<decltype(Natives::Online_GetSessionInterface)>(GetSessionInterface);
+    Natives::IOnlineSession_GetSessionSettingsIndex = SettingsSlot;
+    Log::Info(L"Finder: AGameSession::GetSessionJoinability is slot 0x{:X}, UpdateSessionJoinability 0x{:X}; Online::GetSessionInterface 0x{:X}, IOnlineSession::GetSessionSettings slot 0x{:X}",
+        Index, Index + 1, GetSessionInterface - Finder::ImageBase(), SettingsSlot);
+    return true;
+}
+
 bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask)
 {
     if (Natives::ABuildingSMActor_AttemptSpawnResourcesIndex >= 0)

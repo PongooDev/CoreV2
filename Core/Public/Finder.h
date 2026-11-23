@@ -361,6 +361,9 @@ namespace Finder
     uint8_t* StrippedComplexCustomStatEventCall(UFunction* SendComplexCustomStatEvent);
     // Natives::AGameSession_KickPlayerIndex.
     bool ResolveGameSessionKickLive();
+    // Natives::AGameSession_GetSessionJoinabilityIndex and UpdateSessionJoinabilityIndex, Online_GetSessionInterface and
+    // IOnlineSession_GetSessionSettingsIndex. MaxPlayersOffset is AGameSession::MaxPlayers'.
+    bool ResolveSessionJoinabilityLive(ptrdiff_t MaxPlayersOffset);
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset);
     bool ResolveAthenaMenuHero();

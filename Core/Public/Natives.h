@@ -74,6 +74,7 @@ class FGameServiceMcp;
 class FOnlineSubsystemImpl;
 class FOnlineSubsystemMcp;
 class FUniqueNetId;
+class IOnlineSession;
 class IHttpRequest;
 class UMcpProfile;
 class UMcpProfileGroup;
@@ -937,6 +938,15 @@ namespace Natives
     // AGameSession::KickPlayer(APlayerController* KickedPlayer, const FText& KickReason)'s slot, as the game mode's kick of
     // a player who didn't load calls it (7.20 0xD0D76B, slot 0xCD): Finder::ResolveGameSessionKickLive.
     inline int32_t AGameSession_KickPlayerIndex = -1;
+    // Finder::ResolveSessionJoinabilityLive, for Creative's friends' joins (Core-Backend #411):
+    // AGameSession::GetSessionJoinability(FName, FJoinabilitySettings&) and UpdateSessionJoinability(FName, bool x4), the
+    // slots after it (8.20 0x6A8/0x6B0, 0x29D5600 and AFortGameSession's 0x13B5A00); Online::GetSessionInterface(const
+    // UWorld*, FName) (8.20 0x645130) and IOnlineSession::GetSessionSettings(FName)'s slot (0x2D8), as
+    // UOnlineEngineInterfaceImpl::UpdateSessionJoinability (0x6665B0) calls them.
+    inline int32_t AGameSession_GetSessionJoinabilityIndex = -1;
+    inline int32_t AGameSession_UpdateSessionJoinabilityIndex = -1;
+    inline TSharedPtr<IOnlineSession, ESPMode::ThreadSafe>* (*Online_GetSessionInterface)(TSharedPtr<IOnlineSession, ESPMode::ThreadSafe>* Result, const UWorld* World, FName SubsystemName) = nullptr;
+    inline int32_t IOnlineSession_GetSessionSettingsIndex = -1;
     // AFortTeamPrivateInfo::SetHealthAndShield (3.5.1 0xF83CB0, 21.40's name): the player state's CurrentHealth, MaxHealth,
     // CurrentShield and MaxShield into its team's replicated RepData (marking the changed items dirty), which squadmates'
     // squad bars read. The game mode's ReplicateHealthAndShield calls it for every player state each tick; Battle

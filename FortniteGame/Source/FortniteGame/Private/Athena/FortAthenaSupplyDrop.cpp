@@ -125,14 +125,17 @@ void AFortAthenaSupplyDrop::HookSpawnPickup()
     // SpawnPickup is 1.10's (CoreV2 #170). 1.10's exec (0x9FE050) steps its five parameters and calls the shared
     // return-zero stub (UserMathErrorFunction, 0x1AC45D0) instead of the native, so every pickup the crate's SpawnTierDrops
     // asked for was null and the crate opened onto nothing. 1.9.1 and earlier have no SpawnPickup (their crate calls
-    // K2_SpawnPickupInWorld), so it is looked up without failing there.
+    // K2_SpawnPickupInWorld), so it is looked up without failing there. 8.20's exec (0x17D1BE0) calls a stripped body
+    // that keeps its AFortPickupAthena::StaticClass() call and returns null (0xE4C0F0), so Battle Royale's supply drops
+    // opened onto nothing (#555).
     UFunction* Function = FindStaticFunction_SpawnPickup();
     if (!Function)
     {
         return;
     }
     uint8_t* NativeCall = Finder::ImplementationCall(Function);
-    if (!NativeCall || !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)))
+    const uintptr_t Native = NativeCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5) : 0;
+    if (!Native || (!Finder::IsStubFunction(Native) && !Finder::IsCallThenReturnZeroStub(Native)))
     {
         Log::Info(L"Finder: AFortAthenaSupplyDrop::SpawnPickup is native in this build");
         return;

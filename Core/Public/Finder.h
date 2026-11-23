@@ -81,6 +81,10 @@ namespace Finder
     uintptr_t Unthunk(uintptr_t Address);
     // Whether Function's code is Bytes (ending in ret or ret 0), including moved code's rewritten copy of it.
     bool BodyIs(uintptr_t Function, std::initializer_list<uint8_t> Bytes);
+    // Whether Function only makes one call and returns zero (sub rsp, 28h; call; xor eax, eax; add rsp, 28h; ret), as a
+    // stripped body that keeps a call does: 8.20's AFortAthenaSupplyDrop::SpawnPickup (0xE4C0F0) is
+    // `AFortPickupAthena::StaticClass(); return nullptr;`.
+    bool IsCallThenReturnZeroStub(uintptr_t Function);
     // The code pointer .rdata holds most often: the shared empty function every stripped void virtual points at.
     uintptr_t MostReferencedFunction();
     // The first of up to MaxInstructions instructions run from From that Match accepts, following jumps (Unthunk), so it

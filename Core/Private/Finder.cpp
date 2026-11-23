@@ -240,6 +240,25 @@ bool Finder::BodyIs(uintptr_t Function, std::initializer_list<uint8_t> Bytes)
     return IsExecutable(Return) && IsReturn(reinterpret_cast<const uint8_t*>(Return));
 }
 
+bool Finder::IsCallThenReturnZeroStub(uintptr_t Function)
+{
+    // sub rsp, 28h; call rel32; xor eax, eax; add rsp, 28h; ret
+    const uintptr_t Body = Unthunk(Function);
+    static constexpr uint8_t Prologue[] = { 0x48, 0x83, 0xEC, 0x28, 0xE8 };
+    if (!IsExecutable(Body) || !IsExecutable(Body + sizeof(Prologue) + 4) || !std::equal(std::begin(Prologue), std::end(Prologue), reinterpret_cast<const uint8_t*>(Body)))
+    {
+        return false;
+    }
+    static constexpr uint8_t Epilogue[] = { 0x33, 0xC0, 0x48, 0x83, 0xC4, 0x28 };
+    const uintptr_t AfterCall = Unthunk(Body + sizeof(Prologue) + 4);
+    if (!IsExecutable(AfterCall) || !IsExecutable(AfterCall + sizeof(Epilogue)) || !std::equal(std::begin(Epilogue), std::end(Epilogue), reinterpret_cast<const uint8_t*>(AfterCall)))
+    {
+        return false;
+    }
+    const uintptr_t Return = Unthunk(AfterCall + sizeof(Epilogue));
+    return IsExecutable(Return) && IsReturn(reinterpret_cast<const uint8_t*>(Return));
+}
+
 uintptr_t Finder::TraceFind(uintptr_t From, size_t MaxInstructions, const std::function<bool(uintptr_t Instruction)>& Match)
 {
     uintptr_t Address = From;

@@ -7386,12 +7386,20 @@ int32_t Finder::WrappedImplementationIndex(UFunction* Function)
     {
         return -1;
     }
+    // 8.40 (CL-6005771): execUnPossess 0x2FB1210 tail-jumps to UnPossess 0x2A9D040 (now virtual, slot 0xD3; it calls
+    // OnUnPossess, call [rax+6A8h]) and has no padding after it, so the scanned end runs into the next bytes' "E9": a
+    // tail jump out of the exec is its last instruction.
     uintptr_t Wrapper = 0;
     for (uintptr_t Site = Exec; Site + 5 <= ExecEnd; ++Site)
     {
-        if ((Byte(Site) == 0xE8 || Byte(Site) == 0xE9) && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+        const uintptr_t Target = Byte(Site) == 0xE8 || Byte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        if (IsInText(Target))
         {
-            Wrapper = Finder::RelativeTarget(Site, 1, 5);
+            Wrapper = Target;
+            if (Byte(Site) == 0xE9 && (Target < Exec || Target >= ExecEnd))
+            {
+                break;
+            }
         }
     }
     const uintptr_t WrapperEnd = Wrapper ? Finder::FunctionEnd(Wrapper) : 0;

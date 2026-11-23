@@ -128,8 +128,8 @@ bool AFortMinigame::DetermineSpawnLocation(AController* PlayerController, FVecto
     }
     const FVector* Location = Params.Get<FVector>(L"OutLocation");
     const FRotator* Rotation = Params.Get<FRotator>(L"OutRotation");
-    const bool* Skydive = Params.Get<bool>(L"bShouldSkydive");
     // 7.40 (CL-5046157) answers whether the player respawns on the ground (bOutRespawningOnGround) instead.
+    const bool* Skydive = Params.Has(L"bShouldSkydive") ? Params.Get<bool>(L"bShouldSkydive") : nullptr;
     const bool* OnGround = Skydive ? nullptr : Params.Get<bool>(L"bOutRespawningOnGround");
     const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
     if (!Location || !Rotation || !ReturnValue || !*ReturnValue)

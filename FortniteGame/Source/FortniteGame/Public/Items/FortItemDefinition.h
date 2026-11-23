@@ -121,7 +121,10 @@ public:
     FString GetPersistentName() const;
     uint8_t GetRarity() const;
     // Whether the build reflects what GetRarity reads.
-    static bool HasRarity() { return Member_bCalculateRarityFromQualityAndTier.IsAvailable() && Member_Quality.IsAvailable() && Member_Tier.IsAvailable() && Member_Rarity.IsAvailable(); }
+    static bool HasRarity()
+    {
+        return Member_Rarity.IsAvailable() && (!Member_bCalculateRarityFromQualityAndTier.IsAvailable() || (Member_Quality.IsAvailable() && Member_Tier.IsAvailable()));
+    }
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition

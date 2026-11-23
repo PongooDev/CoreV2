@@ -38,7 +38,8 @@ FString UFortItemDefinition::GetPersistentName() const
 
 uint8_t UFortItemDefinition::GetRarity() const
 {
-    if (!bCalculateRarityFromQualityAndTier)
+    // 8.40 (CL-6005771) dropped Quality and bCalculateRarityFromQualityAndTier: Rarity is the item's rarity.
+    if (!Member_bCalculateRarityFromQualityAndTier.IsAvailable() || !Member_Quality.IsAvailable() || !bCalculateRarityFromQualityAndTier)
     {
         return Rarity;
     }

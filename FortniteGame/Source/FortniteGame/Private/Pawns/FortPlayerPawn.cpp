@@ -212,7 +212,17 @@ bool AFortPlayerPawn::EquipLastWeapon()
 // 7.10 renamed LastEquippedWeaponGUID to LastEquippedWeaponOrGadgetGUID (EquipLastWeapon still reads it).
 ptrdiff_t AFortPlayerPawn::LastEquippedWeaponGUIDOffset()
 {
-    return Member_LastEquippedWeaponGUID.IsAvailable() ? Member_LastEquippedWeaponGUID.GetOffsetChecked() : Member_LastEquippedWeaponOrGadgetGUID.GetOffsetChecked();
+    if (Member_LastEquippedWeaponGUID.IsAvailable())
+    {
+        return Member_LastEquippedWeaponGUID.GetOffsetChecked();
+    }
+    // 8.40 (CL-6005771) no longer reflects it. Its EquipLastWeapon (0x1618A70) still reads it at +0x1510, 0x20 bytes
+    // before VehicleInputComponent (+0x1530), as 7.10 to 8.30 lay it out (8.30: +0x14F8 and +0x1518).
+    if (!Member_LastEquippedWeaponOrGadgetGUID.IsAvailable() && Member_VehicleInputComponent.IsAvailable())
+    {
+        return Member_VehicleInputComponent.GetOffsetChecked() - 0x20;
+    }
+    return Member_LastEquippedWeaponOrGadgetGUID.GetOffsetChecked();
 }
 
 void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)

@@ -10126,6 +10126,108 @@ bool Finder::ResolvePreGarbageCollectLive()
     return true;
 }
 
+bool Finder::ResolveEngineLoopInitComplete()
+{
+    // FEngineLoop::Init ends with
+    //   SCOPED_BOOT_TIMING("FCoreDelegates::OnFEngineLoopInitComplete.Broadcast()");
+    //   FCoreDelegates::OnFEngineLoopInitComplete.Broadcast();
+    // lea rdx, Name; lea rcx, [rbp+X]; call FScopedBootTiming; lea rcx, Delegate; call TMulticastDelegate<void>::Broadcast
+    // (8.00 CL-5203069 ref 0x2B9FFB; 8.20 CL-5625478 ref 0x2C45D4; 8.30 CL-5793395 0x30ECCB: 0x54B2FD8, 0x3132C0; 8.40
+    // CL-6005771 0x311616: 0x54F6058, 0x315C10). The packer's last code check (8.40 0x1C0EE40, 8.30 0x1BEE2B0) is
+    // called just before it.
+    static bool bTried = false;
+    if (Natives::FCoreDelegates_OnFEngineLoopInitComplete || bTried)
+    {
+        return Natives::FCoreDelegates_OnFEngineLoopInitComplete != nullptr;
+    }
+    bTried = true;
+
+    static constexpr char Name[] = "FCoreDelegates::OnFEngineLoopInitComplete.Broadcast()";
+    std::vector<uintptr_t> References = Finder::StringRefs(Name);
+    if (References.empty())
+    {
+        // A packed build's references taken at the stub's handover can miss FEngineLoop::Init's; the engine is up here.
+        Finder::RescanStringRefs();
+        References = Finder::StringRefs(Name);
+    }
+
+    // Broadcast's first instruction takes the invocation list's lock: inc dword ptr [rcx+14h] on the heap list (UE 4.21+),
+    // [rcx+64h] on 4.1's inline one.
+    const auto LockOffset = [](uintptr_t Broadcast) -> int32_t
+    {
+        for (uintptr_t At = Broadcast; At < Broadcast + 0x10 && IsInText(At + 3); ++At)
+        {
+            if (Byte(At) == 0xFF && Byte(At + 1) == 0x41 && (Byte(At + 2) == 0x14 || Byte(At + 2) == 0x64))
+            {
+                return Byte(At + 2);
+            }
+        }
+        return -1;
+    };
+    uintptr_t Delegate = 0;
+    uintptr_t Broadcast = 0;
+    int32_t Candidates = 0;
+    for (const uintptr_t Reference : References)
+    {
+        for (uintptr_t At = Reference; At < Reference + 0x30 && IsInText(At + 17); ++At)
+        {
+            if (Byte(At) != 0xE8 || Byte(At + 5) != 0x48 || Byte(At + 6) != 0x8D || Byte(At + 7) != 0x0D || Byte(At + 12) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t Static = Finder::RelativeTarget(At + 5, 3, 7);
+            const uintptr_t Target = Finder::RelativeTarget(At + 12, 1, 5);
+            if (!IsInText(Static) && IsInText(Target) && LockOffset(Target) >= 0 && Static != Delegate)
+            {
+                Delegate = Static;
+                Broadcast = Target;
+                ++Candidates;
+            }
+            break;
+        }
+    }
+    const int32_t Lock = Broadcast ? LockOffset(Broadcast) : -1;
+    const bool bReadable = Delegate && Finder::IsReadable(reinterpret_cast<const void*>(Delegate), Lock + 4);
+    if (Candidates != 1 || !bReadable || *reinterpret_cast<const int32_t*>(Delegate + Lock) != 0)
+    {
+        Log::Error(L"Finder: FCoreDelegates::OnFEngineLoopInitComplete not found ({} references, {} candidates)", References.size(), Candidates);
+        return false;
+    }
+
+    // The redirect reads no console delegates, so it takes the instance layout from this broadcast: call [rax+disp8], the
+    // instance's ExecuteIfSafe, four slots after GetHandle in 4.20's order and its 5.30 and 8.20 growths (8.40: call
+    // [rax+50h], slot 10, GetHandle 6). Only the heap list's layout: 4.1's inline one is the console finder's to read.
+    if (Lock == 0x14)
+    {
+        int32_t GetHandleIndex = -1;
+        for (uintptr_t At = Broadcast; At < Broadcast + 0x80 && IsInText(At + 3) && GetHandleIndex < 0; ++At)
+        {
+            if (Byte(At) == 0xFF && Byte(At + 1) == 0x50 && Byte(At + 2) % 8 == 0)
+            {
+                GetHandleIndex = Byte(At + 2) / 8 - 4;
+            }
+        }
+        if (Natives::IDelegateInstance_GetHandleIndexResolved)
+        {
+            if (GetHandleIndex != Natives::IDelegateInstance_GetHandleIndex)
+            {
+                Log::Warning(L"Finder: FCoreDelegates::OnFEngineLoopInitComplete's broadcast calls ExecuteIfSafe for GetHandle slot {}, the console's delegates say {}", GetHandleIndex, Natives::IDelegateInstance_GetHandleIndex);
+            }
+        }
+        else if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 6)
+        {
+            Natives::NumDelegateInlineBytes = 0;
+            Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
+            Natives::IDelegateInstance_GetHandleIndexResolved = true;
+            Log::Info(L"Finder: IDelegateInstance::GetHandle is slot {} (from FCoreDelegates::OnFEngineLoopInitComplete's broadcast; delegates use the heap allocator)", GetHandleIndex);
+        }
+    }
+
+    Natives::FCoreDelegates_OnFEngineLoopInitComplete = reinterpret_cast<void*>(Delegate);
+    Log::Info(L"Finder: FCoreDelegates::OnFEngineLoopInitComplete is at 0x{:X} (FEngineLoop::Init's broadcast 0x{:X})", Delegate - Finder::ImageBase(), Broadcast - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
 {
     const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");

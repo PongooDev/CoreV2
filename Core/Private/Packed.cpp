@@ -9,8 +9,10 @@
 #include "UObject/UObjectArray.h"
 #include "UObject/UObjectBase.h"
 #include "Engine/World.h"
+#include "Misc/CoreDelegates.h"
 
 #include <atomic>
+#include <format>
 
 namespace
 {
@@ -43,6 +45,14 @@ namespace
     // to 3.3 (CL-3942182) it only checks once as the load ends, so those patch at UEngine::Init / the engine coming up
     // as they always have. The extra ticking wait is only for this changelist on, where frame-0 patches crash.
     constexpr uint32_t FirstRecheckChangelist = 4000805;
+
+    // Set from FCoreDelegates::OnFEngineLoopInitComplete's broadcast, on the game thread (WaitForCodeCheck).
+    HANDLE GEngineLoopInitComplete = nullptr;
+
+    void OnEngineLoopInitComplete()
+    {
+        SetEvent(GEngineLoopInitComplete);
+    }
 
     // The build's changelist from its version string in .rdata ("++Fortnite+Release-3.5-CL-4000805"); 0 when missing.
 
@@ -392,6 +402,12 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
     // seconds. The server doesn't wait here: it holds the engine at UEngine::Start instead (RunBeforeEngineStart).
     if (bUntilTicking && Natives::GWorld && BuildChangelist() >= FirstRecheckChangelist)
     {
+        // That check is the packer's call at the end of FEngineLoop::Init, after GEngine->Start has loaded the menu map
+        // and just before Init broadcasts FCoreDelegates::OnFEngineLoopInitComplete (8.40 CL-6005771 0x311611, 8.30
+        // CL-5793395 0x30ECC1). The settle margin alone counts from the world appearing, so a menu load longer than it
+        // patched before the check (#595: 8.40's Frontend took 4.3s past the world and the client crashed in the check).
+        // Where the delegate is found, the hooks also wait for its broadcast.
+        FSimpleMulticastDelegate* const InitComplete = FCoreDelegates::GetOnFEngineLoopInitComplete();
         while (!*Natives::GWorld)
         {
             if (!bReportedSlow && GetTickCount() > Deadline)
@@ -401,9 +417,49 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
             }
             Sleep(PollMs);
         }
-        const DWORD Settle = TickSettleMs;
-        Log::Info(L"Packed exe: a world is up; letting it tick {}ms past the menu-load check before patching", Settle);
-        Sleep(Settle);
+        const DWORD WorldUp = GetTickCount();
+
+        // Bound once the world is up: Start is loading the menu map, past the modules that bind this delegate as they
+        // start. The client and the redirect each bind one, so the two adds are serialised.
+        bool bBound = false;
+        if (InitComplete)
+        {
+            GEngineLoopInitComplete = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            const HANDLE AddLock = CreateMutexW(nullptr, FALSE, std::format(L"Local\\CoreV2.FCoreDelegates.{}", GetCurrentProcessId()).c_str());
+            if (GEngineLoopInitComplete && AddLock)
+            {
+                WaitForSingleObject(AddLock, INFINITE);
+                bBound = InitComplete->AddStatic(&OnEngineLoopInitComplete).IsValid();
+                ReleaseMutex(AddLock);
+            }
+            if (AddLock)
+            {
+                CloseHandle(AddLock);
+            }
+        }
+
+        if (bBound)
+        {
+            Log::Info(L"Packed exe: a world is up; holding the hooks until FEngineLoop::Init broadcasts FCoreDelegates::OnFEngineLoopInitComplete, after the packer's last check");
+            if (WaitForSingleObject(GEngineLoopInitComplete, CheckTimeoutMs) == WAIT_TIMEOUT)
+            {
+                Log::Warning(L"Packed exe: FEngineLoop::Init hasn't completed after {}s; the load is slow, still holding the hooks", CheckTimeoutMs / 1000);
+                WaitForSingleObject(GEngineLoopInitComplete, INFINITE);
+            }
+            // Never sooner than the margin the builds were measured with (3.5.1: 1s past the world still died).
+            const DWORD Elapsed = GetTickCount() - WorldUp;
+            Log::Info(L"Packed exe: FEngineLoop::Init has completed {}ms after the world came up", Elapsed);
+            if (Elapsed < TickSettleMs)
+            {
+                Sleep(TickSettleMs - Elapsed);
+            }
+        }
+        else
+        {
+            const DWORD Settle = TickSettleMs;
+            Log::Info(L"Packed exe: a world is up; letting it tick {}ms past the menu-load check before patching", Settle);
+            Sleep(Settle);
+        }
     }
 
     Log::Info(L"Packed exe: the engine is up, so the packer has finished checking; enabling hooks now");

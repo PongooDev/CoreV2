@@ -179,6 +179,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CommandLine.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\ConfigCacheIni.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreDelegates.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMisc.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DateTime.h" />

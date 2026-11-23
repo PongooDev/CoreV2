@@ -931,6 +931,10 @@ namespace Natives
     // 0x18EB920; 7.20 CL-4727874 0x55FCCF0 from 0x1AE9CD0 at 0x1A73F5A; 7.30 CL-4834550 0x565A430; 7.40 CL-5046157
     // 0x56D0320): Finder::ResolvePreGarbageCollectLive.
     inline void* FCoreUObjectDelegates_PreGarbageCollect = nullptr;
+    // FCoreDelegates::OnFEngineLoopInitComplete, the static FSimpleMulticastDelegate FEngineLoop::Init broadcasts last
+    // (8.30 CL-5793395 0x54B2FD8, broadcast at 0x30ECE5; 8.40 CL-6005771 0x54F6058 at 0x311630):
+    // Finder::ResolveEngineLoopInitComplete.
+    inline void* FCoreDelegates_OnFEngineLoopInitComplete = nullptr;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

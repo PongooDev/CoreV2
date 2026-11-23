@@ -242,6 +242,11 @@ namespace Finder
     // the getter CollectGarbageInternal calls and broadcasts right after its "is flushing async loading" log. Checked on
     // UE 4.21 and 4.22 (6.21 to 7.40); false (logged once) where that shape isn't there.
     bool ResolvePreGarbageCollectLive();
+    // FCoreDelegates::OnFEngineLoopInitComplete (Natives::FCoreDelegates_OnFEngineLoopInitComplete), from FEngineLoop::
+    // Init's broadcast of it. Where this DLL hasn't read the delegate instance layout (the redirect), it is read from that
+    // broadcast's ExecuteIfSafe call, on the heap invocation list builds (UE 4.21+) only. False (logged once) where the
+    // broadcast isn't found.
+    bool ResolveEngineLoopInitComplete();
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

@@ -12,6 +12,7 @@
 #include "UObject/UnrealNames.h"
 #include "UObject/Object.h"
 #include "UObject/ScriptDelegates.h"
+#include "UObject/SparseDelegate.h"
 
 class APawn;
 class ULevel;
@@ -78,13 +79,11 @@ public:
     DefineUProperty(USceneComponent*, RootComponent)
     // What AActor::EndPlay broadcasts as the actor leaves play (FActorEndPlaySignature: Actor, EndPlayReason): destroyed
     // (AActor::Destroyed routes EndPlay before its OnDestroyed, while the actor is still valid), or its level or world
-    // going away.
-    DefineUProperty(FMulticastScriptDelegate, OnEndPlay)
-    static bool HasOnEndPlay() { return StaticClass() && Member_OnEndPlay.IsAvailable(); }
+    // going away. Sparse from 8.20 (SparseDelegate.h), as is OnDestroyed.
+    DefineDynamicMulticastDelegateUProperty(OnEndPlay)
     // What AActor::Destroyed broadcasts as the actor goes (one parameter, DestroyedActor), after the class's own
     // Destroyed (a player state's takes it out of the game state's PlayerArray first).
-    DefineUProperty(FMulticastScriptDelegate, OnDestroyed)
-    static bool HasOnDestroyed() { return StaticClass() && Member_OnDestroyed.IsAvailable(); }
+    DefineDynamicMulticastDelegateUProperty(OnDestroyed)
     DefineUFunction(GetTransform)
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)

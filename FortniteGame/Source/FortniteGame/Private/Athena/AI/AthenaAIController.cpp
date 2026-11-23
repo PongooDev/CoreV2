@@ -46,8 +46,7 @@ void AAthenaAIController::BindDestroyed()
 {
     if (HandleDestroyedFunction)
     {
-        FMulticastScriptDelegate& Delegate = OnDestroyed;
-        Delegate.AddUniqueDynamic(this, HandleDestroyedFunction->GetFName());
+        OnDestroyed.AddUniqueDynamic(this, HandleDestroyedFunction->GetFName());
     }
 }
 

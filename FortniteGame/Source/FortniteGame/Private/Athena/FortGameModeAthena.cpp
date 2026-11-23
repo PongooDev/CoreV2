@@ -2804,8 +2804,7 @@ namespace
                 // And when it is destroyed (HandlePawnDestroyed's log line).
                 if (PawnDestroyedHandler)
                 {
-                    FMulticastScriptDelegate& OnDestroyed = Pawn->OnDestroyed;
-                    OnDestroyed.AddUniqueDynamic(Athena, PawnDestroyedHandler->GetFName());
+                    Pawn->OnDestroyed.AddUniqueDynamic(Athena, PawnDestroyedHandler->GetFName());
                 }
             }
         }
@@ -3418,14 +3417,12 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
         OnDied.AddUniqueDynamic(this, PawnDiedHandler->GetFName());
         if (PawnDestroyedHandler)
         {
-            FMulticastScriptDelegate& PawnOnDestroyed = FortPawn->OnDestroyed;
-            PawnOnDestroyed.AddUniqueDynamic(this, PawnDestroyedHandler->GetFName());
+            FortPawn->OnDestroyed.AddUniqueDynamic(this, PawnDestroyedHandler->GetFName());
         }
     }
     if (AActor* PlayerState = PlayerStateDestroyedHandler ? reinterpret_cast<AActor*>(static_cast<APlayerState*>(Player->PlayerState)) : nullptr)
     {
-        FMulticastScriptDelegate& OnDestroyed = PlayerState->OnDestroyed;
-        OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
+        PlayerState->OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
     }
     CheckTeamSwitches(this);
     // 7.40: the player's squad and team for the clients' squad maps (GameMemberInfoArray), once the game has placed them
@@ -3539,7 +3536,7 @@ void AFortGameModeAthena::AddDelegateHandlers()
     CurrentPlaylistLoadedHandler = Add(L"HandleCurrentPlaylistLoaded", &execHandleCurrentPlaylistLoaded, AFortGameStateAthena::StaticClass(), L"OnCurrentPlaylistLoaded");
     PawnDiedHandler = Add(L"HandlePawnDied", &execHandlePawnDied, AFortPawn::StaticClass(), L"OnDied");
     // Only with the pawns' OnDied: without it the results are looked at with the phase, the leaving player's among them.
-    PlayerStateDestroyedHandler = PawnDiedHandler ? Add(L"HandlePlayerStateDestroyed", &execHandlePlayerStateDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
+    PlayerStateDestroyedHandler = PawnDiedHandler && AActor::HasOnDestroyed() ? Add(L"HandlePlayerStateDestroyed", &execHandlePlayerStateDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
     // The same delegate on the pawns themselves, bound where their OnDied is.
     PawnDestroyedHandler = PawnDiedHandler && AActor::HasOnDestroyed() ? Add(L"HandlePawnDestroyed", &execHandlePawnDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
     Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {})", GamePhaseChangedHandler ? L"added" : L"none",

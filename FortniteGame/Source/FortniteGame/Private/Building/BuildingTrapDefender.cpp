@@ -215,8 +215,7 @@ void ABuildingTrapDefender::TrackDefender(ABuildingTrapDefender* Trap, AFortAIPa
     {
         FMulticastScriptDelegate& PawnOrItemSet = Trap->DefenderPawnOrItemSet;
         PawnOrItemSet.AddUniqueDynamic(Trap, HandleDefenderPawnOrItemSetFunction->GetFName());
-        FMulticastScriptDelegate& EndPlay = Defender->OnEndPlay;
-        EndPlay.AddUniqueDynamic(Trap, HandleDefenderEndPlayFunction->GetFName());
+        Defender->OnEndPlay.AddUniqueDynamic(Trap, HandleDefenderEndPlayFunction->GetFName());
         return;
     }
     QueueReturnCheck(Trap ? Trap->GetWorld() : nullptr);

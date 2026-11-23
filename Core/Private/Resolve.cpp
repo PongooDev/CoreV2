@@ -19039,6 +19039,111 @@ bool Finder::ResolveAutoPickupLive()
     return true;
 }
 
+bool Finder::ResolveSparseDelegateStorageLive(const wchar_t* DelegateName, int32_t DelegateOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::FSparseDelegateStorage_Add && Natives::FSparseDelegateStorage_Remove;
+    }
+    bSearched = true;
+
+    // A sparse delegate's name is a function-local static FName (TSparseDynamicDelegate's GetDelegateName): "mov r8d, 1;
+    // lea rdx, "OnDestroyed"; lea rcx, Name; call FName::FName" (8.20 0x1489E18). The game's AddDynamic loads it into the
+    // second argument and keeps the answer in the member's bIsBound: "mov rdx, [Name]; lea r8, Delegate; mov rcx, rdi;
+    // call FSparseDelegateStorage::Add; or [rdi+1AEh], al" (0x1489D83). Its RemoveDynamic stores it instead, with the
+    // function's name as the fourth argument: "mov rdx, [Name]; mov r9, rbx; mov r8, rsi; mov rcx, rdi; call Remove;
+    // mov [rdi+1AEh], al" (0x76966D). RemoveAll (0x1CD61B0) stores it too, with no fourth argument, so it isn't taken.
+    std::string AsciiName;
+    for (const wchar_t* Character = DelegateName; *Character; ++Character)
+    {
+        AsciiName.push_back(static_cast<char>(*Character));
+    }
+    // 8.20 keeps these literals in .data, which the string reference table (.rdata only) doesn't cover.
+    std::vector<uintptr_t> NameRefs;
+    for (const char* SectionName : { ".rdata", ".data" })
+    {
+        Memcury::PE::Section Section = Memcury::PE::Section::GetSection(SectionName);
+        const char* const Begin = reinterpret_cast<const char*>(Section.GetSectionStart().Get());
+        const char* const SectionEnd = reinterpret_cast<const char*>(Section.GetSectionEnd().Get());
+        for (const char* Found = std::search(Begin, SectionEnd, AsciiName.c_str(), AsciiName.c_str() + AsciiName.size() + 1); Found != SectionEnd;
+             Found = std::search(Found + 1, SectionEnd, AsciiName.c_str(), AsciiName.c_str() + AsciiName.size() + 1))
+        {
+            if (Found > Begin && Found[-1] == 0)
+            {
+                const std::vector<uintptr_t> Refs = Finder::AddressRefs(reinterpret_cast<uintptr_t>(Found));
+                NameRefs.insert(NameRefs.end(), Refs.begin(), Refs.end());
+            }
+        }
+    }
+    std::vector<uintptr_t> Names;
+    for (const uintptr_t Ref : NameRefs)
+    {
+        const bool bNameArgument = Byte(Ref) == 0x48 && Byte(Ref + 1) == 0x8D && Byte(Ref + 2) == 0x15;
+        const bool bConstruct = bNameArgument && Byte(Ref + 7) == 0x48 && Byte(Ref + 8) == 0x8D && Byte(Ref + 9) == 0x0D && Byte(Ref + 14) == 0xE8;
+        if (bConstruct && !IsInText(Finder::RelativeTarget(Ref + 7, 3, 7)))
+        {
+            Names.push_back(Finder::RelativeTarget(Ref + 7, 3, 7));
+        }
+    }
+    std::map<uintptr_t, int32_t> Adds;
+    std::map<uintptr_t, int32_t> Removes;
+    const uintptr_t End = Finder::TextEnd();
+    for (uintptr_t Site = Names.empty() ? End : Finder::TextBegin(); Site + 7 <= End; ++Site)
+    {
+        if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8B || Byte(Site + 2) != 0x15
+            || std::find(Names.begin(), Names.end(), Finder::RelativeTarget(Site, 3, 7)) == Names.end())
+        {
+            continue;
+        }
+        const uintptr_t Call = FindInstruction(Site + 7, Site + 0x18, { 0xE8 });
+        if (!Call || Call + 11 > End)
+        {
+            continue;
+        }
+        // or [reg+disp32], al / mov [reg+disp32], al, with the member's offset.
+        const uint8_t Op = Byte(Call + 5);
+        const uint8_t ModRm = Byte(Call + 6);
+        if ((Op != 0x08 && Op != 0x88) || (ModRm & 0xF8) != 0x80 || (ModRm & 0x07) == 0x04 || *reinterpret_cast<const int32_t*>(Call + 7) != DelegateOffset)
+        {
+            continue;
+        }
+        bool bFunctionName = false;
+        for (uintptr_t Move = Site + 7; Move + 3 <= Call && !bFunctionName; ++Move)
+        {
+            // mov r9, reg
+            bFunctionName = (Byte(Move) & 0xFE) == 0x4C && Byte(Move + 1) == 0x8B && (Byte(Move + 2) & 0xF8) == 0xC8;
+        }
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        if (Op == 0x08)
+        {
+            ++Adds[Target];
+        }
+        else if (bFunctionName)
+        {
+            ++Removes[Target];
+        }
+    }
+    const auto MostUsed = [](const std::map<uintptr_t, int32_t>& Targets)
+    {
+        const auto Best = std::max_element(Targets.begin(), Targets.end(), [](const auto& A, const auto& B) { return A.second < B.second; });
+        return Best != Targets.end() ? *Best : std::pair<const uintptr_t, int32_t>(0, 0);
+    };
+    const auto [Add, AddSites] = MostUsed(Adds);
+    const auto [Remove, RemoveSites] = MostUsed(Removes);
+    if (!IsInText(Add) || !IsInText(Remove))
+    {
+        Log::Error(L"Finder: FSparseDelegateStorage::Add/Remove not found from {}'s {} static name(s) ({} and {} binding sites), so Core can't bind the sparse delegate {}",
+            DelegateName, Names.size(), Adds.size(), Removes.size(), DelegateName);
+        return false;
+    }
+    Natives::FSparseDelegateStorage_Add = reinterpret_cast<decltype(Natives::FSparseDelegateStorage_Add)>(Add);
+    Natives::FSparseDelegateStorage_Remove = reinterpret_cast<decltype(Natives::FSparseDelegateStorage_Remove)>(Remove);
+    Log::Info(L"Finder: {} is a sparse delegate (bIsBound +0x{:X}): FSparseDelegateStorage::Add 0x{:X} ({} AddDynamic sites), Remove 0x{:X} ({} RemoveDynamic sites)",
+        DelegateName, DelegateOffset, Add - Finder::ImageBase(), AddSites, Remove - Finder::ImageBase(), RemoveSites);
+    return true;
+}
+
 bool Finder::ResolveActorDestroyLive()
 {
     static bool bSearched = false;

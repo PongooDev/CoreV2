@@ -158,6 +158,11 @@ namespace Natives
     inline FName* (*FName_Construct)(FName* This, const wchar_t* Name, int32_t FindType) = nullptr;
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
+    // From 8.20 (UE 4.23's sparse delegates; Finder::ResolveSparseDelegateStorageLive): FSparseDelegateStorage::Add (8.20
+    // 0x1CC06D0; Delegate is the FScriptDelegate passed by value, the caller's copy) and Remove (0x1CD5DF0). Each
+    // returns whether the delegate is still bound.
+    inline bool (*FSparseDelegateStorage_Add)(const UObject* DelegateOwner, FName DelegateName, const void* Delegate) = nullptr;
+    inline bool (*FSparseDelegateStorage_Remove)(const UObject* DelegateOwner, FName DelegateName, const UObject* UserObject, FName FunctionName) = nullptr;
     // IModularFeatures::Get (Core's Features/ModularFeatures.cpp: the static FModularFeatures), from the game's own lookups
     // of its "VoiceChatToken" feature (Finder::ResolveModularFeaturesLive). 7.00 0x16F3FC0, 6.31 0x1703DE0, 7.10 0x174B6F0.
     inline IModularFeatures& (*IModularFeatures_Get)() = nullptr;

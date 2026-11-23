@@ -206,6 +206,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptDelegates.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptInterface.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\SparseDelegate.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Stack.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBase.h" />

@@ -1169,8 +1169,7 @@ namespace
         {
             return;
         }
-        FMulticastScriptDelegate& OnDestroyed = Actor->OnDestroyed;
-        OnDestroyed.AddUniqueDynamic(CheatManager, Destroyed->GetFName());
+        Actor->OnDestroyed.AddUniqueDynamic(CheatManager, Destroyed->GetFName());
         if (AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Actor)))
         {
             FMulticastScriptDelegate& OnDied = Pawn->OnDied;
@@ -1193,8 +1192,7 @@ namespace
             {
                 continue;
             }
-            FMulticastScriptDelegate& OnDestroyed = Actor->OnDestroyed;
-            OnDestroyed.RemoveDynamic(CheatManager, Destroyed->GetFName());
+            Actor->OnDestroyed.RemoveDynamic(CheatManager, Destroyed->GetFName());
             if (AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Actor)))
             {
                 FMulticastScriptDelegate& OnDied = Pawn->OnDied;

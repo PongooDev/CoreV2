@@ -446,6 +446,10 @@ namespace Finder
     // jumps there): cmp byte ptr [rcx+bAutoRestart], 0; setz al; mov [rcx+bAutoRestart], al (7.40 0x11EEAF0: +0x651, 8.00
     // 0x1238A80: +0x669). -1 where it isn't that shape.
     ptrdiff_t MinigameAutoRestartOffset(uintptr_t ToggleAutoRestartExec);
+    // FSparseDelegateStorage::Add and Remove (Natives::FSparseDelegateStorage_Add, _Remove), from the game's own
+    // AddDynamic and RemoveDynamic of the sparse delegate DelegateName (8.20's AActor::OnDestroyed), which update its
+    // bIsBound byte at DelegateOffset with their answer.
+    bool ResolveSparseDelegateStorageLive(const wchar_t* DelegateName, int32_t DelegateOffset);
     // AActor::Destroy (Natives::AActor_Destroy), from AActor's own K2_DestroyActor (the slot execK2_DestroyActor calls, in
     // AActor's vtable), which jumps to it: for actors whose class overrides K2_DestroyActor with nothing (AController).
     bool ResolveActorDestroyLive();

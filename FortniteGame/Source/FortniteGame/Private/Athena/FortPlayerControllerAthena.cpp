@@ -280,10 +280,31 @@ void AFortPlayerControllerAthena::GiveLoadoutPickaxe()
     // shipping exe gives it (the controller's loadout pickaxe, +0x2900, is touched only by constructors). It goes in the
     // harvesting tool's slot, primary 0, before Possess activates the focused slot.
     UFortWorldItemDefinition* Pickaxe = Role == ROLE_Authority && WorldInventory ? GetLoadoutPickaxe() : nullptr;
-    if (Pickaxe && GetItemQuantity(Pickaxe) <= 0)
+    if (!Pickaxe || GetItemQuantity(Pickaxe) > 0)
     {
-        UFortKismetLibrary::K2_GiveItemToPlayer(this, Pickaxe, 1, false);
-        UE_LOG(LogFort, Log, TEXT("GiveLoadoutPickaxe: %s gets %s"), *GetName(), *Pickaxe->GetName());
+        return;
+    }
+    UFortKismetLibrary::K2_GiveItemToPlayer(this, Pickaxe, 1, false);
+    UE_LOG(LogFort, Log, TEXT("GiveLoadoutPickaxe: %s gets %s"), *GetName(), *Pickaxe->GetName());
+
+    // 7.40 on (no server quickbars, so Possess activates no slot here): the client slots its world inventory in item
+    // order (8.20 CL-5625478 0x159CFF0 -> TryAddToQuickBar 0x1582590 -> AFortQuickBars::AddItemInternal 0x12EF570),
+    // and an item added to its bar's focused slot is equipped. The StartingItems' wall came first and took the building
+    // bar's focus, so the pickaxe landed unfocused and the player spawned holding the wall (#560). The server has the
+    // client equip it, as it does an item that bForceFocusWhenAdded; the client keeps the guid until its quickbar has it.
+    if (HasQuickBars() || !FindStaticFunction_ClientEquipItem())
+    {
+        return;
+    }
+    TArray<UFortWorldItem*>& Instances = WorldInventory->Inventory.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry& Entry = Instances[Index]->ItemEntry;
+        if (static_cast<UFortItemDefinition*>(Entry.ItemDefinition) == Pickaxe)
+        {
+            ClientEquipItem(Entry.ItemGuid, true);
+            return;
+        }
     }
 #endif
 }

@@ -27,6 +27,14 @@
 #include "Templates/Sorting.h"
 #include "UObject/Class.h"
 
+#include <algorithm>
+#include <format>
+#include <iterator>
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 static TAutoConsoleVariable<int32_t> CVarSetNetDormancyEnabled(
     TEXT("net.DormancyEnable"),
     1,
@@ -106,6 +114,7 @@ void UNetDriver::TickFlush(float DeltaSeconds)
             UE_LOG(LogNetTraffic, Verbose, TEXT("%s replicated %d actors"), *GetDescription(), Updated);
         }
         LastUpdateCount = Updated;
+        LogConnectionReplication();
 #endif
     }
 
@@ -126,6 +135,117 @@ void UNetDriver::RaiseClientNetSpeeds()
             Connection->CurrentNetSpeed = Rate;
         }
     }
+}
+
+namespace
+{
+    struct FConnectionReplicationStats
+    {
+        // An actor by its address and its weak pointer's hash (object index ^ serial number), so a new actor at a
+        // destroyed one's address isn't taken for it reopening.
+        using FActorId = std::pair<AActor*, uint32_t>;
+        std::vector<FActorId> OpenActors;
+        std::map<FActorId, float> ClosedAt;
+        std::unordered_map<UClass*, int32_t> ReopenedByClass;
+        float WindowStart = -1.0f;
+        int32_t Frames = 0;
+        int32_t SaturatedFrames = 0;
+        int32_t Opened = 0;
+        int32_t Closed = 0;
+        int32_t Reopened = 0;
+    };
+    std::unordered_map<UNetConnection*, FConnectionReplicationStats> ConnectionReplicationStats;
+
+    constexpr float ReplicationStatsWindow = 30.0f;
+    constexpr float ReopenWindow = 2.0f;
+}
+
+void UNetDriver::LogConnectionReplication()
+{
+#if WITH_SERVER_CODE
+    if (Natives::UNetConnection_ActorChannels < 0 || Natives::UNetConnection_IsNetReadyIndex < 0)
+    {
+        return;
+    }
+    const float Now = Time;
+    std::vector<UNetConnection*> Live;
+    for (UNetConnection* Connection : ClientConnections)
+    {
+        APlayerController* Controller = Connection ? static_cast<APlayerController*>(Connection->PlayerController) : nullptr;
+        if (!Controller || Connection->State != USOCK_Open)
+        {
+            continue;
+        }
+        Live.push_back(Connection);
+        FConnectionReplicationStats& Stats = ConnectionReplicationStats[Connection];
+        if (Stats.WindowStart < 0.0f)
+        {
+            Stats.WindowStart = Now;
+        }
+
+        std::vector<FConnectionReplicationStats::FActorId> Actors;
+        Actors.reserve(Stats.OpenActors.size() + 64);
+        for (auto& Pair : Connection->ActorChannels)
+        {
+            UActorChannel* Channel = Pair.Value;
+            if (Channel && Channel->Actor)
+            {
+                Actors.emplace_back(Channel->Actor, GetTypeHash(Pair.Key));
+            }
+        }
+        std::sort(Actors.begin(), Actors.end());
+
+        std::vector<FConnectionReplicationStats::FActorId> Changed;
+        std::set_difference(Stats.OpenActors.begin(), Stats.OpenActors.end(), Actors.begin(), Actors.end(), std::back_inserter(Changed));
+        for (const FConnectionReplicationStats::FActorId& Gone : Changed)
+        {
+            Stats.ClosedAt[Gone] = Now;
+        }
+        Stats.Closed += static_cast<int32_t>(Changed.size());
+        Changed.clear();
+        std::set_difference(Actors.begin(), Actors.end(), Stats.OpenActors.begin(), Stats.OpenActors.end(), std::back_inserter(Changed));
+        Stats.Opened += static_cast<int32_t>(Changed.size());
+        for (const FConnectionReplicationStats::FActorId& New : Changed)
+        {
+            auto Found = Stats.ClosedAt.find(New);
+            if (Found != Stats.ClosedAt.end() && Now - Found->second <= ReopenWindow)
+            {
+                ++Stats.Reopened;
+                ++Stats.ReopenedByClass[New.first->GetClass()];
+            }
+        }
+        Stats.OpenActors = std::move(Actors);
+        ++Stats.Frames;
+        Stats.SaturatedFrames += Connection->IsNetReady(false) ? 0 : 1;
+
+        if (Now - Stats.WindowStart < ReplicationStatsWindow)
+        {
+            continue;
+        }
+        std::vector<std::pair<UClass*, int32_t>> Classes(Stats.ReopenedByClass.begin(), Stats.ReopenedByClass.end());
+        std::sort(Classes.begin(), Classes.end(), [](const auto& A, const auto& B) { return A.second > B.second; });
+        std::wstring Top;
+        for (size_t i = 0; i < Classes.size() && i < 6; ++i)
+        {
+            Top += std::format(L"{}{} {}", i ? L", " : L"", Classes[i].first->GetName().ToStdString(), Classes[i].second);
+        }
+        AActor* ViewTarget = Connection->ViewTarget;
+        Log::Info(L"Net (#567): {} over {:.0f}s: {} frames, {} saturated; {} actor channels open, {} opened, {} closed, {} reopened within {:.0f}s{}{}; view target {}, net speed {}",
+            Controller->GetName().ToStdString(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.size(), Stats.Opened, Stats.Closed, Stats.Reopened,
+            ReopenWindow, Top.empty() ? L"" : L": ", Top, ViewTarget ? ViewTarget->GetName().ToStdString() : std::wstring(L"none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1);
+        for (auto It = Stats.ClosedAt.begin(); It != Stats.ClosedAt.end();)
+        {
+            It = Now - It->second > ReopenWindow ? Stats.ClosedAt.erase(It) : std::next(It);
+        }
+        Stats.ReopenedByClass.clear();
+        Stats.WindowStart = Now;
+        Stats.Frames = Stats.SaturatedFrames = Stats.Opened = Stats.Closed = Stats.Reopened = 0;
+    }
+    for (auto It = ConnectionReplicationStats.begin(); It != ConnectionReplicationStats.end();)
+    {
+        It = std::find(Live.begin(), Live.end(), It->first) == Live.end() ? ConnectionReplicationStats.erase(It) : std::next(It);
+    }
+#endif
 }
 
 void UNetDriver::FlushActorDormancy(AActor* Actor)

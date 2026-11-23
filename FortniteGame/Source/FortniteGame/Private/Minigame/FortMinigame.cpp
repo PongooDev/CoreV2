@@ -859,6 +859,56 @@ uint8_t AFortMinigame::GetSpawnLocationSetting(const AFortPlayerState* PlayerSta
     return Setting ? *Setting : static_cast<uint8_t>(SpawnLocationSetting);
 }
 
+int32_t AFortMinigame::ReturnSpectatorsToGame()
+{
+#if WITH_SERVER_CODE
+    UFunction* const AddFunction = FindStaticFunction_AddMinigamePlayer();
+    UFunction* const RemoveFunction = FindStaticFunction_RemoveMinigamePlayer();
+    AFortGameModeAthena* const GameMode = AFortGameModeAthena::GetCurrent(this);
+    if (!Member_SpectatingPlayerArray.IsAvailable() || !FMinigamePlayer::HasResetData() || !AddFunction || !RemoveFunction || !GameMode)
+    {
+        return 0;
+    }
+    // Copied first: RemoveMinigamePlayer changes the list.
+    std::vector<AFortPlayerState*> Spectators;
+    TStructArray<FMinigamePlayer>& Entries = SpectatingPlayerArray.Players;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        if (AFortPlayerState* PlayerState = static_cast<AFortPlayerState*>(Entries[Index].PlayerState))
+        {
+            Spectators.push_back(PlayerState);
+        }
+    }
+    int32_t Returned = 0;
+    for (AFortPlayerState* PlayerState : Spectators)
+    {
+        Reflection::FParams Remove(RemoveFunction, true);
+        Reflection::FParams Add(AddFunction, true);
+        if (!Remove.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) || !Remove.Call(this) || !Add.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState))
+            || !Add.Call(this))
+        {
+            continue;
+        }
+        AActor* Owner = reinterpret_cast<AActor*>(PlayerState)->GetOwner();
+        AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        if (!Controller)
+        {
+            continue;
+        }
+        // The pawn the game killed for the spectating is gone, and nothing respawned them during the game (the Creative
+        // mutator's IsRespawningAllowed says no to a player outside PlayerArray while it is in progress).
+        if (!Controller->GetPawn())
+        {
+            GameMode->RestartPlayer(reinterpret_cast<AController*>(Controller));
+        }
+        ++Returned;
+    }
+    return Returned;
+#else
+    return 0;
+#endif
+}
+
 bool AFortMinigame::SetTeamForPlayer(AFortPlayerState* PlayerState, uint8_t NewTeam)
 {
     Reflection::FParams Params(FindStaticFunction_SetTeamForPlayer(), true);
@@ -1076,6 +1126,9 @@ void AFortMinigame::PostGameResetPlayers()
     {
         return;
     }
+    // Core's reconstruction too: nothing else in the build takes a spectator out of SpectatingPlayerArray, so one who
+    // joined during a game stayed dead and spectating through the next (#583).
+    const int32_t Spectators = ReturnSpectatorsToGame();
     const bool bToPreGameLocation = Member_PostGameSpawnLocationSetting.IsAvailable() && PostGameSpawnLocationSetting == EFortMinigamePostGameSpawnLocationSetting::GetPreGameLocation();
     AFortVolume* GameVolume = Volume;
     AFortPlayerStartCreative* IslandStart = GameVolume ? GameVolume->FindIslandStart() : nullptr;
@@ -1146,8 +1199,8 @@ void AFortMinigame::PostGameResetPlayers()
             reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
         }
     }
-    Log::Info(L"Minigame: {} resets its {} players after the game: {} back on their team, {} sent back to {} through the travel screen", GetName().ToStdString(), Players, Teams, Travelling,
-        bToPreGameLocation ? L"where they were before it" : L"the island's start");
+    Log::Info(L"Minigame: {} resets its {} players after the game ({} of them spectators until now): {} back on their team, {} sent back to {} through the travel screen", GetName().ToStdString(),
+        Players, Spectators, Teams, Travelling, bToPreGameLocation ? L"where they were before it" : L"the island's start");
 #endif
 }
 

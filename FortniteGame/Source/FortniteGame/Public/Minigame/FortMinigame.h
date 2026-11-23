@@ -195,6 +195,12 @@ public:
     // the island is Ready, so nothing takes PostGameReset back to PreGame.
     DefineUFunction(AdvanceState)
     DefineUFunction(PostGameResetPlayers)
+    // A player who joins while the game is under way (and bAllowJoinInProgress is off) is put here by AddMinigamePlayer
+    // (8.20 0x13185B0): their pawn dies as SilentSwitchingToSpectate and they spectate until the game is over.
+    // RemoveMinigamePlayer (0x133CE40) only takes such a player out of this list.
+    DefineUStructProperty(FMinigamePlayers, SpectatingPlayerArray)
+    DefineUFunction(AddMinigamePlayer)
+    DefineUFunction(RemoveMinigamePlayer)
     DefineUFunction(SetTeamForPlayer)
     DefineUFunction(GetSpawnLocationSetting)
     DefineUProperty(FName, MinigameStartCameraBehavior)
@@ -211,7 +217,8 @@ public:
     void TransitionPlayersToMinigameStart();
     // Restored native (8.20 strips it): each player gets their team from before the game back, loses the game's items,
     // and goes back as PostGameSpawnLocationSetting says (PreGameLocation: where they were; IslandStart: the island's
-    // start), through the travel screen (MinigameEndCameraBehavior, ClientMinigameEndedText).
+    // start), through the travel screen (MinigameEndCameraBehavior, ClientMinigameEndedText). The game's spectators
+    // (SpectatingPlayerArray) become its players again first and are restarted, so they go back with the others.
     void PostGameResetPlayers();
     DECLARE_FUNCTION(execPostGameResetPlayers);
     DECLARE_FUNCTION(execHandleStateChangedForTransition);
@@ -240,6 +247,9 @@ private:
     void AdvanceTransitionNextTick();
     uint8_t GetSpawnLocationSetting(const AFortPlayerState* PlayerState);
     bool SetTeamForPlayer(AFortPlayerState* PlayerState, uint8_t NewTeam);
+    // Each spectator back among the game's players (RemoveMinigamePlayer, then AddMinigamePlayer, which adds to
+    // PlayerArray once the game is post-game) with a pawn again (the game mode's RestartPlayer). How many came back.
+    int32_t ReturnSpectatorsToGame();
     // bPendingRestart, the unreflected flag after MinigameStarter (-1 without it).
     static inline ptrdiff_t PendingRestartOffset = -1;
 

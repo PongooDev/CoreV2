@@ -612,6 +612,18 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         return;
     }
+    // 8.20's island games (#583): AFortMinigame::AddMinigamePlayer (0x13185B0) moves a player who joins a game under way
+    // to spectate by killing their pawn as SilentSwitchingToSpectate, then sends ClientClearDeathNotification; the kill
+    // feed calls it switching to spectate (KillFeedSwitchingToSpectate). It is no elimination: taking the player out of
+    // the match here gave them Battle Royale's end (the match stats and its leave) while the island went on. They stay
+    // in it and come back with the game's other players after the game (AFortMinigame::PostGameResetPlayers).
+    // Only 8.20's EDeathCause has the value.
+    static const uint8_t SilentSwitchingToSpectate = EDeathCause::StaticEnumInfo().FindValue(L"SilentSwitchingToSpectate");
+    if (SilentSwitchingToSpectate != Reflection::InvalidEnumValue && DeathCause == SilentSwitchingToSpectate)
+    {
+        UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s switches to spectating the island's game, still in the match"), *GetName());
+        return;
+    }
     // The elimination is the eliminator's earned kill when they are of another team (the eliminator the death stored,
     // FinisherOrDowner). The game state's mutators hear of it (21.40's FortGameStateAthena_OnPostEarnedKill), which is how
     // 6.31's Team Rumble scores its teams. Its HUD and the game mode's own Tick (the team placements, the win at 100)

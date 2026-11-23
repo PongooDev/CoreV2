@@ -268,6 +268,25 @@ namespace
         }
         return false;
     }
+
+    // bDestroyGadgetWhenTrackedAttributesIsZero: every tracked attribute at 0. 8.40's jetpack (AGID_BoostJumpPack) tracks
+    // Fuel and ReserveFuel: Fuel at 0 is its overheat, which UFortGameplayAbility_JumpBoostPack's tick (CL-6005771 0xCDF650)
+    // refills from ReserveFuel after FuelRegenDelay; only with the reserve gone too does the pack break off.
+    bool AreTrackedAttributesZero(const TArray<float>& Values, int32_t NumTrackedAttributes)
+    {
+        if (NumTrackedAttributes <= 0 || Values.Num() < NumTrackedAttributes)
+        {
+            return false;
+        }
+        for (int32_t Index = 0; Index < NumTrackedAttributes; ++Index)
+        {
+            if (Values[Index] > 0.0f)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 void AFortPlayerControllerZone::OnGadgetTrackedAttributeChangedHK(AFortPlayerControllerZone* This, float NewValue, const void* ModCallbackData)
@@ -296,7 +315,12 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
     const bool bItemGuidSet = Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet;
     const int32_t NumElements = bItemGuidSet ? reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container)->Num()
         : reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(Container)->Num();
-    std::vector<std::pair<FGuid, const UFortGadgetItemDefinition*>> UsedUp;
+    struct FUsedUpGadget
+    {
+        FGuid ItemGuid;
+        const UFortGadgetItemDefinition* Gadget;
+    };
+    TArray<FUsedUpGadget> UsedUp;
     for (int32_t Index = 0; Index < NumElements; ++Index)
     {
         // A free slot of the sparse array holds its free list's indices where the gadget or the guid would be, which
@@ -331,14 +355,12 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         {
             Values.AddZeroed(TrackedAttributes.Num() - Values.Num());
         }
-        bool bUsedUp = false;
         for (int32_t Attribute = 0; Attribute < TrackedAttributes.Num(); ++Attribute)
         {
             float Value = 0.0f;
             if (GetNumericAttributeBase(AbilitySystemComponent, TrackedAttributes[Attribute], Value))
             {
                 Values[Attribute] = Value;
-                bUsedUp |= Value <= 0.0f;
             }
         }
         Entry->SetStateValue(EFortItemEntryState::GetGenericAttributeValueSet(), 1);
@@ -350,15 +372,14 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
             Log::Info(L"Gadget: {}'s {} keeps its tracked attributes ({} attributes, the first now {:.0f})", GetName().ToStdString(), Gadget->GetName().ToStdString(),
                 TrackedAttributes.Num(), Values.Num() > 0 ? Values[0] : 0.0f);
         }
-        // Core's: one used-up attribute is enough (7.20's gadgets track one).
-        if (bUsedUp && Gadget->bDestroyGadgetWhenTrackedAttributesIsZero)
+        if (Gadget->bDestroyGadgetWhenTrackedAttributesIsZero && AreTrackedAttributesZero(Values, TrackedAttributes.Num()))
         {
-            UsedUp.emplace_back(static_cast<FGuid>(Entry->ItemGuid), Gadget);
+            UsedUp.Add({ static_cast<FGuid>(Entry->ItemGuid), Gadget });
         }
     }
-    for (const auto& [ItemGuid, Gadget] : UsedUp)
+    for (int32_t Index = 0; Index < UsedUp.Num(); ++Index)
     {
-        DestroyGadgetTrackedAttributeItem(ItemGuid, Gadget);
+        DestroyGadgetTrackedAttributeItem(UsedUp[Index].ItemGuid, UsedUp[Index].Gadget);
     }
 #endif
 }
@@ -387,13 +408,7 @@ void AFortPlayerControllerZone::DestroyGadgetTrackedAttributeItem(const FGuid& I
             return;
         }
         // Still used up: nothing gave it back in between.
-        const TArray<float>& Values = Entry->GenericAttributeValues;
-        bool bUsedUp = false;
-        for (int32_t Index = 0; Index < Values.Num(); ++Index)
-        {
-            bUsedUp |= Values[Index] <= 0.0f;
-        }
-        if (!bUsedUp || !Controller->RemoveInventoryItem(ItemGuid, Entry->Count, true, true))
+        if (!AreTrackedAttributesZero(Entry->GenericAttributeValues, GadgetItemDefinition->TrackedAttributes.Num()) || !Controller->RemoveInventoryItem(ItemGuid, Entry->Count, true, true))
         {
             return;
         }

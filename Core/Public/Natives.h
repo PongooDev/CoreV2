@@ -31,6 +31,7 @@ class AActor;
 class AController;
 class AFortGameMode;
 class AFortInventory;
+class AFortWeapon;
 class UFortWorldItem;
 class UFortWorldItemDefinition;
 struct FGuid;
@@ -923,6 +924,11 @@ namespace Natives
     inline void (*AFortTeamPrivateInfo_SetHealthAndShield)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
+    // 7.40 (CL-5046157, 0x15A3FF0; no 21.40 name): what takes a weapon whose item has left the inventory out of its pawn's
+    // hands. On the server, for a weapon marked bPendingDestroyDueToDurabilityOrStackCount, it queues a Replace of the
+    // weapon's item for the owner's client-side quickbars (DelayedQuickBarActions) and destroys the weapon; true when it
+    // did. AFortPawn's ability-ended handler (0x13D35F0) calls it: Finder::ResolveWeaponPendingDestroyLive.
+    inline bool (*AFortWeapon_HandlePendingDestroy)(AFortWeapon* This) = nullptr;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_ModDurabilityIndex = -1;

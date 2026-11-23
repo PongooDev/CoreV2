@@ -15082,6 +15082,56 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
     return true;
 }
 
+bool Finder::ResolveWeaponPendingDestroyLive(ptrdiff_t PendingDestroyOffset, uint8_t PendingDestroyMask)
+{
+    if (Natives::AFortWeapon_HandlePendingDestroy)
+    {
+        return true;
+    }
+    if (PendingDestroyOffset <= 0 || !PendingDestroyMask)
+    {
+        return false;
+    }
+
+    // 7.40 (CL-5046157) reads the flag with test byte ptr [reg+disp32], mask (F6 /0) in two functions: the weapon's own
+    // ability-ended virtual (0x15A4490, only in vtables) and 0x15A3FF0, which AFortPawn's ability-ended handler
+    // (0x13D35F0) calls directly. The one with direct callers is it.
+    TArray<uintptr_t> Readers;
+    for (const auto& [Begin, End] : Finder::ExecutableSections())
+    {
+        for (uintptr_t Site = Begin; Site + 7 <= End; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == PendingDestroyOffset
+                && Byte(Site + 6) == PendingDestroyMask)
+            {
+                const uintptr_t Function = Finder::FunctionStart(Site);
+                if (Function && !Readers.Contains(Function))
+                {
+                    Readers.Add(Function);
+                }
+            }
+        }
+    }
+    TArray<uintptr_t> Called;
+    for (const uintptr_t Function : Readers)
+    {
+        if (!Finder::CallsTo(Function, false).empty())
+        {
+            Called.Add(Function);
+        }
+    }
+    if (Called.Num() != 1)
+    {
+        Log::Error(L"Finder: AFortWeapon's pending destroy handler not found ({} reader(s) of +0x{:X} mask 0x{:X}, {} called directly)", Readers.Num(), PendingDestroyOffset,
+            PendingDestroyMask, Called.Num());
+        return false;
+    }
+    Natives::AFortWeapon_HandlePendingDestroy = reinterpret_cast<decltype(Natives::AFortWeapon_HandlePendingDestroy)>(Called[0]);
+    Log::Info(L"Finder: AFortWeapon's pending destroy handler 0x{:X} ({} reader(s) of +0x{:X})", Called[0] - Finder::ImageBase(), Readers.Num(), PendingDestroyOffset);
+    return true;
+}
+
 bool Finder::ResolveOutpostMcpRequestLive()
 {
     // Set together on success (4.2 leaves FDelegateBase_Allocate null, see below).

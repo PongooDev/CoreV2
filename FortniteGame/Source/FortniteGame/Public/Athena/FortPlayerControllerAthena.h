@@ -353,6 +353,14 @@ public:
     // Modulator's GE_Toy_SpeedAdjust comes off the player state's ability system, and a flying player stops flying through
     // the game's own ServerCreativeStopFly and ClientCreativeStopFly (#512). Nothing where the build has neither.
     void ResetCreativeMovementState();
+    // Athena_PlayerController's RevokeItem calls it right after it takes the Creative phone (K2_RemoveItemFromPlayer of
+    // WID_CreativeTool): on leaving every island (OnLeaveVolume), on losing edit (HandlePermissions) and from
+    // RevokeCreativeTool. Its exec is the shared empty one on 7.20 to 8.00, and no build has the body. Core's (#554): where
+    // the quickbars are the client's (7.40), the held weapon whose item just went is handed to the game's own pending
+    // destroy handler, as the pawn's ability-ended handler would on the next ability's end.
+    DefineUFunction(MoveToolRemoved)
+    void MoveToolRemoved();
+    DECLARE_FUNCTION(execMoveToolRemoved);
 
     void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
     // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative

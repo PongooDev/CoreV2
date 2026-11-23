@@ -34,6 +34,7 @@
 #include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "Weapons/FortWeapon.h"
 
 #include <algorithm>
 #include <format>
@@ -968,6 +969,39 @@ void AFortPlayerControllerAthena::ResetCreativeMovementState()
 #endif
 }
 
+void AFortPlayerControllerAthena::MoveToolRemoved()
+{
+#if WITH_SERVER_CODE
+    // 7.40 (CL-5046157) keeps the quickbars on the client, which moves off a held item only when the server queues it a
+    // quickbar change (DelayedQuickBarActions). A weapon whose item leaves the inventory is marked pending destroy (on
+    // authority, AFortWeapon's inventory handler 0x15BB1F0 sets the flag at 0x15BB2B7 once its item guid is gone), but
+    // the queue and the destroy wait for an ability to end on the pawn (AFortPawn's handler 0x13D35F0 -> 0x15A3FF0).
+    // Holding the phone runs no ability, so the revoked phone stayed in the player's hands in the hub (#554). The same
+    // handler runs here, as the tool is taken; it sends the client the Replace that moves its quickbar off the phone.
+    AFortPawn* Pawn = Role == ROLE_Authority ? static_cast<AFortPawn*>(MyFortPawn) : nullptr;
+    AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+    AFortInventory* Inventory = WorldInventory;
+    if (!Weapon || !Inventory || Inventory->FindWorldItem(static_cast<FGuid&>(Weapon->ItemEntryGuid)))
+    {
+        return;
+    }
+    Weapon->SetPendingDestroyDueToDurability();
+    if (Weapon->HandlePendingDestroy())
+    {
+        Log::Info(L"Creative: {} loses the Creative phone from their hands ({}: its quickbar slot replaced, the weapon destroyed)", PlayerNameOf(this),
+            Weapon->GetName().ToStdString());
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerControllerAthena::execMoveToolRemoved)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerControllerAthena*>(Context)->MoveToolRemoved();
+    P_NATIVE_END;
+}
+
 void AFortPlayerControllerAthena::ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef)
 {
     Reflection::FParams Params(FindStaticFunction_ClientCycleQuickBarToCreativeItem(), true);
@@ -1311,6 +1345,28 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         {
             Log::Error(L"Finder: AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame's restoration is missing a part (GetMinigame {}, AFortMinigame::ToggleAutoRestartMinigame {}), so the toggle does nothing",
                 FindStaticFunction_GetMinigame() ? L"found" : L"missing", AFortMinigame::FindStaticFunction_ToggleAutoRestartMinigame() ? L"found" : L"missing");
+        }
+    }
+
+    // MoveToolRemoved (#554): only where the quickbars are the client's (7.40), and its exec is the empty one many
+    // stripped UFunctions share (7.40 0x866D10). Older builds' server quickbars take the held phone out of the hands.
+    if (UFunction* MoveTool = FindStaticFunction_MoveToolRemoved(); MoveTool && !AFortPlayerController::HasQuickBars() && AFortPlayerController::HasDelayedQuickBarActions()
+        && Finder::ResolveWeaponPendingDestroyLive(AFortWeapon::PendingDestroyDueToDurabilityOffset(), AFortWeapon::PendingDestroyDueToDurabilityMask()))
+    {
+        const FNativeFuncPtr Exec = MoveTool->GetNativeFunc();
+        int32_t Sharing = 0;
+        for (TObjectIterator<UFunction> It; Exec && It && Sharing <= 16; ++It)
+        {
+            Sharing += (*It)->GetNativeFunc() == Exec;
+        }
+        if (Sharing > 16)
+        {
+            MoveTool->SetNativeFunc(&execMoveToolRemoved);
+            Log::Info(L"Hook AFortPlayerControllerAthena::MoveToolRemoved: native (the build's exec +0x{:X} is the shared empty one)", reinterpret_cast<uintptr_t>(Exec) - Finder::ImageBase());
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortPlayerControllerAthena::MoveToolRemoved is native in this build (exec +0x{:X})", reinterpret_cast<uintptr_t>(Exec) - Finder::ImageBase());
         }
     }
 

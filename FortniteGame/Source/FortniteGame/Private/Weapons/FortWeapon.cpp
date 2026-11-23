@@ -50,6 +50,16 @@ bool AFortWeapon::IsPendingDestroyDueToDurability() const
     return Reflection::GetBoolMember(this, PendingDestroyDueToDurabilityMember());
 }
 
+void AFortWeapon::SetPendingDestroyDueToDurability()
+{
+    Reflection::SetBoolMember(this, PendingDestroyDueToDurabilityMember(), true);
+}
+
+bool AFortWeapon::HandlePendingDestroy()
+{
+    return Natives::AFortWeapon_HandlePendingDestroy && Natives::AFortWeapon_HandlePendingDestroy(this);
+}
+
 ptrdiff_t AFortWeapon::PendingDestroyDueToDurabilityOffset()
 {
     return PendingDestroyDueToDurabilityMember().GetOffsetChecked();

@@ -34,6 +34,10 @@ public:
     void ModAmmo(int32_t AmmoDelta);
     void DestroyedDueToDurability();
     bool IsPendingDestroyDueToDurability() const;
+    void SetPendingDestroyDueToDurability();
+    // 7.40's (Natives::AFortWeapon_HandlePendingDestroy): a weapon marked pending destroy has its item replaced on the
+    // owner's client-side quickbars and is destroyed. False where it isn't marked or the build has no such function.
+    bool HandlePendingDestroy();
 
     static ptrdiff_t PendingDestroyDueToDurabilityOffset();
     static uint8_t PendingDestroyDueToDurabilityMask();

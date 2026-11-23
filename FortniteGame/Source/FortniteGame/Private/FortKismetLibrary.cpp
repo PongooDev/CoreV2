@@ -97,6 +97,13 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
             {
                 ExistingEntry.AddNewItemCount(Added, true);
             }
+            else if (PlayerController && EFortItemEntryState::GetNewItemCount() != Reflection::InvalidEnumValue)
+            {
+                // A silent add (a harvest, #594) onto a stack that kept its pickup's toast states shows no toast: the
+                // client toasts every entry with NewItemCount and ShouldShowItemToast (64e3cffe), so drop both.
+                ExistingEntry.RemoveStateValue(EFortItemEntryState::GetNewItemCount());
+                ExistingEntry.RemoveStateValue(EFortItemEntryState::GetShouldShowItemToast());
+            }
         },
         [&](int32_t StackCount, bool bOverflow) -> UFortWorldItem*
         {

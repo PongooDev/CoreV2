@@ -7018,7 +7018,10 @@ bool Finder::ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplemen
     const uintptr_t ThunkEnd = IsInText(Thunk) ? Finder::FunctionEnd(Thunk) : 0;
     for (const auto& [Site, Target] : ThunkEnd ? Finder::DirectCalls(Thunk, ThunkEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
     {
-        const uintptr_t WriteToLog = IsInText(Target) ? FindInstruction(Target, Target + 0x40, { 0x41, 0xB1, 0x01 }) : 0;
+        // 8.30 (CL-5793395) strips ServerCheat_Implementation to a bare "retn 0" (0x30E250, slot 0x1BA), and its
+        // UKismetSystemLibrary::ExecuteConsoleCommand (0x2B9D5F0) sets bWriteToLog 0x4C bytes in.
+        uintptr_t WriteToLog = IsInText(Target) ? FindInstruction(Target, Target + 0x40, { 0x41, 0xB1, 0x01 }) : 0;
+        WriteToLog = WriteToLog || !IsInText(Target) ? WriteToLog : FindInstruction(Target, Target + 0x60, { 0x41, 0xB1, 0x01 });
         Index = WriteToLog ? VirtualSlot(FindVirtualCall(WriteToLog, WriteToLog + 0x10)) : -1;
         if (Index >= 0)
         {

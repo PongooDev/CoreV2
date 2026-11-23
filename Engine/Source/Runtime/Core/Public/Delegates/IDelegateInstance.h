@@ -123,24 +123,49 @@ namespace DelegateInstance
     inline constexpr int32_t SlotsWithTimerManagerObject[] = { 0, 2, 3, 4, 5, 6, 7, 8, 9 };
     static_assert(std::size(SlotsWithTimerManagerObject) == static_cast<size_t>(EDelegateInstanceSlot::Num));
 
+    // 8.20 (CL-5625478) adds a slot in front of GetUObject that returns the address of the bound function (the static
+    // function pointer, the method pointer or the functor); FTimerUnifiedDelegate::ToString (0x2D8A340, call [rax]) logs
+    // it as " func: 0x%llx" next to GetObjectForTimerManager's "vtbl: %p" and skips it when null. 21.40 calls this
+    // GetBoundProgramCounterForTimerManager (there after GetObjectForTimerManager). Its static instance vtable
+    // (0x3BA4030) is that, GetUObject, GetObjectForTimerManager, HasSameObject, IsCompactable, IsSafeToExecute, GetHandle
+    // (slot 6), the destructor, CreateCopy, Execute, ExecuteIfSafe.
+    inline constexpr int32_t GetBoundProgramCounterForTimerManagerSlot = 0;
+    inline constexpr int32_t SlotsWithProgramCounter[] = { 1, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static_assert(std::size(SlotsWithProgramCounter) == static_cast<size_t>(EDelegateInstanceSlot::Num));
+
     inline bool UsesTimerManagerObjectLayout()
     {
         return Natives::IDelegateInstance_GetHandleIndex == SlotsWithTimerManagerObject[static_cast<int32_t>(EDelegateInstanceSlot::GetHandle)];
     }
 
+    inline bool UsesProgramCounterLayout()
+    {
+        return Natives::IDelegateInstance_GetHandleIndex == SlotsWithProgramCounter[static_cast<int32_t>(EDelegateInstanceSlot::GetHandle)];
+    }
+
     // 4.20's order, with or without GetObjectForTimerManager: Core builds its instances' vtables in the build's order.
     inline bool UsesLayout420()
     {
-        return Natives::IDelegateInstance_GetHandleIndex == static_cast<int32_t>(EDelegateInstanceSlot::GetHandle) || UsesTimerManagerObjectLayout();
+        return Natives::IDelegateInstance_GetHandleIndex == static_cast<int32_t>(EDelegateInstanceSlot::GetHandle) || UsesTimerManagerObjectLayout() || UsesProgramCounterLayout();
     }
 
     inline int32_t Slot(EDelegateInstanceSlot Function)
     {
+        if (UsesProgramCounterLayout())
+        {
+            return SlotsWithProgramCounter[static_cast<int32_t>(Function)];
+        }
         if (UsesTimerManagerObjectLayout())
         {
             return SlotsWithTimerManagerObject[static_cast<int32_t>(Function)];
         }
         return UsesLayout420() ? static_cast<int32_t>(Function) : SlotsBefore420[static_cast<int32_t>(Function)];
+    }
+
+    // Core's instances answer the 8.20 slot with null: the timer list then prints no function for them.
+    inline const void* GetBoundProgramCounterForTimerManager(const IDelegateInstance*)
+    {
+        return nullptr;
     }
 
     // A vtable in 4.20's order (or 5.30's, with GetObjectForTimerManager) taken from Core's own (4.16-4.19) one, built
@@ -149,17 +174,23 @@ namespace DelegateInstance
     template <typename InstanceType>
     void* const* BuildVTable(void* const* CompiledVTable)
     {
-        static void* VTable[static_cast<size_t>(EDelegateInstanceSlot::Num) + 1] = {};
+        static void* VTable[static_cast<size_t>(EDelegateInstanceSlot::Num) + 2] = {};
         static const bool bBuilt = [CompiledVTable]
         {
+            const bool bProgramCounter = UsesProgramCounterLayout();
             const bool bTimerManagerObject = UsesTimerManagerObjectLayout();
             for (size_t Index = 0; Index < static_cast<size_t>(EDelegateInstanceSlot::Num); ++Index)
             {
-                VTable[bTimerManagerObject ? SlotsWithTimerManagerObject[Index] : Index] = CompiledVTable[SlotsBefore420[Index]];
+                const int32_t To = bProgramCounter ? SlotsWithProgramCounter[Index] : bTimerManagerObject ? SlotsWithTimerManagerObject[Index] : static_cast<int32_t>(Index);
+                VTable[To] = CompiledVTable[SlotsBefore420[Index]];
             }
-            if (bTimerManagerObject)
+            if (bProgramCounter || bTimerManagerObject)
             {
-                VTable[GetObjectForTimerManagerSlot] = CompiledVTable[SlotsBefore420[static_cast<int32_t>(EDelegateInstanceSlot::GetUObject)]];
+                VTable[bProgramCounter ? Slot(EDelegateInstanceSlot::GetUObject) + 1 : GetObjectForTimerManagerSlot] = CompiledVTable[SlotsBefore420[static_cast<int32_t>(EDelegateInstanceSlot::GetUObject)]];
+            }
+            if (bProgramCounter)
+            {
+                VTable[GetBoundProgramCounterForTimerManagerSlot] = reinterpret_cast<void*>(&GetBoundProgramCounterForTimerManager);
             }
             return true;
         }();

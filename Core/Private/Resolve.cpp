@@ -6225,8 +6225,8 @@ namespace
         void** const VTable = reinterpret_cast<void**>(OutpostMcpRequestVTable(Abort, AbortEnd, Completed));
         // The same instance's GetHandle (mov rax, [rcx+Handle]; mov [rdx], rax; mov rax, rdx; ret) gives the instance
         // vtable's layout (Natives::IDelegateInstance_GetHandleIndex), which the client reads from its console
-        // delegates: slot 8 up to 2.4.2, 4 from 2.5 (UE 4.20), 5 from 5.30. The server's own instances (Core's timer
-        // delegates, FTimerManager) take the build's layout from it.
+        // delegates: slot 8 up to 2.4.2, 4 from 2.5 (UE 4.20), 5 from 5.30, 6 from 8.20. The server's own instances (Core's
+        // timer delegates, FTimerManager) take the build's layout from it.
         int32_t GetHandleIndex = -1;
         for (int32_t Index = 0; VTable && Index < 0x10 && GetHandleIndex < 0; ++Index)
         {
@@ -6236,7 +6236,7 @@ namespace
                 GetHandleIndex = Index;
             }
         }
-        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 8)
+        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 6 || GetHandleIndex == 8)
         {
             Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
             Natives::IDelegateInstance_GetHandleIndexResolved = true;
@@ -6277,6 +6277,22 @@ namespace
             }
             const uintptr_t SizeStore = SizeCheck ? FindInstruction(SizeCheck, SizeCheck + SizeWindow, { 0xC7, -1, 0x08, 0x03, 0x00, 0x00, 0x00 }) : 0;
             CreateCopy = SizeStore && (Byte(SizeStore + 1) & 0xF8) == 0x40 ? Function : 0;
+            if (!CreateCopy && GetHandleIndex == 6 && IsInText(Function))
+            {
+                // 8.20 (CL-5625478) calls FDelegateBase::Allocate instead: mov ecx, 30h; call 0x2C75F0 (operator new(size,
+                // Base)), whose DelegateSize is right after the heap allocator's Data: mov r8d, [rdx+8]; ...; mov [rbx+8],
+                // edi (0x2C7653).
+                const uintptr_t SizeArgument = FindInstruction(Function, Function + 0x20, { 0xB9 });
+                const uintptr_t AllocateCall = SizeArgument && Byte(SizeArgument + 5) == 0xE8 ? SizeArgument + 5 : 0;
+                const uintptr_t Allocate = AllocateCall ? Finder::RelativeTarget(AllocateCall, 1, 5) : 0;
+                const uintptr_t HeapSize = IsInText(Allocate) ? FindInstruction(Allocate, Allocate + 0x20, { 0x44, 0x8B, 0x42, 0x08 }) : 0;
+                uintptr_t HeapSizeStore = 0;
+                for (uintptr_t Store = HeapSize ? FindInstruction(HeapSize, HeapSize + 0x80, { 0x89, -1, 0x08 }) : 0; Store && !HeapSizeStore; Store = FindInstruction(Store + 1, HeapSize + 0x80, { 0x89, -1, 0x08 }))
+                {
+                    HeapSizeStore = (Byte(Store + 1) & 0xC7) == 0x43 ? Store : 0;
+                }
+                CreateCopy = HeapSizeStore ? Function : 0;
+            }
         }
         if (CreateCopy)
         {
@@ -17025,7 +17041,7 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
         const uintptr_t CalleeEnd = IsInText(Callee) ? Finder::FunctionEnd(Callee) : 0;
         for (const uintptr_t Target : LeaTargets(Callee, CalleeEnd))
         {
-            for (const int32_t CreateCopyIndex : { 6, 7 })
+            for (const int32_t CreateCopyIndex : { 6, 7, 8 })
             {
                 if (IsDelegateVTable(Target, CreateCopyIndex))
                 {

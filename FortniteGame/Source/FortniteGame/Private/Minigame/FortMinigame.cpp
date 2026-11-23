@@ -14,6 +14,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -69,6 +70,24 @@ namespace
             }
         }
         return false;
+    }
+
+    // Epic's start of an island game respawned its players (#581): AFortGameModeAthena::RestartPlayer, whose last step
+    // gives the new pawn the health and shield the island's mutators answer (My Island's starting health and shield).
+    // Core moves the same pawn instead, so that step runs as each player reaches their start.
+    void ApplyStartingHealthAndShield(AFortMinigame* Minigame, AController* Controller)
+    {
+        UWorld* const World = Minigame ? Minigame->GetWorld() : nullptr;
+        AFortGameStateAthena* const GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        if (!GameState || !GameState->ApplyMutatorHealthAndShield(Controller))
+        {
+            return;
+        }
+        const AFortPawn* const Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Controller->GetPawn()));
+        const APlayerState* const PlayerState = static_cast<APlayerState*>(Controller->PlayerState);
+        Log::Info(L"Minigame: {}'s player {} starts with the island's health and shield ({:.0f}/{:.0f}, shield {:.0f}/{:.0f})", Minigame->GetName().ToStdString(),
+            PlayerState ? PlayerState->GetPlayerName().ToStdString() : std::wstring(L"?"), Pawn ? Pawn->GetHealth() : 0.0f, Pawn ? Pawn->GetMaxHealth() : 0.0f,
+            Pawn ? Pawn->GetShield() : 0.0f, Pawn ? Pawn->GetMaxShield() : 0.0f);
     }
 }
 
@@ -266,6 +285,11 @@ void AFortMinigame::ClearPlayerInventory(AFortPlayerControllerAthena* PlayerCont
             Log::Info(L"Minigame: {} restores {} to full health as its game's inventory is reset", GetName().ToStdString(),
                 FortPawn->GetName().ToStdString());
         }
+        // 7.10 to 7.30 reset as the game goes InProgress, after the warmup's respawn gave the island's health and shield.
+        if (Member_CurrentState.IsAvailable() && CurrentState == EFortMinigameState::GetInProgress())
+        {
+            ApplyStartingHealthAndShield(this, reinterpret_cast<AController*>(PlayerController));
+        }
     }
 #endif
 }
@@ -452,6 +476,7 @@ void AFortMinigame::RespawnMinigamePlayers()
             continue;
         }
         ++Moved;
+        ApplyStartingHealthAndShield(this, Controller);
         // The game's rotation is the respawn's (7.30's volume manager hands it to the respawn with the location), and a
         // respawned player looks that way: AGameModeBase::FinishRestartPlayer sets the controller's rotation (without
         // roll) and sends the client ClientSetRotation(rotation, true). A player pawn turns with its controller's
@@ -620,6 +645,10 @@ void AFortMinigame::DelayedTeleportPlayer(AFortPlayerControllerAthena* PlayerCon
     }
     const bool bMoved = reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
     const bool bSkydive = bMoved && !bRespawningOnGround;
+    if (bMoved)
+    {
+        ApplyStartingHealthAndShield(this, reinterpret_cast<AController*>(PlayerController));
+    }
     if (EFortMinigameState::HasTransitioning())
     {
         // 8.20's OnClientFinishTeleportingForMinigame (0x1334160) is the end for both: it looks for the floor under the
@@ -1384,6 +1413,12 @@ void AFortMinigame::HookNatives()
     else if (AFortVolumeManager::HasOnVolumeStateChanged())
     {
         Log::Info(L"Finder: AFortMinigame's post-game reset end not restored (the volume manager's OnVolumeStateChanged signature {})", VolumeSignature ? L"found" : L"not found");
+    }
+
+    // #581: the starting health and shield a game's start gives (ApplyStartingHealthAndShield), found here to be logged.
+    if (StaticClass())
+    {
+        Finder::ResolveRestartHealthAndShieldLive();
     }
 
     // The game mode binds its world's minigames as it binds the match's events (AFortGameModeAthena::BindMatchEvents);

@@ -222,6 +222,15 @@ TArray<UObject*>* AFortGameStateAthena::GetGameplayMutatorList() const
     return List ? &List->GetMember_Mutators() : nullptr;
 }
 
+bool AFortGameStateAthena::ApplyMutatorHealthAndShield(AController* Controller)
+{
+#if WITH_SERVER_CODE
+    return Controller && Finder::ResolveRestartHealthAndShieldLive() && Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield(this, Controller);
+#else
+    return false;
+#endif
+}
+
 bool AFortGameStateAthena::GetMutatorGravityData(FGravityMovementData& OutData) const
 {
     // As 0xD4D100: each active mutator of the list in turn, the first answer kept. Only the gravity mutator answers in

@@ -18534,6 +18534,41 @@ bool Finder::ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOf
     return false;
 }
 
+bool Finder::ResolveRestartHealthAndShieldLive()
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield)
+    {
+        return Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena::RestartPlayer (7.30 0xD2BE20 slot 0xE9; 7.40 0xD53EB0, 8.00 0xD73290 and 8.20 0xE77640 slot 0xEA;
+    // the slot execRestartPlayer calls) ends, after Super::RestartPlayer, with the game state's health and shield
+    // step for the restarted controller: "mov rdx, <controller>; mov rcx, <game state>; call".
+    UFunction* RestartPlayer = FindObject<UFunction>(nullptr, L"/Script/Engine.GameModeBase:RestartPlayer");
+    const uintptr_t Exec = RestartPlayer ? reinterpret_cast<uintptr_t>(RestartPlayer->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const int32_t Index = ExecEnd ? VirtualSlot(FindVirtualCall(Exec, ExecEnd)) : -1;
+    const uintptr_t Override = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeAthena"), Index);
+    const auto Calls = Override ? Finder::DecodedDirectCalls(Override) : decltype(Finder::DecodedDirectCalls(0)){};
+    const uintptr_t Site = Calls.empty() ? 0 : Calls.back().first;
+    const auto IsMove = [](uintptr_t At, uint8_t Destination)
+    {
+        return (Byte(At) == 0x48 || Byte(At) == 0x49) && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xF8) == Destination;
+    };
+    if (!Site || !IsMove(Site - 6, 0xD0) || !IsMove(Site - 3, 0xC8) || !IsInText(Calls.back().second))
+    {
+        Log::Info(L"Finder: AFortGameModeAthena::RestartPlayer's health and shield step not found (slot {}, 0x{:X}), an island game's start keeps its players' health and shield",
+            Index, Override ? Override - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield = reinterpret_cast<decltype(Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield)>(Calls.back().second);
+    Log::Info(L"Finder: AFortGameModeAthena::RestartPlayer is slot 0x{:X} (0x{:X}), its game state health and shield step 0x{:X}", Index, Override - Finder::ImageBase(),
+        Calls.back().second - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveReplicationDriverLive()
 {
     static bool bSearched = false;

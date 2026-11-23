@@ -470,6 +470,9 @@ namespace Finder
     // mode's ReplicateHealthAndShield: its 100 MaxShield store (MaxShieldOffset, the player state's) and then its call on
     // the player state's PlayerTeamPrivate (PlayerTeamPrivateOffset). For Battle Royale's player bots' squad bar health.
     bool ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOffset, ptrdiff_t MaxShieldOffset);
+    // Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield: the last call of the Athena game mode's RestartPlayer
+    // (the slot GameModeBase's execRestartPlayer calls), made as (GameState, Controller).
+    bool ResolveRestartHealthAndShieldLive();
     bool ResolveReplicationDriverLive();
     // The replication graph's per-connection actor infos (Natives::UNetReplicationGraphConnection_ActorMapOffset and
     // FPerConnectionActorInfoMap_RemoveByKey), for UReplicationGraph::RemoveActorInfoFromConnections (CoreV2 #411).

@@ -6,6 +6,7 @@
 #include "GameFramework/OnlineReplStructs.h"
 #include "UObject/ScriptDelegates.h"
 
+class AController;
 class AFortAthenaMapInfo;
 class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
@@ -258,6 +259,9 @@ public:
     // asks before it gives a restarted player's pawn SetGravityJumpMultipliers): the first of the list's mutators that
     // answers, here its active gravity mutators. False when none does, or the build has none.
     bool GetMutatorGravityData(FGravityMovementData& OutData) const;
+    // The health and shield a restarted player's pawn gets from the mutators (the game's own step at the end of
+    // AFortGameModeAthena::RestartPlayer): Natives::AFortGameStateAthena_ApplyMutatorHealthAndShield. Core's name.
+    bool ApplyMutatorHealthAndShield(AController* Controller);
     // From 6.30 (Food Fight's OpposingAirCraftForEachTeam): a bus path for each of the playlist's teams, in their order,
     // and the line between them, along which the Barrier mutator's wall stands. Replicated.
     DefineUStructArrayProperty(FAircraftFlightInfo, TeamFlightPaths)

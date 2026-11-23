@@ -942,6 +942,12 @@ namespace Natives
     // squad bars read. The game mode's ReplicateHealthAndShield calls it for every player state each tick; Battle
     // Royale's player bots call it after correcting their values: Finder::ResolveTeamPrivateHealthAndShieldLive.
     inline void (*AFortTeamPrivateInfo_SetHealthAndShield)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
+    // The game state's step at the end of AFortGameModeAthena::RestartPlayer (7.30 CL-4834550 0xD5A9F0, 7.40 0xD85AF0,
+    // 8.00 0xDA5070, 8.20 0xE9E060; no 21.40 name): the controller's pawn's MaxHealth, health, MaxShield and shield as
+    // the mutators answer FortGameStateAthena_EvaluateMaxHealth to _EvaluateStartingShield (an island's
+    // AFortAthenaMutator_HealthAndShield up to 8.00, its AFortAthenaMutator_TeamSettings in 8.20), set on the pawn when one
+    // answers; true then. Finder::ResolveRestartHealthAndShieldLive.
+    inline bool (*AFortGameStateAthena_ApplyMutatorHealthAndShield)(AFortGameStateAthena* This, AController* Controller) = nullptr;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     // 7.40 (CL-5046157, 0x15A3FF0; no 21.40 name): what takes a weapon whose item has left the inventory out of its pawn's

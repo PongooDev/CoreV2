@@ -43,6 +43,15 @@ bool buzz::XmppClient::Private::Hook()
         return Hooks::Detour(L"XmppClient::Private::ChooseBestSaslMechanism", reinterpret_cast<void*>(Function), &ChooseBestSaslMechanismHK, &ChooseBestSaslMechanismOG);
     }
 
+    // 8.30 (CL-5793395) has no libjingle: FXmppModule::CreateConnection (0x30F4A60) always makes an
+    // FXmppConnectionStrophe, and libstrophe's own auth (0x3C04A30) sends SASL PLAIN when that is the only mechanism
+    // offered and TLS isn't mandatory, so it needs nothing from Core.
+    if (!Finder::StringRefs(L"Starting Strophe XMPP thread").empty())
+    {
+        Log::Info(L"Redirect: XmppClient::Private::ChooseBestSaslMechanism not needed, this build's XMPP is libstrophe's (no libjingle)");
+        return true;
+    }
+
     Log::Error(L"Redirect: XmppClient::Private::ChooseBestSaslMechanism not found");
     return false;
 }

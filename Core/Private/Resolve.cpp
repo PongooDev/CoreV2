@@ -1543,6 +1543,44 @@ namespace
             ++MissingCount;
         }
 
+        // 8.30 (CL-5793395) calls Epic's UEngine::BroadcastNetworkFailure (0x2EDDAC0) instead of inlining it; it
+        // broadcasts NetworkFailureEvent (lea rsi, [rbp+9A8h]; inc dword ptr [rsi+14h]) after its log line.
+        if (const uintptr_t EngineBroadcast = FunctionOf(L"UEngine::BroadcastNetworkFailure: FailureType = %s, ErrorString = %s, Driver = %s"))
+        {
+            const uintptr_t EngineBroadcastEnd = Finder::FunctionEnd(EngineBroadcast);
+            for (uintptr_t Lea = EngineBroadcast; EngineBroadcastEnd && Lea + 11 <= EngineBroadcastEnd; ++Lea)
+            {
+                const uint8_t Rex = Byte(Lea);
+                const uint8_t ModRm = Byte(Lea + 2);
+                if ((Rex & 0xF8) != 0x48 || Byte(Lea + 1) != 0x8D || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+                {
+                    continue;
+                }
+                // inc dword ptr [reg+14h] (the invocation list's lock count) within the next few instructions.
+                const uint8_t Destination = static_cast<uint8_t>(((Rex & 0x04) << 1) | ((ModRm >> 3) & 0x07));
+                for (uintptr_t Increment = Lea + 7; Increment < Lea + 0x10; ++Increment)
+                {
+                    const uintptr_t IncrementModRm = Increment + (Destination >= 8 ? 2 : 1);
+                    const bool bIncrement = Destination >= 8 ? Byte(Increment) == 0x41 && Byte(Increment + 1) == 0xFF : Byte(Increment) == 0xFF;
+                    if (bIncrement && Byte(IncrementModRm) == (0x40 | (Destination & 0x07)) && Byte(IncrementModRm + 1) == 0x14)
+                    {
+                        Natives::UEngine_NetworkFailureEvent = *reinterpret_cast<const int32_t*>(Lea + 3);
+                        break;
+                    }
+                }
+                if (Natives::UEngine_NetworkFailureEvent > 0)
+                {
+                    break;
+                }
+            }
+            if (Natives::UEngine_NetworkFailureEvent > 0)
+            {
+                Natives::UEngine_BroadcastNetworkFailure = reinterpret_cast<decltype(Natives::UEngine_BroadcastNetworkFailure)>(EngineBroadcast);
+                Log::Info(L"Finder: UEngine::BroadcastNetworkFailure at +0x{:X} (NetworkFailureEvent +0x{:X})", EngineBroadcast - Finder::ImageBase(), Natives::UEngine_NetworkFailureEvent);
+                return;
+            }
+        }
+
         uintptr_t Broadcast = 0;
         for (uintptr_t Type = FindInstruction(Travel, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }); Type; Type = FindInstruction(Type + 1, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }))
         {

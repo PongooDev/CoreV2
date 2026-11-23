@@ -33,10 +33,7 @@ class UEngine : public UObject
 public:
     FOnNetworkFailure& OnNetworkFailure() { return NetworkFailureEvent; }
 
-    void BroadcastNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString = FString())
-    {
-        NetworkFailureEvent.Broadcast(World, NetDriver, FailureType, ErrorString);
-    }
+    void BroadcastNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString = FString());
 
     bool CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition);
     UNetDriver* FindNamedNetDriver(const UWorld* InWorld, FName NetDriverName);

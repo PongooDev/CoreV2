@@ -304,6 +304,7 @@ namespace Natives
     inline void (*UEngine_DestroyNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName) = nullptr;
     inline FWorldContext* (*UEngine_GetWorldContextFromWorldChecked)(UEngine* This, const UWorld* InWorld) = nullptr;
     inline void (*FOnNetworkFailure_Broadcast)(void* Delegate, UWorld* World, UNetDriver* NetDriver, int32_t FailureType, const FString& ErrorString) = nullptr;
+    inline void (*UEngine_BroadcastNetworkFailure)(UEngine* This, UWorld* World, UNetDriver* NetDriver, int32_t FailureType, const FString& ErrorString) = nullptr;
 
     inline ULocalPlayer* (*UGameViewportClient_SetupInitialLocalPlayer)(UGameViewportClient* This, FString& OutError) = nullptr;
     inline bool (*UFortUITeamInfo_GetTeamMemberInfo)(UFortUITeamInfo* This, UFortRegisteredPlayerInfo* PlayerInfo, FFortTeamMemberInfo& OutInfo) = nullptr;

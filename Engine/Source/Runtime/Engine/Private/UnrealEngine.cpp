@@ -16,6 +16,18 @@ void FOnNetworkFailure::Broadcast(UWorld* World, UNetDriver* NetDriver, ENetwork
     reinterpret_cast<const TMulticastDelegate<UWorld*, UNetDriver*, ENetworkFailure::Type, const FString&>*>(this)->Broadcast(World, NetDriver, FailureType, ErrorString);
 }
 
+void UEngine::BroadcastNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+{
+    // 8.30 (CL-5793395) has Epic's out-of-line UEngine::BroadcastNetworkFailure (it logs, then broadcasts
+    // NetworkFailureEvent); older builds inline it into a bare NetworkFailureEvent.Broadcast.
+    if (Natives::UEngine_BroadcastNetworkFailure)
+    {
+        Natives::UEngine_BroadcastNetworkFailure(this, World, NetDriver, FailureType, ErrorString);
+        return;
+    }
+    NetworkFailureEvent.Broadcast(World, NetDriver, FailureType, ErrorString);
+}
+
 bool UEngine::CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition)
 {
     return Natives::UEngine_CreateNamedNetDriver(this, InWorld, NetDriverName, NetDriverDefinition);

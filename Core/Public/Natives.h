@@ -843,6 +843,9 @@ namespace Natives
     // AFortGameModeAthena::AddToAlivePlayers(AFortPlayerControllerAthena*) (8.30 0xF00870): the player into AlivePlayers,
     // their team's alive count, PlayersLeft and TeamsLeft, and bMarkedAlive. Found on first use (the Reboot Van's).
     inline void (*AFortGameModeAthena_AddToAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player) = nullptr;
+    // FGameMemberInfo::PostReplicatedAdd(const FGameMemberInfoArray&) with AFortGameStateAthena::HandleGameMemberAdded
+    // inlined (8.20 0xEAE8D0, 8.30 0xF536C0): the item's player state into the game state's native team and squad maps.
+    inline void (*FGameMemberInfo_PostReplicatedAdd)(void* Item, void* InArraySerializer) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
     // The death cause up to 3.3 (1.9.1 0x43AE20), on the pawn.

@@ -367,6 +367,16 @@ void AFortGameStateAthena::AddPlayerStateToGameMemberInfo(AFortPlayerStateAthena
     Member.TeamIndex = TeamIndex;
     FUniqueNetIdRepl::StaticStruct()->CopyScriptStruct(&Member.MemberUniqueId, &UniqueId);
     MemberInfo.MarkItemDirty(Member);
+    // The server's own team and squad maps (+0x12C8 and +0x12E0 on 8.30), which the clients fill from this item and
+    // the server's code reads: GetSquadMembers (0xF6F730) is how 8.30's IsResurrectionEnabled (0xF4ECF0) sees a squad
+    // of more than one, so with them empty no Reboot Card dropped (CoreV2 #586); the card's pickup and the van's
+    // interaction read the squad from them too. Core's: the item's own add (the clients' PostReplicatedAdd), as the
+    // stripped server writer must have filled the maps. An item removed above stays in them (no team switch in Battle
+    // Royale from 7.40).
+    if (Finder::ResolveGameMemberAddedLive(FGameMemberInfoArray::OwningGameStateOffset()) && static_cast<AFortGameStateAthena*>(MemberInfo.OwningGameState) == this)
+    {
+        Natives::FGameMemberInfo_PostReplicatedAdd(&Member, &MemberInfo);
+    }
     ForceNetUpdate();
     Log::Info(L"Battle Royale: {} is a game member in squad {} of team {} ({} members)", PlayerState->GetPlayerName().ToStdString(), SquadId, TeamIndex, Members.Num());
 #endif

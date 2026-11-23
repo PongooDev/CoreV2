@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingGameplayActorSpawnMachine.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
@@ -157,32 +158,115 @@ bool ABuildingGameplayActorSpawnMachine::RebootPlayersInAir()
     return Params.Call(this) && Params.Take<bool>(L"ReturnValue");
 }
 
-void ABuildingGameplayActorSpawnMachine::SetUpResurrectLocations(UWorld* World)
+AFortGameStateAthena* ABuildingGameplayActorSpawnMachine::GetAthenaGameState() const
+{
+    UWorld* World = GetWorld();
+    return World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+}
+
+void ABuildingGameplayActorSpawnMachine::SetUpSpawnMachines(UWorld* World)
 {
 #if WITH_SERVER_CODE
     UClass* Class = StaticClass();
     UClass* PlayerStartClass = Class ? FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortPlayerStart") : nullptr;
-    if (!World || !PlayerStartClass || !HasResurrection())
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState || !PlayerStartClass || !HasResurrection())
     {
         return;
     }
+    // The match has Reboot: the game state's IsResurrectionEnabled without a pawn (8.30 0xF4ECF0: the
+    // Athena.bResurrectionFunctionalityEnabled console variable and the playlist's ResurrectionEnabledRow).
+    bool bRebootEnabled = false;
+    Reflection::FParams Enabled(GameState->FindFunction(FName(L"IsResurrectionEnabled", FNAME_Find)), true);
+    if (Enabled.Set(L"PlayerPawn", static_cast<UObject*>(nullptr)) && Enabled.Call(reinterpret_cast<UObject*>(GameState)))
+    {
+        bRebootEnabled = Enabled.Take<bool>(L"ReturnValue");
+    }
+    const bool bRepData = bRebootEnabled && AFortGameStateAthena::HasSpawnMachineRepData() && Member_SpawnMachineState.IsAvailable() && Member_IndexIntoGameState.IsAvailable();
+    FSpawnMachineRepDataArray& RepData = GameState->SpawnMachineRepData;
+    TStructArray<FSpawnMachineRepData>& Items = RepData.SpawnMachineRepDataArray;
+    // Once a match: only this fills the array. IndexIntoGameState starts at 0 (the van's constructor, 0x1046BF0, leaves it),
+    // so an empty array is what says no van has an item yet.
+    const bool bList = bRepData && Items.Num() == 0;
+
     const TArray<AActor*> Vans = UGameplayStatics::GetAllActorsOfClass(World, Class);
     int32_t Set = 0;
+    int32_t Listed = 0;
     for (AActor* Actor : Vans)
     {
         ABuildingGameplayActorSpawnMachine* SpawnMachine = static_cast<ABuildingGameplayActorSpawnMachine*>(Actor);
+        if (!SpawnMachine || reinterpret_cast<UObject*>(SpawnMachine)->IsPendingKill())
+        {
+            continue;
+        }
         // The Blueprint's ResurrectionLocation, a UChildActorComponent with a FortPlayerStart child.
         AActor* Start = reinterpret_cast<AActor*>(ObjectProperty(ObjectProperty(reinterpret_cast<UObject*>(SpawnMachine), L"ResurrectionLocation"), L"ChildActor"));
-        if (SpawnMachine && !SpawnMachine->ResurrectLocation && Start && reinterpret_cast<UObject*>(Start)->IsA(PlayerStartClass))
+        if (!SpawnMachine->ResurrectLocation && Start && reinterpret_cast<UObject*>(Start)->IsA(PlayerStartClass))
         {
             SpawnMachine->ResurrectLocation = Start;
             ++Set;
         }
+        if (bList)
+        {
+            const int32_t Index = Items.Num();
+            FSpawnMachineRepData& Item = Items.AddDefaulted();
+            Item.Location = SpawnMachine->GetTransform().GetLocation();
+            Item.SpawnMachineState = SpawnMachine->SpawnMachineState;
+            RepData.MarkItemDirty(Item);
+            SpawnMachine->IndexIntoGameState = Index;
+            ++Listed;
+        }
+    }
+    if (Listed > 0)
+    {
+        GameState->ForceNetUpdate();
     }
     if (Vans.Num() > 0)
     {
-        Log::Info(L"Reboot Van: {} of the world's {} vans reboot at their ResurrectionLocation", Set, Vans.Num());
+        Log::Info(L"Reboot Van: {} of the world's {} vans reboot at their ResurrectionLocation; {} on the game state's SpawnMachineRepData for the map (the match {} Reboot)", Set,
+            Vans.Num(), Listed, bRebootEnabled ? L"has" : L"has no");
     }
+#endif
+}
+
+void ABuildingGameplayActorSpawnMachine::UpdateSpawnMachineRepData()
+{
+#if WITH_SERVER_CODE
+    AFortGameStateAthena* GameState = Member_IndexIntoGameState.IsAvailable() ? GetAthenaGameState() : nullptr;
+    const int32_t Index = GameState ? static_cast<int32_t>(IndexIntoGameState) : -1;
+    FSpawnMachineRepDataArray* RepData = Index >= 0 ? &static_cast<FSpawnMachineRepDataArray&>(GameState->SpawnMachineRepData) : nullptr;
+    TStructArray<FSpawnMachineRepData>* Items = RepData ? &static_cast<TStructArray<FSpawnMachineRepData>&>(RepData->SpawnMachineRepDataArray) : nullptr;
+    if (!Items || Index >= Items->Num())
+    {
+        return;
+    }
+    FSpawnMachineRepData& Item = (*Items)[Index];
+    const uint8_t State = SpawnMachineState;
+    Item.SpawnMachineState = State;
+    static const uint8_t OnCooldown = ESpawnMachineState::GetOnCooldown();
+    if (State == OnCooldown)
+    {
+        float CooldownLength = 0.0f;
+        Reflection::FParams Length(FindFunction(FName(L"GetCooldownLength", FNAME_Find)), true);
+        if (Length.Call(this))
+        {
+            CooldownLength = Length.Take<float>(L"ReturnValue");
+        }
+        UWorld* World = GetWorld();
+        const float Now = World ? World->GetTimeSeconds() : 0.0f;
+        Item.SpawnMachineCooldownStartTime = Now;
+        Item.SpawnMachineCooldownEndTime = Now + CooldownLength;
+    }
+    RepData->MarkItemDirty(Item);
+    GameState->ForceNetUpdate();
+#endif
+}
+
+DEFINE_FUNCTION(ABuildingGameplayActorSpawnMachine::execSetSpawnMachineState)
+{
+    SetSpawnMachineStateNative(Context, TheStack, RESULT_PARAM);
+#if WITH_SERVER_CODE
+    static_cast<ABuildingGameplayActorSpawnMachine*>(Context)->UpdateSpawnMachineRepData();
 #endif
 }
 
@@ -206,6 +290,14 @@ void ABuildingGameplayActorSpawnMachine::HookNatives()
     }
     Hooks::RedirectAddress(L"ABuildingGameplayActorSpawnMachine::StartResurrection (ServerOnAttemptInteract's timer)", Bind, reinterpret_cast<void*>(&StartResurrectionHK));
     Log::Info(L"Finder: ABuildingGameplayActorSpawnMachine's reboot is stripped, restored (StartResurrection on the interaction's timer)");
+
+    UFunction* SetState = AFortGameStateAthena::HasSpawnMachineRepData() && Member_IndexIntoGameState.IsAvailable() ? FindStaticFunction_SetSpawnMachineState() : nullptr;
+    if (SetState && SetState->GetNativeFunc() && SetState->GetNativeFunc() != &execSetSpawnMachineState)
+    {
+        SetSpawnMachineStateNative = SetState->GetNativeFunc();
+        SetState->SetNativeFunc(&execSetSpawnMachineState);
+        Log::Info(L"Reboot Van: SetSpawnMachineState's native keeps the van's SpawnMachineRepData item in step (its server update is stripped)");
+    }
 #endif
 }
 

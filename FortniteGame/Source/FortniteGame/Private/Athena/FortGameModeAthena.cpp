@@ -2891,7 +2891,7 @@ namespace
             }
             SpawnMapLlamas(Athena);
             // 8.30: the Reboot Vans' places, before anyone can use one.
-            ABuildingGameplayActorSpawnMachine::SetUpResurrectLocations(Athena->GetWorld());
+            ABuildingGameplayActorSpawnMachine::SetUpSpawnMachines(Athena->GetWorld());
             ClearGameModeTimer(Athena, Events.PlaylistTimer);
             SpawnWaitingVendingMachines(Athena, L"from the default tables: the bus is under way and the game state has no playlist");
         }

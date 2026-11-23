@@ -7,6 +7,7 @@
 #include "UObject/ScriptDelegates.h"
 
 class AController;
+class AFortGameStateAthena;
 class AFortAthenaMapInfo;
 class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
@@ -86,6 +87,26 @@ struct FGameMemberInfoArray : public FFastArraySerializer
 {
     DefineUnrealStruct(FGameMemberInfoArray, FortniteGame)
     DefineUStructArrayProperty(FGameMemberInfo, Members)
+    // The game state the array belongs to (RepSkip; the game state's constructor sets it, 8.30 0xF37104).
+    DefineUProperty(AFortGameStateAthena*, OwningGameState)
+    static ptrdiff_t OwningGameStateOffset() { return Member_OwningGameState.IsAvailable() ? Member_OwningGameState.GetOffsetChecked() : -1; }
+};
+
+// From 8.30 (CL-5793395): one Reboot Van for the clients' map and the card carrier's marker (SpawnMachineRepData's
+// items). The client's resurrection component (0xFFEB70) marks the closest van that isn't on cooldown.
+struct FSpawnMachineRepData : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FSpawnMachineRepData, FortniteGame)
+    DefineUProperty(FVector, Location)
+    DefineUProperty(uint8_t, SpawnMachineState)
+    DefineUProperty(float, SpawnMachineCooldownStartTime)
+    DefineUProperty(float, SpawnMachineCooldownEndTime)
+};
+
+struct FSpawnMachineRepDataArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FSpawnMachineRepDataArray, FortniteGame)
+    DefineUStructArrayProperty(FSpawnMachineRepData, SpawnMachineRepDataArray)
 };
 
 class AFortGameStateAthena : public AFortGameStateZone
@@ -321,6 +342,10 @@ public:
     // replication reads it, so the clients' maps stayed empty and no marker the player placed was drawn (CoreV2 #522).
     DefineUStructProperty(FGameMemberInfoArray, GameMemberInfoArray)
     static bool HasGameMemberInfoArray() { return Member_GameMemberInfoArray.IsAvailable() && FGameMemberInfo::StaticStruct(); }
+    // 8.30's Reboot Vans (replicated): their places, states and cooldowns. The server's writer is stripped (only the game
+    // state's constructor and destructor touch the array), so the clients had no vans on their map.
+    DefineUStructProperty(FSpawnMachineRepDataArray, SpawnMachineRepData)
+    static bool HasSpawnMachineRepData() { return Member_SpawnMachineRepData.IsAvailable() && FSpawnMachineRepData::StaticStruct(); }
     // The server's side of GameMemberInfoArray, stripped from the client builds (21.40 exports only the clients' side:
     // NotifyGameMemberAdded, NotifyGameMemberRemoved, FGameMemberInfo::PostReplicatedAdd and PreReplicatedRemove; the
     // name is Core's): PlayerState's item with its SquadId, TeamIndex and UniqueId. An item the player already has with

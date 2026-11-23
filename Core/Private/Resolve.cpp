@@ -17720,6 +17720,36 @@ bool Finder::ResolveAddToAlivePlayersLive()
     return true;
 }
 
+bool Finder::ResolveGameMemberAddedLive(ptrdiff_t OwningGameStateOffset)
+{
+    static bool bSearched = false;
+    if (Natives::FGameMemberInfo_PostReplicatedAdd || bSearched)
+    {
+        return Natives::FGameMemberInfo_PostReplicatedAdd != nullptr;
+    }
+    bSearched = true;
+
+    // FGameMemberInfo::PostReplicatedAdd (8.20 0xEAE8D0, 8.30 0xF536C0; the fast array's add thunk 0x192F840 calls it)
+    // has AFortGameStateAthena::HandleGameMemberAdded inlined: it logs "Didn't find existing player state" for an id
+    // no player state has yet, and first reads the array's OwningGameState: mov r64, [rdx+118h]. 7.40 keeps
+    // HandleGameMemberAdded a game state method of its own (0xD9AF80), which this shape leaves out.
+    const uintptr_t Add = FunctionOf(L"AFortGameStateAthena::HandleGameMemberAdded(): Didn't find existing player state with UniqueId: %s, in team: %d, and in squad: %d");
+    bool bReadsOwner = false;
+    for (uintptr_t Site = Add; Add && OwningGameStateOffset > 0 && Site + 7 <= Add + 0x30 && !bReadsOwner; ++Site)
+    {
+        bReadsOwner = (Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x8B && (Byte(Site + 2) & 0xC7) == 0x82
+            && *reinterpret_cast<const int32_t*>(Site + 3) == static_cast<int32_t>(OwningGameStateOffset);
+    }
+    if (!bReadsOwner)
+    {
+        Log::Info(L"Finder: no FGameMemberInfo::PostReplicatedAdd of 8.20's shape (0x{:X}), the server's team and squad maps stay as the game keeps them", Add ? Add - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::FGameMemberInfo_PostReplicatedAdd = reinterpret_cast<decltype(Natives::FGameMemberInfo_PostReplicatedAdd)>(Add);
+    Log::Info(L"Finder: FGameMemberInfo::PostReplicatedAdd (HandleGameMemberAdded) at 0x{:X}", Add - Finder::ImageBase());
+    return true;
+}
+
 namespace
 {
     // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg

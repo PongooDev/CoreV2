@@ -466,6 +466,11 @@ static void InstallHooks()
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameStateAthena::HookCallSites();
+            // 8.20+: the server's team and squad maps from the game members Core adds (CoreV2 #586), found now for the log.
+            if (AFortGameStateAthena::HasGameMemberInfoArray())
+            {
+                Finder::ResolveGameMemberAddedLive(FGameMemberInfoArray::OwningGameStateOffset());
+            }
             AFortGameModeAthena::HookMatchAssignmentVTables();
             UNetDriver::AddPreReplicationCallback(&AFortPlayerController::ReplicateServerFinishedLoadingAfterGameState);
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");

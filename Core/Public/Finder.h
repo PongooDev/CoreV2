@@ -560,6 +560,9 @@ namespace Finder
     uint8_t* SpawnMachineResurrectionTimerBind(UObject* SpawnMachineDefault, UClass* InteractInterface, ptrdiff_t ResurrectionStartDelayOffset);
     // AFortGameModeAthena::AddToAlivePlayers (Natives::AFortGameModeAthena_AddToAlivePlayers), by its log line.
     bool ResolveAddToAlivePlayersLive();
+    // FGameMemberInfo::PostReplicatedAdd (Natives::FGameMemberInfo_PostReplicatedAdd), by HandleGameMemberAdded's log
+    // line, where it reads the array's OwningGameState (OwningGameStateOffset) off its second parameter.
+    bool ResolveGameMemberAddedLive(ptrdiff_t OwningGameStateOffset);
     // From 5.40 (The Getaway): AFortSpecialActorReplicationInfo::AddActorToReplicationList and the constructor and
     // destructor of the FSpecialActorInitData it takes, from AFortAthenaExitCraftSpawner::RegisterSpawnerSpecialActor
     // (the "%s_%s" function that stores Add's id into SpawnerSpecialActorIDOffset), and RemoveActorFromReplicationList,

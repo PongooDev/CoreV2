@@ -27,7 +27,8 @@ void UMcpProfileGroup::SendRequestNow(const TSharedRef<IHttpRequest>& HttpReques
 
     bool bStarted = false;
     FString ErrorStr;
-    FGameServiceMcpPtr McpService = McpSubsystem->GetMcpGameService();
+    FOnlineSubsystemMcp* OnlineSubMcp = GetOnlineSubMcp();
+    FGameServiceMcpPtr McpService = OnlineSubMcp->GetMcpGameService();
     const FUniqueNetIdRepl& AccountId = CredentialsAccountId;
 
     switch (ContextCredentials)
@@ -36,7 +37,7 @@ void UMcpProfileGroup::SendRequestNow(const TSharedRef<IHttpRequest>& HttpReques
     case CXC_Public:
         if (AccountId.IsValid())
         {
-            McpSubsystem->QueueRequest(*McpService, *AccountId, HttpRequest, ErrorStr);
+            OnlineSubMcp->QueueRequest(*McpService, *AccountId, HttpRequest, ErrorStr);
             bStarted = true;
         }
         else
@@ -55,14 +56,14 @@ void UMcpProfileGroup::SendRequestNow(const TSharedRef<IHttpRequest>& HttpReques
             // every service once its hooks are in; should that have missed them, add them now, to all of them.
             if (Finder::ResolveMcpBasicAuth())
             {
-                FFortMcpConfig::AddDedicatedServerPermissionsToServices(McpSubsystem);
+                FFortMcpConfig::AddDedicatedServerPermissionsToServices(OnlineSubMcp);
             }
             FFortMcpConfig::AddDedicatedServerPermissions(McpService->ServiceConfig);
             Permissions = McpService->ServiceConfig.FindServicePermissions(DedicatedServerServicePermissionsName);
         }
         if (Permissions)
         {
-            bStarted = McpSubsystem->QueueRequest(*McpService, Permissions->Id, HttpRequest, ErrorStr);
+            bStarted = OnlineSubMcp->QueueRequest(*McpService, Permissions->Id, HttpRequest, ErrorStr);
         }
         else
         {

@@ -1035,6 +1035,8 @@ namespace Natives
     inline ptrdiff_t FGameServiceMcp_ServiceConfig = -1;
     inline ptrdiff_t FOnlineSubsystemMcp_McpGameService = -1;
     inline ptrdiff_t UMcpProfileGroup_McpSubsystem = -1;
+    // 8.40+: UMcpProfileGroup::Mcp (FMcpProfileOSSAccess*), which holds the subsystem; -1 before.
+    inline ptrdiff_t UMcpProfileGroup_Mcp = -1;
     inline ptrdiff_t UMcpProfileGroup_CredentialsAccountId = -1;
     inline ptrdiff_t FProfileHttpRequest_Profile = -1;
     inline ptrdiff_t FProfileHttpRequest_HttpRequest = -1;

@@ -5612,7 +5612,47 @@ namespace
                 }
             }
         }
-        RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? McpSubsystem : 0);
+        ptrdiff_t McpAccess = 0;
+        if (!bService)
+        {
+            // 8.40 (CL-6005771 0xC79495) reaches the subsystem through UMcpProfileGroup::Mcp (FMcpProfileOSSAccess*):
+            // mov rdi, [rdi+110h]; mov rcx, [rdi] (Mcp->OnlineSubMcp); call 0x6B3ED0 (mov rax, [rcx+298h] ... mov rcx,
+            // [rcx+2A0h]), the service getter 6.30 has.
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = SendRequestNowEnd ? Finder::DecodedDirectCalls(SendRequestNow) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+            for (const auto& [Call, Getter] : Calls)
+            {
+                if (bService || Call < SendRequestNow + 10 || Byte(Call - 10) != 0x48 || Byte(Call - 9) != 0x8B || Byte(Call - 3) != 0x48 || Byte(Call - 2) != 0x8B)
+                {
+                    continue;
+                }
+                const uint8_t AccessModRm = Byte(Call - 8);
+                const uint8_t SubsystemModRm = Byte(Call - 1);
+                const uint8_t AccessRegister = (AccessModRm >> 3) & 0x07;
+                const bool bAccessLoad = (AccessModRm & 0xC0) == 0x80 && (AccessModRm & 0x07) != 0x04;
+                const bool bSubsystemLoad = (SubsystemModRm & 0xF8) == 0x08 && (SubsystemModRm & 0x07) == AccessRegister && AccessRegister != 0x04 && AccessRegister != 0x05;
+                const uintptr_t Read = bAccessLoad && bSubsystemLoad ? FindInstruction(Getter, Getter + 0x10, { 0x48, 0x8B, 0x81 }) : 0;
+                const int32_t Object = Read ? *reinterpret_cast<const int32_t*>(Read + 3) : 0;
+                for (uintptr_t Candidate = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B }) : 0; Candidate && !bService; Candidate = FindInstruction(Candidate + 1, Read + 0x40, { 0x48, 0x8B }))
+                {
+                    if ((Byte(Candidate + 2) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Candidate + 3) == Object + 8)
+                    {
+                        ServiceObject = Object;
+                        McpAccess = *reinterpret_cast<const int32_t*>(Call - 7);
+                        bService = true;
+                    }
+                }
+            }
+        }
+        Natives::UMcpProfileGroup_Mcp = McpAccess > 0 ? McpAccess : -1;
+        if (McpAccess > 0)
+        {
+            Natives::UMcpProfileGroup_McpSubsystem = -1;
+            Log::Info(L"Finder: UMcpProfileGroup::Mcp (FMcpProfileOSSAccess*) +0x{:X} holds the subsystem", McpAccess);
+        }
+        else
+        {
+            RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? McpSubsystem : 0);
+        }
         RequireOffset(L"FOnlineSubsystemMcp::McpGameService", Natives::FOnlineSubsystemMcp_McpGameService, bService ? ServiceObject : 0);
 
         const uintptr_t ContextSwitch = Scan({ 0x8B, 0x4F, -1, 0x33, 0xDB, 0x48, 0x89, 0x5D, -1, 0x8B, 0xD3, 0x48, 0x89, 0x5D, -1, 0x85, 0xC9, 0x0F, 0x84 });
@@ -5681,7 +5721,24 @@ namespace
         const ptrdiff_t CredentialsNetId = CredentialsCheck ? *reinterpret_cast<const int32_t*>(CredentialsCheck + 3) : 0;
         RequireOffset(L"UMcpProfileGroup::CredentialsAccountId", Natives::UMcpProfileGroup_CredentialsAccountId, CredentialsNetId > static_cast<ptrdiff_t>(sizeof(void*)) ? CredentialsNetId - static_cast<ptrdiff_t>(sizeof(void*)) : 0);
         RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + IsValidSlotAt) % 8 == 0 ? Byte(CredentialsCheck + IsValidSlotAt) / 8 : -1);
-        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + CheckLength, QueueForUserCallEnd) : 0;
+        uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + CheckLength, QueueForUserCallEnd) : 0;
+        if (QueueForUser && Natives::UMcpProfileGroup_Mcp >= 0)
+        {
+            // 8.40 (CL-6005771) gets the game service (0xC7949F) and builds an FOnlineError (0xC794AA) before it calls the
+            // user's QueueRequest (0xC794C5, a jmp to 0x6C3620, the body that logs this line).
+            const uintptr_t UserBody = FunctionOf(L"Queuing Mcp request for user=%s url=%s");
+            for (uintptr_t Call = QueueForUser; Call; Call = FindRawCall(Call + 5, QueueForUserCallEnd))
+            {
+                uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+                Target = Byte(Target) == 0xE9 ? Finder::RelativeTarget(Target, 1, 5) : Target;
+                if (UserBody && Target == UserBody)
+                {
+                    QueueForUser = Call;
+                    break;
+                }
+                QueueForUser = 0;
+            }
+        }
         Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
 
         uintptr_t AccountInventoryChanged = FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor");

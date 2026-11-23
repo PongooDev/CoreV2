@@ -294,16 +294,22 @@ public:
 
     // 21.40's static AFortPlayerStateAthena::ToDeathCause: the EDeathCause the damage tags give (DeathInfo.DeathCause,
     // which picks the kill feed line), DBNOTimeout for some when the pawn was DBNO. From 3.5 it is that static;
-    // up to 3.3 the pawn's own (DeadPawn). Only where HasToDeathCause.
-    static bool HasToDeathCause() { return Natives::AFortPlayerStateAthena_ToDeathCause || Natives::AFortPlayerPawn_GetDeathCause; }
+    // up to 3.3 the pawn's own (DeadPawn). 1.8 and 1.9 have no such function: their death handler and DBNO handling
+    // inline it, and Core's InlinedToDeathCause does what they do. Only where HasToDeathCause.
+    static bool HasToDeathCause() { return Natives::AFortPlayerStateAthena_ToDeathCause || Natives::AFortPlayerPawn_GetDeathCause || EDeathCause::StaticEnum() != nullptr; }
     static uint8_t ToDeathCause(AFortPawn* DeadPawn, const FGameplayTagContainer& InTags, bool bWasDBNO)
     {
         if (Natives::AFortPlayerStateAthena_ToDeathCause)
         {
             return Natives::AFortPlayerStateAthena_ToDeathCause(InTags, bWasDBNO);
         }
-        return Natives::AFortPlayerPawn_GetDeathCause(DeadPawn, InTags, bWasDBNO);
+        if (Natives::AFortPlayerPawn_GetDeathCause)
+        {
+            return Natives::AFortPlayerPawn_GetDeathCause(DeadPawn, InTags, bWasDBNO);
+        }
+        return InlinedToDeathCause(InTags, bWasDBNO);
     }
+    static uint8_t InlinedToDeathCause(const FGameplayTagContainer& InTags, bool bWasDBNO);
 
     static bool HasKillScore() { return Member_KillScore.IsAvailable(); }
     static bool HasTeamKillScore() { return Member_TeamKillScore.IsAvailable(); }

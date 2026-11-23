@@ -313,6 +313,54 @@ void AFortPlayerStateAthena::SetTeamMemberState(uint8_t NewState)
 #endif
 }
 
+uint8_t AFortPlayerStateAthena::InlinedToDeathCause(const FGameplayTagContainer& InTags, bool bWasDBNO)
+{
+    // 1.9 (CL-3757339) inlines the tags-to-cause mapping in AFortPlayerControllerAthena's pawn-death handler (0x42DB20)
+    // and in AFortPlayerPawnAthena's DBNO handling (0x439020), in this order. The global tags are FortGlobals' (0x5D9730),
+    // the weapon tags are the ones the pawn (0x416E10) and the controller request. A tag matches a damage tag or its
+    // parent (HasTag). 1.8.2 has no grenade, launcher or trap cause but Heavy (Weapon.ranged.heavy); a cause the build's
+    // EDeathCause doesn't have is skipped. Nothing matched: Unspecified, as 1.9.1's function (0x43AE20) returns.
+    const auto Matches = [&InTags](const wchar_t* TagName)
+    {
+        const FName Name(TagName, FNAME_Find);
+        return !Name.IsNone() && InTags.HasTag(FGameplayTag{ Name });
+    };
+    if (Matches(L"Gameplay.Damage.Environment.Falling"))
+    {
+        return bWasDBNO ? EDeathCause::GetDBNOTimeout() : EDeathCause::GetFallDamage();
+    }
+    if (Matches(L"Gameplay.Damage.OutsideSafeZone"))
+    {
+        return bWasDBNO ? EDeathCause::GetDBNOTimeout() : EDeathCause::GetOutsideSafeZone();
+    }
+    if (Matches(L"Gameplay.Damage.DBNOBleedOut"))
+    {
+        return EDeathCause::GetDBNOTimeout();
+    }
+    static constexpr std::pair<const wchar_t*, const wchar_t*> WeaponCauses[] = {
+        { L"Weapon.Melee", L"Melee" },
+        { L"Weapon.ranged.pistol", L"Pistol" },
+        { L"Weapon.ranged.smg", L"SMG" },
+        { L"Weapon.ranged.shotgun", L"Shotgun" },
+        { L"Weapon.ranged.assault", L"Rifle" },
+        { L"Weapon.ranged.sniper", L"Sniper" },
+        { L"Weapon.ranged.heavy.grenade", L"Grenade" },
+        { L"Weapon.ranged.heavy.grenade_launcher", L"GrenadeLauncher" },
+        { L"Weapon.ranged.heavy.rocket_launcher", L"RocketLauncher" },
+        { L"trap", L"Trap" },
+        { L"Weapon.ranged.heavy", L"Heavy" },
+    };
+    for (const auto& [TagName, CauseName] : WeaponCauses)
+    {
+        const uint8_t Cause = EDeathCause::StaticEnumInfo().FindValue(CauseName);
+        if (Cause != Reflection::InvalidEnumValue && Matches(TagName))
+        {
+            return Cause;
+        }
+    }
+    return EDeathCause::GetUnspecified();
+}
+
 void AFortPlayerStateAthena::ClearDeathInfo()
 {
 #if WITH_SERVER_CODE

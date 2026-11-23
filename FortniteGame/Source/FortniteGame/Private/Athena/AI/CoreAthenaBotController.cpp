@@ -9062,7 +9062,7 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
         FDeathInfo& DeathInfo = PlayerState->DeathInfo;
         DeathInfo.FinisherOrDowner = KillerState ? KillerState : PlayerState;
         DeathInfo.bDBNO = false;
-        if (Pawn && AFortPlayerStateAthena::HasToDeathCause())
+        if (Pawn && AFortPawn::HasDeathTags() && AFortPlayerStateAthena::HasToDeathCause())
         {
             DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(Pawn, Pawn->DeathTags, false);
             bStormDeath = DeathInfo.DeathCause == EDeathCause::GetOutsideSafeZone();

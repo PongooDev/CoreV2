@@ -1200,7 +1200,7 @@ bool FCoreAthenaBotManager::GetCurrentSafeZone(FVector& OutCenter, float& OutRad
 {
     AFortGameModeAthena* Athena = GetGameMode();
     AFortSafeZoneIndicator* Indicator = Athena ? static_cast<AFortSafeZoneIndicator*>(Athena->SafeZoneIndicator) : nullptr;
-    if (!Indicator || !AFortSafeZoneIndicator::FindStaticFunction_GetSafeZoneCenter())
+    if (!Indicator)
     {
         return false;
     }

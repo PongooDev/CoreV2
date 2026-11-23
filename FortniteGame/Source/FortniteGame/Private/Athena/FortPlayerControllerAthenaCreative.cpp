@@ -1488,6 +1488,13 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
             break;
         }
     }
+    // 8.20 (CL-5625478) drops ReadFromDisk's log line; ReadFromBuffer (0x1338F70) is still ReadFromArchive's only caller,
+    // with 8.00's body (a memory reader over the bytes, then ReadFromArchive).
+    const std::vector<uintptr_t> ArchiveCalls = !ReadFromDisk && ReadFromArchive ? Finder::CallsTo(ReadFromArchive, false) : std::vector<uintptr_t>();
+    if (!Natives::ULevelSaveRecord_ReadFromBuffer && ArchiveCalls.size() == 1)
+    {
+        Natives::ULevelSaveRecord_ReadFromBuffer = reinterpret_cast<decltype(Natives::ULevelSaveRecord_ReadFromBuffer)>(Finder::FunctionStart(ArchiveCalls.front()));
+    }
 
     // The island's cloud save (its upload, or with bCheckin its checkin) and the sidecar's meta setter, which the save
     // calls once for each of its four meta keys and which is the one of them that formats the file's "%s/%s" key.

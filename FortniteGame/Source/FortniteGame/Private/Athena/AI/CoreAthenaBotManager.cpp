@@ -2135,11 +2135,19 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, uint8_t Squad, 
         }
     }
 
-    // A stock AAIController with a player state of the game mode's class (bWantsPlayerState, read as the controller
-    // finishes spawning: AAIController::PostInitializeComponents' InitPlayerState), as 8.30's bot controller has.
+    // Epic's bot controller class where the build has it (AFortAthenaAIBotController, 8.20 on), else a stock
+    // AAIController, with a player state of the game mode's class (bWantsPlayerState, read as the controller finishes
+    // spawning: AAIController::PostInitializeComponents' InitPlayerState). Without Phoebe's Blueprint (its behaviour
+    // tree, perception senses and skill sets) and the stripped bot manager, Epic's class only caches the game mode and
+    // binds its pawn's DBNO and death delegates (8.30 BeginPlay 0xD3C780, OnPossess 0xD508F0); Core's brain drives it.
+    static UClass* const BotControllerClass = []
+    {
+        UClass* EpicClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController");
+        return EpicClass && EpicClass->IsChildOf(AAIController::StaticClass()) ? EpicClass : AAIController::StaticClass();
+    }();
     FTransform SpawnTransform;
     SpawnTransform.Rotation.W = 1.0f;
-    AAIController* Controller = Cast<AAIController>(UGameplayStatics::BeginDeferredActorSpawnFromClass(Athena, AAIController::StaticClass(), SpawnTransform,
+    AAIController* Controller = Cast<AAIController>(UGameplayStatics::BeginDeferredActorSpawnFromClass(Athena, BotControllerClass, SpawnTransform,
         ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
     if (!Controller)
     {

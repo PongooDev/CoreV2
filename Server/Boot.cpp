@@ -27,6 +27,7 @@
 #include "Athena/FortAthenaExitCraftSpawner.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortAthenaVehicle.h"
+#include "Athena/FortOctopusVehicle.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
@@ -435,6 +436,7 @@ static void InstallHooks()
             ABGAConsumableSpawner::HookNatives();
             AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();
+            AFortOctopusVehicle::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             ABuildingItemCollectorActor::HookVTables();

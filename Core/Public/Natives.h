@@ -728,6 +728,14 @@ namespace Natives
     inline uint8_t* AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = nullptr;
     // The same call in AFortDecoTool_ContextTrap's override (8.00 0x15F9D4E, 8.20 0x170117C), which the Chiller and Damage Trap use.
     inline uint8_t* AFortDecoTool_ContextTrap_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = nullptr;
+    // From 8.00 (Finder::ResolveOctopusTowhookLive): the Baller's grapple. The call in AFortOctopusTowhookAttachableProjectile::
+    // OnRep_ReplicatedAttachedInfo (8.00 0x161C3BD, 8.20 CL-5625478 0x1723E7C) that hands the hit to the owning
+    // AFortOctopusVehicle, a call into the shared empty function. UPrimitiveComponent::GetBodyInstance's slot and
+    // FBodyInstance::GetUnrealWorldTransform (8.20 0x2BAC2F0, 8.00 0x2B06090), which FTowhookAttachState's world getter
+    // (8.20 0xF57770, 8.00 0xE60900) places the attach point with.
+    inline uint8_t* AFortOctopusTowhookAttachableProjectile_OnRep_ReplicatedAttachedInfo_SetTowhookAttachStateCall = nullptr;
+    inline int32_t UPrimitiveComponent_GetBodyInstanceIndex = -1;
+    inline FTransform* (*FBodyInstance_GetUnrealWorldTransform)(const void* This, FTransform* Result, bool bWithProjection, bool bForceGlobalPose) = nullptr;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;
     // From 3.0 (Finder::ResolveGetPoiTagsForLive): AFortGameMode::GetPoiTagsFor, a pawn's location tags (slot 0x144 on
     // 3.6 and 4.0; AFortGameModeAthena's asks its POI manager, AFortGameModeZone's is the shared empty function).

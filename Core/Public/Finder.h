@@ -484,6 +484,7 @@ namespace Finder
     bool ResolveReplicationGraphActorInfoLive(void** GraphVTable);
     bool ResolveDecoSpawnedLive();
     bool ResolveCreateBuildingAndSpawnDecoLive();
+    bool ResolveOctopusTowhookLive();
     bool ResolveScoreBuildingConstructionLive();
     bool ResolveGetPoiTagsForLive();
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);

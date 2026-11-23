@@ -13710,6 +13710,77 @@ bool Finder::ResolveCreateBuildingAndSpawnDecoLive()
     return true;
 }
 
+bool Finder::ResolveOctopusTowhookLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortOctopusTowhookAttachableProjectile_OnRep_ReplicatedAttachedInfo_SetTowhookAttachStateCall || bSearched)
+    {
+        return Natives::AFortOctopusTowhookAttachableProjectile_OnRep_ReplicatedAttachedInfo_SetTowhookAttachStateCall != nullptr;
+    }
+    bSearched = true;
+
+    // The Baller's (AFortOctopusVehicle) grapple is AFortOctopusTowhookAttachableProjectile. Its OnRep_ReplicatedAttachedInfo
+    // override (slot 0xD6, 8.00 0x161C350, 8.20 CL-5625478 0x1723D60), which ServerAttachToActor_Implementation calls on
+    // the server, calls AFortAttachableProjectileBase's and then hands OwningVehicle the hit: (the hit component as a
+    // TWeakObjectPtr, the hit's Location, its Normal), all by reference. That call goes into the shared empty function
+    // (8.00 0x161C3BD, 8.20 0x1723E7C), so the vehicle never attaches and its towhook model retracts at full length.
+    UFunction* OnRep = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAttachableProjectileBase:OnRep_ReplicatedAttachedInfo");
+    void** ProjectileVTable = OnRep ? CdoVTable(L"/Script/FortniteGame.FortOctopusTowhookAttachableProjectile") : nullptr;
+    if (!ProjectileVTable)
+    {
+        Log::Info(L"Finder: no AFortOctopusTowhookAttachableProjectile, the Baller's grapple attach is not restored");
+        return false;
+    }
+    const int32_t Index = ImplementationIndex(OnRep);
+    const uintptr_t Override = VTableEntry(ProjectileVTable, Index);
+    const uintptr_t Base = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortAttachableProjectileBase"), Index);
+    std::vector<uintptr_t> StubCalls;
+    for (const auto& [Site, Target] : Override && Override != Base ? Finder::DecodedDirectCalls(Override) : decltype(Finder::DecodedDirectCalls(0)){})
+    {
+        if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
+        {
+            StubCalls.push_back(Site);
+        }
+    }
+
+    // The vehicle keeps the attach point in the hit component's body space: FTowhookAttachState's world getter (8.00
+    // 0xE60900, 8.20 0xF57770; GetTowhookPosition's exec -> its native -> its second call -> that one's call) takes
+    // Component->GetBodyInstance(NAME_None, true) (the first virtual call, 8.20 [r9+670h]) and transforms the local
+    // location and normal by its GetUnrealWorldTransform(true, false) (the next direct call).
+    UFunction* GetTowhookPosition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortOctopusVehicle:GetTowhookPosition");
+    const uintptr_t Exec = GetTowhookPosition ? reinterpret_cast<uintptr_t>(GetTowhookPosition->GetNativeFunc()) : 0;
+    const auto ExecCalls = IsInText(Exec) ? Finder::DecodedDirectCalls(Exec) : decltype(Finder::DecodedDirectCalls(0)){};
+    const auto NativeCalls = ExecCalls.size() == 1 ? Finder::DecodedDirectCalls(ExecCalls[0].second) : decltype(Finder::DecodedDirectCalls(0)){};
+    const auto GetWorldLocationCalls = NativeCalls.size() >= 2 ? Finder::DecodedDirectCalls(NativeCalls[1].second) : decltype(Finder::DecodedDirectCalls(0)){};
+    const uintptr_t GetWorldLocationAndNormal = GetWorldLocationCalls.size() == 1 ? GetWorldLocationCalls[0].second : 0;
+    const uintptr_t GetterEnd = GetWorldLocationAndNormal ? Finder::FunctionEnd(GetWorldLocationAndNormal) : 0;
+    const uintptr_t BodyInstanceCall = GetterEnd ? FindVirtualCall(GetWorldLocationAndNormal, GetterEnd) : 0;
+    uintptr_t GetUnrealWorldTransform = 0;
+    for (const auto& [Site, Target] : BodyInstanceCall ? Finder::DecodedDirectCalls(GetWorldLocationAndNormal) : decltype(Finder::DecodedDirectCalls(0)){})
+    {
+        if (Site > BodyInstanceCall && !GetUnrealWorldTransform)
+        {
+            GetUnrealWorldTransform = Target;
+        }
+    }
+    const int32_t BodyInstanceIndex = VirtualSlot(BodyInstanceCall);
+
+    if (StubCalls.size() != 1 || BodyInstanceIndex < 0 || !GetUnrealWorldTransform)
+    {
+        Log::Error(L"Finder: the Baller's grapple attach not restored (OnRep_ReplicatedAttachedInfo slot {}, override 0x{:X}, {} stub calls; world getter 0x{:X}, GetBodyInstance slot {}, GetUnrealWorldTransform 0x{:X})",
+            Index, Override ? Override - Finder::ImageBase() : 0, StubCalls.size(), GetWorldLocationAndNormal ? GetWorldLocationAndNormal - Finder::ImageBase() : 0, BodyInstanceIndex,
+            GetUnrealWorldTransform ? GetUnrealWorldTransform - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    Natives::AFortOctopusTowhookAttachableProjectile_OnRep_ReplicatedAttachedInfo_SetTowhookAttachStateCall = reinterpret_cast<uint8_t*>(StubCalls[0]);
+    Natives::UPrimitiveComponent_GetBodyInstanceIndex = BodyInstanceIndex;
+    Natives::FBodyInstance_GetUnrealWorldTransform = reinterpret_cast<decltype(Natives::FBodyInstance_GetUnrealWorldTransform)>(GetUnrealWorldTransform);
+    Log::Info(L"Finder: AFortOctopusTowhookAttachableProjectile::OnRep_ReplicatedAttachedInfo (slot 0x{:X}, 0x{:X}) attaches the vehicle with a stripped call at 0x{:X}; GetBodyInstance slot 0x{:X}, GetUnrealWorldTransform 0x{:X}",
+        Index, Override - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase(), BodyInstanceIndex, GetUnrealWorldTransform - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveScoreBuildingConstructionLive()
 {
     static bool bSearched = false;

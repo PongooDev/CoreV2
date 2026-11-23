@@ -19,6 +19,13 @@ struct alignas(16) FQuat
         const FVector T = FVector::CrossProduct(Q, V) * 2.0f;
         return V + T * W + FVector::CrossProduct(Q, T);
     }
+
+    FVector UnrotateVector(const FVector& V) const
+    {
+        const FVector Q(-X, -Y, -Z);
+        const FVector T = FVector::CrossProduct(Q, V) * 2.0f;
+        return V + T * W + FVector::CrossProduct(Q, T);
+    }
 };
 
 static_assert(sizeof(FQuat) == 0x10);

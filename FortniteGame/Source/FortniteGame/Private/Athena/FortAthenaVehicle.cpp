@@ -9,6 +9,7 @@
 #include "Math/Rotator.h"
 #include "Math/Transform.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -238,4 +239,15 @@ void AFortAthenaVehicle::ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaV
 void AFortAthenaVehicle::ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState)
 {
     This->ServerUpdateInputParams_Implementation(InState);
+}
+
+bool AFortAthenaVehicle::IsAsleep() const
+{
+    Reflection::FParams Params(FindStaticFunction_IsAsleep());
+    if (!Params.Call(const_cast<AFortAthenaVehicle*>(this)))
+    {
+        return false;
+    }
+    const bool* bAsleep = Params.Get<bool>(L"ReturnValue");
+    return bAsleep && *bAsleep;
 }

@@ -63,6 +63,16 @@ namespace Finder
         ptrdiff_t ManagedTickIndexOffset = -1;
     };
 
+    // 8.40's Air Royale mutator (AFortAthenaMutator_Goose): the stripped SpawnPlane, the build's calls to it, and the
+    // pickup timer's call to the shared return-zero function in place of the pickup spawn.
+    struct FGooseMutatorSites
+    {
+        uintptr_t SpawnPlane = 0;
+        uint8_t* SpawnPlaneCalls[8] = {};
+        int32_t NumSpawnPlaneCalls = 0;
+        uint8_t* SpawnPickupCall = nullptr;
+    };
+
     struct FPlayerSpawnQuerySites
     {
         uintptr_t PickSpawnActor = 0;
@@ -536,6 +546,8 @@ namespace Finder
     uint8_t* AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset);
     bool ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FConditionalFoundationQuotaSites& OutSites);
     bool ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites);
+    // False (and OutSites empty) where the build has no Air Royale mutator or SpawnPlane has a body.
+    bool ResolveGooseMutatorLive(FGooseMutatorSites& OutSites);
     // AFortPlayerState's home actor setter (Natives::AFortPlayerState_SetHomeActor), the call in
     // AFortGameMode::SpawnDefaultPawnFor_Implementation that both reads and writes the player state's HomeActor.
     bool ResolveSetHomeActorLive(ptrdiff_t HomeActorOffset);

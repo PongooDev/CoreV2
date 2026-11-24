@@ -9784,6 +9784,100 @@ bool Finder::ResolveEncounterOverrideCategoryLive()
     return true;
 }
 
+bool Finder::ResolveGooseMutatorLive(FGooseMutatorSites& OutSites)
+{
+    // 8.40 (CL-6005771), Air Royale. SpawnPlane (Core's name, 0xFF2460) keeps only its loop over SpawnedVehicles and
+    // returns null: no call is left in it. It is the one callee OnPlaylistLoaded's native (0xFEA1D0, in its loop of
+    // InitialNumOfSleepingPlanes) and OnVehicleStolen's (0xFEB2D0) share; OnVehicleDied's (0xFEAF00) and SeatPlayer
+    // (0xFEDF90, by its "Spawning a new one" log) call it too. The pickup timer (0xFF5D80, bound with a lea in
+    // OnGamePhaseChanged's native 0xFE7900) calls the shared return-zero function with the world in rcx
+    // (0xFF5E91: mov rcx, rax; call) where the pickup spawn was.
+    OutSites = FGooseMutatorSites();
+    if (!FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Goose") || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        return false;
+    }
+    const uintptr_t PlaylistLoaded = ExecImplementation(L"/Script/FortniteGame.FortAthenaMutator_Goose:OnPlaylistLoaded");
+    const uintptr_t VehicleDied = ExecImplementation(L"/Script/FortniteGame.FortAthenaMutator_Goose:OnVehicleDied");
+    const uintptr_t VehicleStolen = ExecImplementation(L"/Script/FortniteGame.FortAthenaMutator_Goose:OnVehicleStolen");
+    const uintptr_t PhaseChanged = ExecImplementation(L"/Script/FortniteGame.FortAthenaMutator_Goose:OnGamePhaseChanged");
+    const std::vector<uintptr_t> SeatRefs = Finder::StringRefs(L"[AFortAthenaMutator_Goose::SeatPlayer()] No vehicle, or sleeping vehicle, found! Spawning a new one");
+    const uintptr_t SeatPlayer = SeatRefs.size() == 1 ? Finder::FunctionStart(SeatRefs[0]) : 0;
+    if (!IsInText(PlaylistLoaded) || !IsInText(VehicleDied) || !IsInText(VehicleStolen) || !IsInText(PhaseChanged) || !IsInText(SeatPlayer))
+    {
+        // 7.30 to 8.30 have the class while Air Royale was being made, without all of these.
+        Log::Info(L"Finder: AFortAthenaMutator_Goose's natives not all in this build (OnPlaylistLoaded 0x{:X}, OnVehicleDied 0x{:X}, OnVehicleStolen 0x{:X}, OnGamePhaseChanged 0x{:X}, SeatPlayer 0x{:X})",
+            PlaylistLoaded ? PlaylistLoaded - Finder::ImageBase() : 0, VehicleDied ? VehicleDied - Finder::ImageBase() : 0, VehicleStolen ? VehicleStolen - Finder::ImageBase() : 0,
+            PhaseChanged ? PhaseChanged - Finder::ImageBase() : 0, SeatPlayer ? SeatPlayer - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    const std::vector<std::pair<uintptr_t, uintptr_t>> LoadedCalls = Finder::DecodedDirectCalls(PlaylistLoaded);
+    const std::vector<std::pair<uintptr_t, uintptr_t>> StolenCalls = Finder::DecodedDirectCalls(VehicleStolen);
+    uintptr_t SpawnPlane = 0;
+    int32_t Shared = 0;
+    for (const auto& [LoadedSite, LoadedTarget] : LoadedCalls)
+    {
+        const bool bInStolen = std::any_of(StolenCalls.begin(), StolenCalls.end(), [Target = LoadedTarget](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == Target; });
+        if (bInStolen && LoadedTarget != SpawnPlane)
+        {
+            SpawnPlane = LoadedTarget;
+            ++Shared;
+        }
+    }
+    if (Shared != 1 || !IsInText(SpawnPlane))
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_Goose's plane spawn not found ({} callees shared by OnPlaylistLoaded 0x{:X} and OnVehicleStolen 0x{:X})", Shared,
+            PlaylistLoaded - Finder::ImageBase(), VehicleStolen - Finder::ImageBase());
+        return false;
+    }
+    // A real body spawns the plane (UWorld::SpawnActor): a stripped one calls nothing.
+    if (!Finder::DecodedDirectCalls(SpawnPlane).empty())
+    {
+        Log::Info(L"Finder: AFortAthenaMutator_Goose's plane spawn 0x{:X} has a body in this build, nothing to restore", SpawnPlane - Finder::ImageBase());
+        return false;
+    }
+    for (const uintptr_t Function : { PlaylistLoaded, VehicleDied, VehicleStolen, SeatPlayer })
+    {
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Function))
+        {
+            if (Target == SpawnPlane && OutSites.NumSpawnPlaneCalls < static_cast<int32_t>(std::size(OutSites.SpawnPlaneCalls)))
+            {
+                OutSites.SpawnPlaneCalls[OutSites.NumSpawnPlaneCalls++] = reinterpret_cast<uint8_t*>(Site);
+            }
+        }
+    }
+    OutSites.SpawnPlane = SpawnPlane;
+
+    // The pickup timer: the function OnGamePhaseChanged binds whose one call to a stub has the world in rcx.
+    int32_t PickupCalls = 0;
+    for (const auto& [Lea, Taken] : Finder::DecodedAddressesTaken(PhaseChanged))
+    {
+        if (!IsInText(Taken) || Finder::FunctionStart(Taken) != Taken)
+        {
+            continue;
+        }
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Taken))
+        {
+            const uint8_t* Code = reinterpret_cast<const uint8_t*>(Site);
+            if (Finder::IsStubFunction(Target) && Code[-3] == 0x48 && Code[-2] == 0x8B && Code[-1] == 0xC8)
+            {
+                OutSites.SpawnPickupCall = const_cast<uint8_t*>(Code);
+                ++PickupCalls;
+            }
+        }
+    }
+    if (PickupCalls != 1)
+    {
+        OutSites.SpawnPickupCall = nullptr;
+        Log::Error(L"Finder: AFortAthenaMutator_Goose's pickup timer's stripped spawn not found ({} candidates off OnGamePhaseChanged 0x{:X})", PickupCalls, PhaseChanged - Finder::ImageBase());
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_Goose's plane spawn 0x{:X} is stripped, {} calls to it (OnPlaylistLoaded 0x{:X}, OnVehicleDied 0x{:X}, OnVehicleStolen 0x{:X}, SeatPlayer 0x{:X}); the pickup spawn call 0x{:X}",
+        SpawnPlane - Finder::ImageBase(), OutSites.NumSpawnPlaneCalls, PlaylistLoaded - Finder::ImageBase(), VehicleDied - Finder::ImageBase(), VehicleStolen - Finder::ImageBase(),
+        SeatPlayer - Finder::ImageBase(), OutSites.SpawnPickupCall ? reinterpret_cast<uintptr_t>(OutSites.SpawnPickupCall) - Finder::ImageBase() : 0);
+    return true;
+}
+
 uint8_t* Finder::AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset)
 {
     // 6.20 (CL-4497486) gives Battle Royale an AI of its own for the Fortnitemares Cube Monsters (the Deimos playlists'

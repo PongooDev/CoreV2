@@ -27,6 +27,7 @@
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
 #include "Athena/FortAthenaExitCraftSpawner.h"
+#include "Athena/Mutators/FortAthenaMutator_Goose.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortOctopusVehicle.h"
@@ -452,6 +453,8 @@ static void InstallHooks()
             ABGAConsumableSpawner::HookNatives();
             AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();
+            // 8.40's Air Royale: the mutator's planes and its floating upgrades (#609, #611).
+            AFortAthenaMutator_Goose::HookNatives();
             // 8.30's Pirate Cannon: firing the passenger (ServerFireActorInCannon_Implementation, stripped).
             AFortWeaponRangedMountedCannon::HookVTables();
             AFortOctopusVehicle::HookCallSites();

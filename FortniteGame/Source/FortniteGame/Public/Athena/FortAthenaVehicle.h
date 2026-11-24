@@ -3,6 +3,7 @@
 #include "GameFramework/Pawn.h"
 #include "Math/Quat.h"
 #include "Math/Vector.h"
+#include "UObject/ScriptDelegates.h"
 
 // The physics state a vehicle's driver sends the server (4.2-5.0: 0x40 bytes). The driver's client fills it from its
 // body (4.1 0xA381C0): Translation and Rotation are the body's ComponentToWorld, LinearVelocity is
@@ -34,8 +35,17 @@ class AFortAthenaVehicle : public APawn
     DefineUFunction(ServerUpdatePhysicsParams)
     DefineUFunction(ServerUpdateInputParams)
     DefineUStructProperty(FReplicatedAthenaVehicleInputState, ReplicatedInputParams)
+    DefineUFunction(IsAsleep)
 
 public:
+    // Broadcast when the vehicle runs out of health (DeadVehicle, InTags, EventInstigator, DamageCauser), and when its
+    // SquadId changes (OldID, NewID). 8.40's Air Royale mutator listens to both on its planes.
+    DefineUProperty(FMulticastScriptDelegate, OnHandleOutOfHealthDelegate)
+    DefineUProperty(FMulticastScriptDelegate, OnVehicleSquadChanged)
+    static bool HasPlaneDelegates() { return StaticClass() && Member_OnHandleOutOfHealthDelegate.IsAvailable() && Member_OnVehicleSquadChanged.IsAvailable() && FindStaticFunction_IsAsleep(); }
+    // A vehicle starts asleep (BeginPlay puts it to sleep, 8.40 0xEE5F8A) and wakes when something moves it.
+    bool IsAsleep() const;
+
     void ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);
     void ServerUpdateInputParams_Implementation(const FReplicatedAthenaVehicleInputState& InState);
 

@@ -399,6 +399,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_AI.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Barrier.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Goose.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaGoosePickup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortMutatorListComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BGAConsumableSpawner.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
@@ -671,6 +673,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_AI.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Barrier.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Goose.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaGoosePickup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BGAConsumableSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingActor.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingContainer.cpp" />

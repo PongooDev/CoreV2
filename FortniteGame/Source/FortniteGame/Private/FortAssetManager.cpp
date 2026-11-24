@@ -7,6 +7,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Templates/Casts.h"
+#include "UObject/UObjectArray.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -51,6 +52,12 @@ void UFortAssetManager::StartInitialLoadingHK(UFortAssetManager* This)
 void UFortAssetManager::Hook()
 {
     // 8.30 on (the game features came with it); the class's own StartInitialLoading slot, before UEngine::Init runs it.
+    // 1.1-1.9 boot Core before the engine has made any object, and StaticFindObject faults there (#615); those builds
+    // have no game features.
+    if (!Natives::GUObjectArray || Natives::GUObjectArray->GetObjectArrayNum() == 0)
+    {
+        return;
+    }
     if (!FindObject<UEnum>(nullptr, L"/Script/FortniteGame.EFortGameFeature") || !Finder::ResolveFortAssetManagerGameFeatures())
     {
         return;

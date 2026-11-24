@@ -20,10 +20,11 @@ public:
         FScriptArray& OutAbilitySetHandles);
 
     // A player's generic ability set (UFortGameData::GenericPlayerAbilitySet, GAS_DefaultPlayer: jump, sprint, crouch,
-    // interact, DBNO, death and the rest) on their player state's ability system, as 21.40's
-    // UFortGlobals::InitializePlayerGameplayAbilities does for a PlayerStateOrProxy. Equipped once: nothing happens when
-    // the ability system already has every ability of the set. Only on builds whose ApplyHeroEffectsAndAbilities runs
-    // in Save the World only (8.00 on); older builds get the set from that function (EquipGenericPlayerAbilitySet).
+    // interact, DBNO, death and the rest; 8.40 on, in the Athena sub game, AthenaPlayerAbilitySet, GAS_AthenaPlayer) on
+    // their player state's ability system, as UFortGlobals::InitializePlayerGameplayAbilities does for a
+    // PlayerStateOrProxy. Equipped once: nothing happens when the ability system already has every ability of the set.
+    // Only on builds whose ApplyHeroEffectsAndAbilities runs in Save the World only (8.00 on); older builds get the set
+    // from that function (EquipGenericPlayerAbilitySet).
     static void InitializePlayerGameplayAbilities(IAbilitySystemInterface* PlayerStateOrProxy);
 
     static void Hook();

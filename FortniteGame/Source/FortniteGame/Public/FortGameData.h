@@ -54,6 +54,10 @@ public:
     DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
+    // 8.40 (CL-6005771) on: Battle Royale's player set (GAS_AthenaPlayer: the rift's skydive, slurp, grenade rethrow and
+    // the rest), which InitializePlayerGameplayAbilities gives in the Athena sub game instead of GenericPlayerAbilitySet.
+    DefineUProperty(TAssetPtr<UFortAbilitySet>, AthenaPlayerAbilitySet)
+    static bool HasAthenaPlayerAbilitySet() { return Member_AthenaPlayerAbilitySet.IsAvailable(); }
     // The ability an emote plays through (its montage comes from the spec's source object, the emote item). From 1.8;
     // 1.7.2 has none (its emotes are AFortPlayerController::ServerEmote's, with no UFortMontageItemDefinitionBase).
     DefineUProperty(TAssetSubclassOf<UGameplayAbility>, EmoteGameplayAbility)

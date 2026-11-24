@@ -12,8 +12,6 @@
 #include "Natives.h"
 #include "UObject/Class.h"
 
-#include <vector>
-
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 void UFortGlobals::ApplyHeroEffectsAndAbilities(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles)
@@ -71,9 +69,22 @@ void UFortGlobals::InitializePlayerGameplayAbilities(IAbilitySystemInterface* Pl
         return;
     }
 
+    // 8.40 (CL-6005771, 0x1293330) gives the Athena sub game's players the game data's AthenaPlayerAbilitySet
+    // (GAS_AthenaPlayer) and the others GenericPlayerAbilitySet, by UFortGlobals::GetSubGame (0x128A980) == Athena; 8.30
+    // (0x1276010) gives GenericPlayerAbilitySet only. GA_Rift_Athena_Skydive is only in GAS_AthenaPlayer on 8.40, so with
+    // GAS_DefaultPlayer a rift's Abilities.Generic.Rift.Trigger found no ability and the player fell standing (#613).
+    // Core calls this only in Battle Royale and Creative (AFortGameModeAthena), the Athena sub game.
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UFortAbilitySet* GenericPlayerAbilitySet = GameData ? GameData->GenericPlayerAbilitySet.LoadSynchronous() : nullptr;
-    if (!GenericPlayerAbilitySet)
+    UFortAbilitySet* PlayerAbilitySet = nullptr;
+    if (GameData && UFortGameData::HasAthenaPlayerAbilitySet())
+    {
+        PlayerAbilitySet = GameData->AthenaPlayerAbilitySet.LoadSynchronous();
+    }
+    if (!PlayerAbilitySet && GameData)
+    {
+        PlayerAbilitySet = GameData->GenericPlayerAbilitySet.LoadSynchronous();
+    }
+    if (!PlayerAbilitySet)
     {
         return;
     }
@@ -81,7 +92,7 @@ void UFortGlobals::InitializePlayerGameplayAbilities(IAbilitySystemInterface* Pl
     // The set stays on the player state's ability system across pawns (the bus, a respawn): equip it again only when
     // one of its abilities is missing, so its effects aren't applied twice.
     bool bHasAll = true;
-    const TArray<UClass*>& Abilities = GenericPlayerAbilitySet->GameplayAbilities;
+    const TArray<UClass*>& Abilities = PlayerAbilitySet->GameplayAbilities;
     for (UClass* Ability : Abilities)
     {
         if (Ability && !AbilitySystemComponent->FindAbilitySpecFromClass(Ability))
@@ -96,12 +107,13 @@ void UFortGlobals::InitializePlayerGameplayAbilities(IAbilitySystemInterface* Pl
     }
 
     UScriptStruct* HandleStruct = FFortAbilitySetHandle::StaticStruct();
-    std::vector<uint8_t> HandleStorage(HandleStruct->GetStructureSize(), 0);
-    HandleStruct->InitializeStruct(HandleStorage.data());
-    UFortKismetLibrary::EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface>(PlayerStateOrProxy->_getUObject(), PlayerStateOrProxy), GenericPlayerAbilitySet, nullptr,
-        *reinterpret_cast<FFortAbilitySetHandle*>(HandleStorage.data()));
-    HandleStruct->DestroyStruct(HandleStorage.data());
-    UE_LOG(LogFort, Log, TEXT("InitializePlayerGameplayAbilities: %s has %s (%d abilities)"), *GetNameSafe(OwnerActor), *GetNameSafe(GenericPlayerAbilitySet), Abilities.Num());
+    TArray<uint8_t> HandleStorage;
+    HandleStorage.AddZeroed(HandleStruct->GetStructureSize());
+    HandleStruct->InitializeStruct(HandleStorage.GetData());
+    UFortKismetLibrary::EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface>(PlayerStateOrProxy->_getUObject(), PlayerStateOrProxy), PlayerAbilitySet, nullptr,
+        *reinterpret_cast<FFortAbilitySetHandle*>(HandleStorage.GetData()));
+    HandleStruct->DestroyStruct(HandleStorage.GetData());
+    UE_LOG(LogFort, Log, TEXT("InitializePlayerGameplayAbilities: %s has %s (%d abilities)"), *GetNameSafe(OwnerActor), *GetNameSafe(PlayerAbilitySet), Abilities.Num());
 #endif
 }
 

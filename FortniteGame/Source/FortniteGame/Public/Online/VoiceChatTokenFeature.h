@@ -2,6 +2,7 @@
 
 #include "Containers/UnrealString.h"
 #include "Features/IModularFeature.h"
+#include "Misc/Optional.h"
 #include "UObject/NameTypes.h"
 
 // What a server's AFortGameModeZone (and its subclasses) asks for its players' Vivox access tokens: the modular
@@ -32,4 +33,46 @@ public:
     virtual void GenerateClientLoginToken(const FString& PlayerName, FString& OutToken) = 0;
     // A token for PlayerName to join ChannelName.
     virtual void GenerateClientJoinToken(const FString& PlayerName, const FString& ChannelName, FString& OutToken) = 0;
+};
+
+// UE 4.23's VoiceChat plugin types (VoiceChat.h), as 8.20 to 8.40's FVivoxVoiceChat reads them: [VoiceChat.Vivox]
+// MinDistance and MaxDistance are ints there (GetInt, 8.30 0xBCDCE0), Rolloff a float.
+enum class EVoiceChatChannelType : uint8_t
+{
+    NonPositional,
+    Positional,
+    Echo
+};
+
+enum class EVoiceChatAttenuationModel : uint8_t
+{
+    None,
+    InverseByDistance,
+    LinearByDistance,
+    ExponentialByDistance
+};
+
+struct FVoiceChatChannel3dProperties
+{
+    EVoiceChatAttenuationModel AttenuationModel = EVoiceChatAttenuationModel::InverseByDistance;
+    int32_t MinDistance = 100;
+    int32_t MaxDistance = 3000;
+    float Rolloff = 1.0f;
+};
+
+// The same feature as 8.20 to 8.40 (UE 4.23, the VoiceChat/VivoxVoiceChat plugins) lay it out: the client asks the
+// backend for its own login token (POST .../voice/{accountId}/createLoginToken), so the server only signs join tokens.
+// AFortGameModeZone's answer to ServerVoiceChatRequestJoinToken (8.30 0x12354D0, 8.20 0x117BE00, the same 0x422-byte
+// body on 8.40) calls slot 1 as GenerateClientJoinToken(account id, channel, NonPositional, unset 3D properties) and
+// sends the FString it returns with ClientVoiceChatSendJoinToken. 21.40 keeps the slot order with delegates added.
+class IVoiceChatTokenFeatureWithChannelType : public IModularFeature
+{
+public:
+    static FName GetModularFeatureName()
+    {
+        return IVoiceChatTokenFeature::GetModularFeatureName();
+    }
+
+    virtual FString GenerateClientLoginToken(const FString& PlayerName) = 0;
+    virtual FString GenerateClientJoinToken(const FString& PlayerName, const FString& ChannelName, EVoiceChatChannelType ChannelType, const TOptional<FVoiceChatChannel3dProperties>& Channel3dProperties) = 0;
 };

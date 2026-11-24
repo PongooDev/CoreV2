@@ -15,6 +15,7 @@
 #include <cstring>
 #include <format>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #pragma comment(lib, "bcrypt.lib")
@@ -125,8 +126,11 @@ namespace
 
     // The feature the engine holds. Epic's module would own it and unregister it in ShutdownModule; Core's server ends
     // with its process, so it stays registered (and allocated) until then.
-    FVivoxVoiceChatToken* RegisteredFeature = nullptr;
+    IModularFeature* RegisteredFeature = nullptr;
 
+    // FeatureType is FVivoxVoiceChatToken (5.10 to 8.00's FVivox) or FVivoxVoiceChatChannelToken (8.20 to 8.40's UE 4.23
+    // VivoxVoiceChat), whichever interface the build's game mode calls.
+    template <typename FeatureType>
     void RegisterFeature(std::string Issuer, std::string Domain, std::string Key, int32_t TokenLifetimeSeconds)
     {
         if (RegisteredFeature)
@@ -135,9 +139,9 @@ namespace
         }
         const std::wstring IssuerText = ToWide(Issuer);
         const std::wstring DomainText = ToWide(Domain);
-        FVivoxVoiceChatToken* Feature = new FVivoxVoiceChatToken(std::move(Issuer), std::move(Domain), std::move(Key), TokenLifetimeSeconds);
+        FeatureType* Feature = new FeatureType(std::move(Issuer), std::move(Domain), std::move(Key), TokenLifetimeSeconds);
         // The game takes the IModularFeature* the registry gives back 8 bytes down to the interface (7.00 0xEE0731, "lea
-        // rsi, [rax-8]"): the interface's vtable pointer, then its empty IModularFeature base.
+        // rsi, [rax-8]"; 8.30's 0x12354D0 the same): the interface's vtable pointer, then its empty IModularFeature base.
         const ptrdiff_t BaseOffset = reinterpret_cast<uintptr_t>(static_cast<IModularFeature*>(Feature)) - reinterpret_cast<uintptr_t>(Feature);
         if (BaseOffset != 8)
         {
@@ -154,14 +158,14 @@ namespace
         // The lookup the game mode makes before each token (IsModularFeatureAvailable, then GetModularFeature) must give
         // this feature back.
         const int32_t Count = ModularFeatures.GetModularFeatureImplementationCount(FeatureName);
-        const IVoiceChatTokenFeature* Found = Count > 0 ? &ModularFeatures.GetModularFeature<IVoiceChatTokenFeature>(FeatureName) : nullptr;
+        const FeatureType* Found = Count > 0 ? &ModularFeatures.GetModularFeature<FeatureType>(FeatureName) : nullptr;
         if (Found != Feature)
         {
             Log::Error(L"VoiceChatToken: registered, but the engine lists {} implementation(s) and its first isn't Core's, so the game mode won't use it", Count);
             return;
         }
-        Log::Info(L"VoiceChatToken: registered Core's Vivox token feature (issuer {}, domain {}, tokens live {} s); the engine lists {} implementation(s), Core's first",
-            IssuerText, DomainText, TokenLifetimeSeconds, Count);
+        Log::Info(L"VoiceChatToken: registered Core's Vivox token feature for {} (issuer {}, domain {}, tokens live {} s); the engine lists {} implementation(s), Core's first",
+            std::is_same_v<FeatureType, FVivoxVoiceChatChannelToken> ? L"UE 4.23's VivoxVoiceChat" : L"FVivox", IssuerText, DomainText, TokenLifetimeSeconds, Count);
     }
 }
 
@@ -220,6 +224,42 @@ std::string FVivoxVoiceChatToken::GenerateToken(const char* Action, const std::s
     return Signed + "." + Signature;
 }
 
+FVivoxVoiceChatChannelToken::FVivoxVoiceChatChannelToken(std::string InIssuer, std::string InDomain, std::string InKey, int32_t InTokenLifetimeSeconds)
+    : Signer(std::move(InIssuer), std::move(InDomain), std::move(InKey), InTokenLifetimeSeconds)
+{
+}
+
+std::string FVivoxVoiceChatChannelToken::AccountUri(const FString& PlayerName) const
+{
+    return "sip:." + Signer.GetIssuer() + "." + ToUtf8(PlayerName.ToStdString()) + ".@" + Signer.GetDomain();
+}
+
+FString FVivoxVoiceChatChannelToken::GenerateClientLoginToken(const FString& PlayerName)
+{
+    std::wstring Description;
+    const std::string Token = Signer.GenerateToken("login", AccountUri(PlayerName), std::string(), Description);
+    Log::Info(L"VoiceChatToken: the game mode asked for {}'s login token: {}", PlayerName.ToStdString(), Description);
+    return FString(ToWide(Token));
+}
+
+FString FVivoxVoiceChatChannelToken::GenerateClientJoinToken(const FString& PlayerName, const FString& ChannelName, EVoiceChatChannelType ChannelType, const TOptional<FVoiceChatChannel3dProperties>& Channel3dProperties)
+{
+    // FVivoxVoiceChat's channel URI: g non-positional, d positional, e echo; 3D properties as Vivox's
+    // "!p-<audible distance>-<conversational distance>-<rolloff>-<model>" (8.30 0x3F0D7B0).
+    const char* TypeString = ChannelType == EVoiceChatChannelType::Positional ? "d" : ChannelType == EVoiceChatChannelType::Echo ? "e" : "g";
+    std::string Properties;
+    if (Channel3dProperties.IsSet())
+    {
+        const FVoiceChatChannel3dProperties& Value = Channel3dProperties.GetValue();
+        Properties = std::format("!p-{}-{}-{:.3f}-{}", Value.MaxDistance, Value.MinDistance, Value.Rolloff, static_cast<int32_t>(Value.AttenuationModel));
+    }
+    const std::string To = "sip:confctl-" + std::string(TypeString) + "-" + Signer.GetIssuer() + "." + ToUtf8(ChannelName.ToStdString()) + Properties + "@" + Signer.GetDomain();
+    std::wstring Description;
+    const std::string Token = Signer.GenerateToken("join", AccountUri(PlayerName), To, Description);
+    Log::Info(L"VoiceChatToken: the game mode asked for {}'s join token for {}: {}", PlayerName.ToStdString(), ChannelName.ToStdString(), Description);
+    return FString(ToWide(Token));
+}
+
 void FVivoxVoiceChatTokenModule::StartupModule()
 {
 #if WITH_SERVER_CODE
@@ -233,8 +273,13 @@ void FVivoxVoiceChatTokenModule::StartupModule()
     // Only where the build's clients can reach Core's Vivox: 5.10 (CL-4225813) is the first build whose FVivox::Connect
     // reads [Vivox] ServerUrl and Domain from the game ini (7.00 0x999130; this line is its complaint without them). 1.7.2
     // to 5.0 have Epic's server built in, so the backend points only 5.10 and later at its emulator.
+    // 8.20 (CL-5625478) to 8.40 have UE 4.23's VivoxVoiceChat instead, which reads [VoiceChat.Vivox] from the engine ini
+    // (8.30 0xBCDCE0, this line its complaint) and whose game mode calls the feature with channel types; 8.00 is FVivox.
     static constexpr wchar_t VivoxConfigLine[] = L"[Vivox] ServerUrl or Domain is not set";
-    if (!Finder::FindReadOnly(VivoxConfigLine, sizeof(VivoxConfigLine) - sizeof(wchar_t)))
+    static constexpr wchar_t VivoxVoiceChatConfigLine[] = L"[VoiceChat.Vivox] ServerUrl, Domain, or Issuer is not set";
+    const bool bFVivox = Finder::FindReadOnly(VivoxConfigLine, sizeof(VivoxConfigLine) - sizeof(wchar_t));
+    const bool bVivoxVoiceChat = !bFVivox && Finder::FindReadOnly(VivoxVoiceChatConfigLine, sizeof(VivoxVoiceChatConfigLine) - sizeof(wchar_t));
+    if (!bFVivox && !bVivoxVoiceChat)
     {
         Log::Info(L"VoiceChatToken: this build's Vivox, if it has one, has Epic's server built in (before 5.10), which Core's Vivox can't stand in for, so no feature is registered");
         return;
@@ -247,7 +292,7 @@ void FVivoxVoiceChatTokenModule::StartupModule()
 
     // The key stays with the backend until a dedicated server asks for it, and only in this process's memory after.
     BackendRequest::GetJson(L"Vivox signing", L"/core/api/voice/vivox/signing", FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret,
-        [](uint32_t Status, const std::string& Body)
+        [bVivoxVoiceChat](uint32_t Status, const std::string& Body)
     {
         std::string Issuer = BackendRequest::JsonField(Body, "issuer");
         std::string Domain = BackendRequest::JsonField(Body, "domain");
@@ -261,9 +306,16 @@ void FVivoxVoiceChatTokenModule::StartupModule()
                 Status == 0 ? L"unanswered" : Status == 200 && !bEnabled ? L"switched off" : Status != 200 ? L"unavailable" : L"incomplete", Status);
             return;
         }
-        GameThread::Enqueue([Issuer = std::move(Issuer), Domain = std::move(Domain), Key = std::move(Key), TokenLifetimeSeconds]() mutable
+        GameThread::Enqueue([bVivoxVoiceChat, Issuer = std::move(Issuer), Domain = std::move(Domain), Key = std::move(Key), TokenLifetimeSeconds]() mutable
         {
-            RegisterFeature(std::move(Issuer), std::move(Domain), std::move(Key), TokenLifetimeSeconds);
+            if (bVivoxVoiceChat)
+            {
+                RegisterFeature<FVivoxVoiceChatChannelToken>(std::move(Issuer), std::move(Domain), std::move(Key), TokenLifetimeSeconds);
+            }
+            else
+            {
+                RegisterFeature<FVivoxVoiceChatToken>(std::move(Issuer), std::move(Domain), std::move(Key), TokenLifetimeSeconds);
+            }
         });
     });
 #endif

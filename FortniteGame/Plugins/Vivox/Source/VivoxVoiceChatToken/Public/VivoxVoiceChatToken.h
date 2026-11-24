@@ -28,16 +28,37 @@ public:
     virtual void GenerateClientLoginToken(const FString& PlayerName, FString& OutToken) override;
     virtual void GenerateClientJoinToken(const FString& PlayerName, const FString& ChannelName, FString& OutToken) override;
 
-private:
     // A signed token for Action ("login" or "join"), from From to To (no "t" when To is empty); "" if signing fails.
     std::string GenerateToken(const char* Action, const std::string& From, const std::string& To, std::wstring& OutDescription);
 
+    const std::string& GetIssuer() const { return Issuer; }
+    const std::string& GetDomain() const { return Domain; }
+
+private:
     std::string Issuer;
     std::string Domain;
     std::string Key;
     int32_t TokenLifetimeSeconds = 300;
     // vxi, the token's serial: the time in microseconds, or one past the last one given.
     int64_t LastSerial = 0;
+};
+
+// 8.20 to 8.40's feature (UE 4.23's VivoxVoiceChat): the same tokens, for that plugin's names. Its account is
+// ".<namespace>.<PlayerName>." (sip:.%s.%s.@%s, 8.30 0x3F0D790) and a channel
+// sip:confctl-<g|d|e>-<namespace>.<channel><3D properties>@<domain> (8.30 0x3F0D7D8), the namespace being [VoiceChat.Vivox]
+// Namespace, or Issuer when that is unset; the backend's hotfix sets both to the issuer signed with here.
+class FVivoxVoiceChatChannelToken final : public IVoiceChatTokenFeatureWithChannelType
+{
+public:
+    FVivoxVoiceChatChannelToken(std::string InIssuer, std::string InDomain, std::string InKey, int32_t InTokenLifetimeSeconds);
+
+    virtual FString GenerateClientLoginToken(const FString& PlayerName) override;
+    virtual FString GenerateClientJoinToken(const FString& PlayerName, const FString& ChannelName, EVoiceChatChannelType ChannelType, const TOptional<FVoiceChatChannel3dProperties>& Channel3dProperties) override;
+
+private:
+    std::string AccountUri(const FString& PlayerName) const;
+
+    FVivoxVoiceChatToken Signer;
 };
 
 // The module: at server start, where the build's game mode asks for the feature and its clients can reach Core's Vivox

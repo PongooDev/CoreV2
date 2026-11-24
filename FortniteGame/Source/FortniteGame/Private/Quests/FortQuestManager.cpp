@@ -29,6 +29,7 @@
 #include "TimerManager.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -1743,6 +1744,28 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
 #else
     SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
 #endif
+}
+
+// 1.8-8.20: TMap<ESubGame, UFortQuestManager*>. 8.30+: UFortQuestManager* QuestManagers[2] indexed by ESubGame (8.40
+// 0x40BC000 creates QuestManagers[SubGame] at +0x118, the profile load passes Athena as 1). Read as a map, 8.30's and
+// 8.40's array gave no Athena quest manager, so SendStatEventWithTagsHK took Battle Royale's quest manager for another
+// sub game's: no warmup gate (#625) and no save to the athena profile (#627).
+UFortQuestManager* UFortRegisteredPlayerInfo::FindQuestManager(uint8_t SubGame)
+{
+    static const UProperty* Property = nullptr;
+    if (!Property)
+    {
+        Property = Member_QuestManagers.IsAvailable() ? StaticClass()->FindPropertyByName(FName(L"QuestManagers", FNAME_Find)) : nullptr;
+        if (!Property)
+        {
+            return nullptr;
+        }
+    }
+    if (Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMapProperty))
+    {
+        return Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(SubGame);
+    }
+    return SubGame < Property->ArrayDim ? *Property->ContainerPtrToValuePtr<UFortQuestManager*>(this, SubGame) : nullptr;
 }
 
 UAbilitySystemComponent* UFortRegisteredPlayerInfo::GetAbilitySystemComponent() const

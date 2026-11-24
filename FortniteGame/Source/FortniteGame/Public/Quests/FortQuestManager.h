@@ -219,22 +219,24 @@ public:
 
 private:
     // 1.8: a quest manager per sub game (ESubGame: Campaign 0, Athena 1) instead of QuestManager. A TMap can't be copied,
-    // so it has no DefineUProperty accessors.
+    // so it has no DefineUProperty accessors. 8.30 made it a fixed array, UFortQuestManager* QuestManagers[2] indexed by
+    // ESubGame (8.40 0x40BC000 creates QuestManagers[SubGame] at +0x118): FindQuestManager reads either.
     static inline Reflection::FMemberInfo Member_QuestManagers{ &StaticReflectionOwner, TEXT("QuestManagers"), sizeof(FQuestManagers), Reflection::EMemberKind::Value };
+
+    UFortQuestManager* FindQuestManager(uint8_t SubGame);
 
 public:
     // Save the World's quest manager (1.8 keeps Battle Royale's apart).
     UFortQuestManager* GetCampaignQuestManager()
     {
         constexpr uint8_t Campaign = 0;
-        return Member_QuestManager.IsAvailable() ? static_cast<UFortQuestManager*>(QuestManager)
-            : Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(Campaign) : nullptr;
+        return Member_QuestManager.IsAvailable() ? static_cast<UFortQuestManager*>(QuestManager) : FindQuestManager(Campaign);
     }
 
     // Battle Royale's quest manager (1.8: the athena profile's challenges), null before 1.8.
     UFortQuestManager* GetAthenaQuestManager()
     {
         constexpr uint8_t Athena = 1;
-        return Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(Athena) : nullptr;
+        return FindQuestManager(Athena);
     }
 };

@@ -17,6 +17,10 @@ class AFortPlayerPawnAthena : public AFortPlayerPawn
     DefineUFunction(ForceReviveFromDBNO)
 
 public:
+    // Broadcast with the pawn as it dies on the server (8.40: AFortPlayerPawnAthena slot 0x13D, 0xFAD7FD, after the
+    // controller hears of the death). 8.40's Air Royale mutator binds its OnPawnDied to it on each pawn it seats.
+    DefineUProperty(FMulticastScriptDelegate, OnFortPlayerDied)
+    static bool HasOnFortPlayerDied() { return StaticClass() && Member_OnFortPlayerDied.IsAvailable(); }
     // From leaving the aircraft (0x415D90) until landing (0x41AB80).
     DefineUProperty(bool, bIsSkydiving)
     DefineUProperty(bool, bIsParachuteOpen)

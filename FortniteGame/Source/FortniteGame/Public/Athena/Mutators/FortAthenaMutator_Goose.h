@@ -1,13 +1,33 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "Engine/NetSerialization.h"
 #include "GameFramework/Info.h"
 #include "Math/Vector.h"
 #include "Reflection.h"
+#include "StructArray.h"
+#include "UObject/Stack.h"
 #include "UObject/Class.h"
 
 class AFortAthenaVehicle;
+class AFortPlayerPawnAthena;
 class UClass;
+
+// One squad's planes (SquadInfoArray's items): its players, and how many planes it has left. The game's
+// IsRespawningAllowed for the mode (slot 0xE5, 8.40 0xFDD560) is PlanesRemaining > 0, and the HUD's plane counter
+// (UGooseWidgetBase's OnUpdateNumberOfPlanes) shows the replicated value.
+struct FPlaneSquadInfo : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FPlaneSquadInfo, FortniteGame)
+    DefineUProperty(uint8_t, SquadId)
+    DefineUProperty(int32_t, PlanesRemaining)
+};
+
+struct FPlaneSquadInfoArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FPlaneSquadInfoArray, FortniteGame)
+    DefineUStructArrayProperty(FPlaneSquadInfo, SquadData)
+};
 
 // Air Royale's mutator (8.40; Playlist_Goose_*'s Mutator_Goose_C). The playlist has no Battle Bus: at the aircraft
 // phase each squad is put in an X-4 Stormwing (VehicleClass, LTMFerretVehicle_C) high over the island, and a squad
@@ -31,11 +51,13 @@ class AFortAthenaMutator_Goose : public AInfo
     DefineUnrealClass(AFortAthenaMutator_Goose, FortniteGame)
     DefineUFunction(OnVehicleDied)
     DefineUFunction(OnVehicleStolen)
+    DefineUFunction(OnPawnDied)
 
 public:
     DefineUProperty(FVector, PlaneSpawnLocation)
     DefineUProperty(UClass*, VehicleClass)
     DefineUProperty(TArray<AFortAthenaVehicle*>, SpawnedVehicles)
+    DefineUStructProperty(FPlaneSquadInfoArray, SquadInfoArray)
     static bool HasPlaneSpawning()
     {
         // 8.40's shape: OnVehicleStolen(uint8 OldID, uint8 NewID), as the vehicle's OnVehicleSquadChanged sends it. 7.30 to
@@ -61,4 +83,14 @@ private:
     static constexpr float SleepingPlaneSpacing = 1500.0f;
 
     static AFortAthenaVehicle* SpawnPlaneCall(AFortAthenaMutator_Goose* This);
+
+    // A seated player died (SeatPlayer, 0xFEDF90, binds it to each pawn's OnFortPlayerDied). 8.40 keeps only the
+    // null check's log (0xFE9AB0); nothing else in the build lowers a squad's PlanesRemaining, so a squad never ran
+    // out of planes (#617). Core's reading of the mode: their squad loses a plane. The pawn's death has
+    // reached its controller first (the broadcast comes after, 0xFAD7FD), so the respawn it was given stands; with
+    // none left, IsRespawningAllowed says no from then on, and OnVehicleDied eliminates a member still waiting to
+    // respawn when the squad's last plane goes.
+    void OnPawnDied(AFortPlayerPawnAthena* PlayerPawn);
+    DECLARE_FUNCTION(execOnPawnDied);
+    static void HookOnPawnDied();
 };

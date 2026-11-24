@@ -5,6 +5,7 @@
 #include "AI/Navigation/NavCollision.h"
 #include "Athena/AI/AthenaAISystem.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
+#include "Athena/CoreSnowMeshRoot.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
@@ -3598,6 +3599,7 @@ void AFortGameModeAthena::AddDelegateHandlers()
 void AFortGameModeAthena::HookVTables()
 {
     AddDelegateHandlers();
+    FCoreSnowMeshRoot::AddNatives();
     // IsRespawningAllowed's own slot (from 6.01), on a Battle Royale server: only a build whose game state reflects
     // bAllowRespawning is looked at.
     if (Configuration::Get().IsBattleRoyale() && StaticClass() && AFortGameStateAthena::HasAllowRespawning())

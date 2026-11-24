@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
+#include "Athena/CoreSnowMeshRoot.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPoiManager.h"
 #include "Athena/FortPoiVolume.h"
@@ -331,6 +332,9 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         Athena->StartMatchResults();
         Athena->StartWarmupReports();
         Athena->AskEventCalendarRevision();
+        // 8.51's Unvaulting: its Blueprint waits for a mesh network node and the root's state (Athena/CoreSnowMeshRoot.h).
+        // Epic's session joined the mesh once the world was ready (AFortGameSession::SetMeshNodeType).
+        FCoreSnowMeshRoot::SetUp(Athena);
         // The llamas, the spawn percents, the warmup's reports and the results from the game state's GamePhaseChanged,
         // the match's playlist from its OnCurrentPlaylistLoaded.
         Athena->BindMatchEvents();

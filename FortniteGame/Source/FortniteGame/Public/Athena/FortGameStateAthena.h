@@ -109,6 +109,16 @@ struct FSpawnMachineRepDataArray : public FFastArraySerializer
     DefineUStructArrayProperty(FSpawnMachineRepData, SpawnMachineRepDataArray)
 };
 
+// What the clients know of their server's mesh network node (from 7.10; MeshNetworkStatus). Their OnRep_MeshNetworkStatus
+// (8.51 0xFE7A50) gives their UMeshNetworkSubsystem the server's node type, and makes a client a Client node.
+struct FMeshNetworkStatus
+{
+    DefineUnrealStruct(FMeshNetworkStatus, FortniteGame)
+    DefineUProperty(bool, bEnabled)
+    DefineUProperty(bool, bConnectedToRoot)
+    DefineUProperty(uint8_t, GameServerNodeType)
+};
+
 class AFortGameStateAthena : public AFortGameStateZone
 {
     DefineUnrealClass(AFortGameStateAthena, FortniteGame)
@@ -346,6 +356,9 @@ public:
     // state's constructor and destructor touch the array), so the clients had no vans on their map.
     DefineUStructProperty(FSpawnMachineRepDataArray, SpawnMachineRepData)
     static bool HasSpawnMachineRepData() { return Member_SpawnMachineRepData.IsAvailable() && FSpawnMachineRepData::StaticStruct(); }
+    // The server's mesh network node for the clients (AFortGameSession's, 8.51 0x1541960 writes it).
+    DefineUStructProperty(FMeshNetworkStatus, MeshNetworkStatus)
+    static bool HasMeshNetworkStatus() { return Member_MeshNetworkStatus.IsAvailable() && FMeshNetworkStatus::StaticStruct(); }
     // The server's side of GameMemberInfoArray, stripped from the client builds (21.40 exports only the clients' side:
     // NotifyGameMemberAdded, NotifyGameMemberRemoved, FGameMemberInfo::PostReplicatedAdd and PreReplicatedRemove; the
     // name is Core's): PlayerState's item with its SquadId, TeamIndex and UniqueId. An item the player already has with

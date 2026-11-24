@@ -340,6 +340,21 @@
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public">
       <UniqueIdentifier>{4ce5004a-e176-4db6-a2ff-05bab770deeb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Plugins\MeshNetwork">
+      <UniqueIdentifier>{4177f243-fd04-443f-98ad-8c31a6c01daf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\MeshNetwork\Source">
+      <UniqueIdentifier>{2d7577a1-63d5-48c3-9dd2-665d589f5cd3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork">
+      <UniqueIdentifier>{20ba26ef-4e01-454f-8101-376797a85d84}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Private">
+      <UniqueIdentifier>{7b11b177-b509-4660-a1c3-986049dca805}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Public">
+      <UniqueIdentifier>{78354caf-11ad-4410-aaf4-dc6d9eba5206}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem">
       <UniqueIdentifier>{25bb8f1b-86a3-4ba9-9358-68cea78fe1b3}</UniqueIdentifier>
     </Filter>
@@ -1369,6 +1384,12 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierObjective.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\CoreSnowMeshRoot.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Public\MeshNetworkSubsystem.h">
+      <Filter>FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBigBaseWall.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
@@ -2209,6 +2230,12 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierObjective.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\CoreSnowMeshRoot.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Private\MeshNetworkSubsystem.cpp">
+      <Filter>FortniteGame\Plugins\MeshNetwork\Source\MeshNetwork\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBigBaseWall.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>

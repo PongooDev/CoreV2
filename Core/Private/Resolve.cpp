@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
 #include "Net/DataBunch.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectArray.h"
@@ -18553,7 +18554,23 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
     if (!MapCursorRemoval && !ServerRemoveMapCursor && MarkerComponentOffset > 0 && AthenaEnd > Athena && AthenaEnd - Athena <= 0x120)
     {
         std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
-        const uintptr_t InvalidationTimer = Calls.size() == 6 ? FunctionOf(L"Starting respawn invalidation timer...") : 0;
+        uintptr_t InvalidationTimer = Calls.size() == 6 ? FunctionOf(L"Starting respawn invalidation timer...") : 0;
+        if (Calls.size() == 6 && !InvalidationTimer && FTimerManager::ResolveNatives())
+        {
+            // 8.50 (CL-6058028, slot 0x3AC, 0x100DD50) drops the timer's log line (0x101CF70): taken as the last call when
+            // that is a short function that sets a timer itself (FTimerManager::InternalSetTimer, 0x101D05E) and doesn't
+            // take the player out of the match.
+            const uintptr_t Candidate = Calls[5].second;
+            const uintptr_t CandidateEnd = Finder::FunctionStart(Candidate) == Candidate ? Finder::FunctionEnd(Candidate) : 0;
+            bool bSetsTimer = false;
+            bool bCallsRemove = false;
+            for (const auto& [Site, Target] : CandidateEnd > Candidate && CandidateEnd - Candidate <= 0x200 ? Finder::DirectCalls(Candidate, CandidateEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                bSetsTimer = bSetsTimer || Target == reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
+                bCallsRemove = bCallsRemove || Target == Remove;
+            }
+            InvalidationTimer = bSetsTimer && !bCallsRemove ? Candidate : 0;
+        }
         const uintptr_t AllowedCall = InvalidationTimer && Calls[5].second == InvalidationTimer ? FindInstruction(Calls[4].first + 5, Calls[5].first, { 0xFF, 0x90 }) : 0;
         const int32_t AllowedDisplacement = AllowedCall ? *reinterpret_cast<const int32_t*>(AllowedCall + 2) : -1;
         if (AllowedDisplacement > 0 && AllowedDisplacement % 8 == 0)
@@ -20067,13 +20084,13 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
     {
         // 8.30 (CL-5793395) takes the style by value: AFortPawn's (0x15CD970) is mov rbx, [rcx+2A8h]; mov rdi, rcx; mov
         // [rcx+6E0h], dl, and the player pawn's override (0x15F74A0) keeps the old style and calls it first.
-        const auto StoresStyleByValue = [CurrentMovementStyleOffset](uintptr_t Body)
+        const auto StoresStyleByValueWithin = [CurrentMovementStyleOffset](uintptr_t Body, uintptr_t Window)
         {
             if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30))
             {
                 return false;
             }
-            for (uintptr_t Store = Body; Store < Body + 0x18; ++Store)
+            for (uintptr_t Store = Body; Store < Body + Window; ++Store)
             {
                 if (IsDisp32Access(Store, 0x88, 2, CurrentMovementStyleOffset) && (Byte(Store + 1) & 0x07) == 0x01)
                 {
@@ -20082,6 +20099,7 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
             }
             return false;
         };
+        const auto StoresStyleByValue = [&StoresStyleByValueWithin](uintptr_t Body) { return StoresStyleByValueWithin(Body, 0x18); };
         Index = FirstVTableIndexWhere(PawnVTable, [&StoresStyleByValue](uintptr_t Entry)
         {
             const uintptr_t Body = Finder::Unthunk(Entry);
@@ -20092,6 +20110,13 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
             const uintptr_t SuperCall = Body && Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30) ? FindRawCall(Body, Body + 0x28) : 0;
             return SuperCall && StoresStyleByValue(Finder::Unthunk(Finder::RelativeTarget(SuperCall, 1, 5)));
         });
+        if (Index < 0)
+        {
+            // 8.50 (CL-6058028) inlines AFortPawn's (0x16BB0A0) into the player pawn's override (0x16BB220) behind a longer
+            // prologue: mov rdi, [rcx+2A8h]; mov rsi, rcx; movzx ebx, byte ptr [rcx+6E0h] (the old style); mov [rcx+6E0h], dl
+            // at +0x20.
+            Index = FirstVTableIndexWhere(PawnVTable, [&StoresStyleByValueWithin](uintptr_t Entry) { return StoresStyleByValueWithin(Finder::Unthunk(Entry), 0x28); });
+        }
         Natives::bAFortPawn_SetCurrentMovementStyleByValue = Index >= 0;
     }
     if (Index < 0)

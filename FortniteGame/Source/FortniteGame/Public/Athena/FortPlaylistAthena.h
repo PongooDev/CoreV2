@@ -28,6 +28,10 @@ public:
     // gives from 5.30 (HandleAssignMatchMessage's "PlaylistName: %s"). UFortPlaylist's own from 4.4 (4.4.2 +0x30); 3.5 to
     // 4.2 keep it on UFortPlaylistAthena (below), so it isn't found here on those builds.
     DefineUProperty(FName, PlaylistName)
+    // The first team a player is put on (Battle Royale's HumanPvP_Team1); a mutator's team number counts from it (8.50's
+    // Endgame: the villains are VillainTeamNum past it).
+    DefineUProperty(uint8_t, DefaultFirstTeam)
+    static bool HasDefaultFirstTeam() { return Member_DefaultFirstTeam.IsAvailable(); }
     // The name as text, from whichever class the build keeps PlaylistName in: UFortPlaylist's from 4.4, else
     // UFortPlaylistAthena's (3.5 to 4.2). "none" where neither has it, so nothing here goes through a checked accessor
     // that isn't there (4.1's first run stopped on UFortPlaylist's lookup).

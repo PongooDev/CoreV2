@@ -12,6 +12,7 @@
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 
+#include <algorithm>
 #include <vector>
 
 AFortPickup* AFortAthenaSupplyDrop::SpawnPickup(UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, AFortPawn* TriggeringPawn, const FVector& Position, const FVector& Direction)
@@ -78,6 +79,54 @@ AFortPickup* AFortAthenaSupplyDrop::SpawnPickupFromItemEntry(UFortWorldItemDefin
 #endif
 }
 
+AFortPickup* AFortAthenaSupplyDrop::SpawnGameModePickup(UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, AFortPawn* TriggeringPawn, const FVector& Position, const FVector& Direction)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    UClass* GameModePickupClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortGameModePickup");
+    if (!World || !ItemDefinition || NumberToSpawn <= 0 || !GameModePickupClass)
+    {
+        return nullptr;
+    }
+    // As the build's remnant (0xF83450) keeps it: PickupClass when it is an AFortGameModePickup, else that class.
+    UClass* SpawnClass = PickupClass && PickupClass->IsChildOf(GameModePickupClass) ? PickupClass : GameModePickupClass;
+
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    TArray<uint8_t> EntryStorage;
+    EntryStorage.AddZeroed(EntryStruct->GetStructureSize());
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.GetData());
+    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToSpawn, 0);
+
+    const FRotator SpawnRotation = Direction.Rotation();
+    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation, nullptr, SpawnClass);
+    EntryStruct->DestroyStruct(ItemEntry);
+    // Core's: tossed as SpawnPickup's are, the pawn that opened the drop its item owner.
+    if (Pickup)
+    {
+        Pickup->TossPickup(Position, TriggeringPawn, 0);
+        Log::Info(L"Supply drop: {} lands {} {} as {}", GetName().ToStdString(), NumberToSpawn, ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
+    }
+    return Pickup;
+#else
+    return nullptr;
+#endif
+}
+
+DEFINE_FUNCTION(AFortAthenaSupplyDrop::execSpawnGameModePickup)
+{
+    P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
+    P_GET_OBJECT(UClass, Z_Param_PickupClass);
+    P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
+    P_GET_OBJECT(AFortPawn, Z_Param_TriggeringPawn);
+    P_GET_STRUCT(FVector, Z_Param_Position);
+    P_GET_STRUCT(FVector, Z_Param_Direction);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<AFortPickup**>(RESULT_PARAM) = static_cast<AFortAthenaSupplyDrop*>(Context)->SpawnGameModePickup(Z_Param_ItemDefinition, Z_Param_PickupClass, Z_Param_NumberToSpawn, Z_Param_TriggeringPawn,
+        Z_Param_Position, Z_Param_Direction);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(AFortAthenaSupplyDrop::execSpawnPickupFromItemEntry)
 {
     // InItemEntry is the build's FFortItemEntry (its size from reflection), stepped into storage of its own.
@@ -118,6 +167,7 @@ void AFortAthenaSupplyDrop::HookNatives()
     }
     HookSpawnPickup();
     HookSpawnPickupFromItemEntry();
+    HookSpawnGameModePickup();
 }
 
 void AFortAthenaSupplyDrop::HookSpawnPickup()
@@ -162,4 +212,28 @@ void AFortAthenaSupplyDrop::HookSpawnPickupFromItemEntry()
     }
     Function->SetNativeFunc(&execSpawnPickupFromItemEntry);
     Log::Info(L"Hook AFortAthenaSupplyDrop::SpawnPickupFromItemEntry: native");
+}
+
+void AFortAthenaSupplyDrop::HookSpawnGameModePickup()
+{
+    // 8.50 (CL-6058028): the exec (0x1978CE0) steps the six parameters and calls a remnant (0xF83450) that only checks
+    // PickupClass against AFortGameModePickup::StaticClass() and returns null, so Endgame's stone supply drops landed no
+    // stone (CoreV2 #630). A real body spawns the pickup: the remnant is small and calls only one function (StaticClass).
+    UFunction* Function = FindStaticFunction_SpawnGameModePickup();
+    if (!Function)
+    {
+        return;
+    }
+    uint8_t* NativeCall = Finder::ImplementationCall(Function);
+    const uintptr_t Native = NativeCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5) : 0;
+    const uintptr_t NativeEnd = Native && Finder::FunctionStart(Native) == Native ? Finder::FunctionEnd(Native) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = NativeEnd ? Finder::DecodedDirectCalls(Native) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+    const bool bOneCallee = std::all_of(Calls.begin(), Calls.end(), [&Calls](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == Calls.front().second; });
+    if (!NativeEnd || (!Finder::IsStubFunction(Native) && (NativeEnd - Native > 0x100 || !bOneCallee)))
+    {
+        Log::Info(L"Finder: AFortAthenaSupplyDrop::SpawnGameModePickup is native in this build");
+        return;
+    }
+    Function->SetNativeFunc(&execSpawnGameModePickup);
+    Log::Info(L"Hook AFortAthenaSupplyDrop::SpawnGameModePickup: native (the build's 0x{:X} returns null)", Native - Finder::ImageBase());
 }

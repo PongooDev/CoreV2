@@ -822,6 +822,14 @@ DEFINE_FUNCTION(AFortGameModeZone::execOnPlayerSpawnPadQueryFinished)
     P_NATIVE_END;
 }
 
+void AFortGameModeZone::GetStartingItems(TStructArray<FItemAndCount>& OutItems, bool bInitialSpawn, AController* Controller)
+{
+    if (HasGetStartingItems())
+    {
+        CallVirtual<FScriptArray*>(this, Natives::AFortGameModeZone_GetStartingItemsIndex, static_cast<FScriptArray*>(&OutItems), bInitialSpawn, Controller);
+    }
+}
+
 void AFortGameModeZone::OnZoneEnd()
 {
     if (Natives::AFortGameModeZone_OnZoneEndIndex >= 0)
@@ -833,6 +841,11 @@ void AFortGameModeZone::OnZoneEnd()
 ptrdiff_t AFortGameModeZone::EndOfZoneRemainTimeOffset()
 {
     return Member_EndOfZoneRemainTime.GetOffsetChecked();
+}
+
+ptrdiff_t AFortGameModeZone::StartingItemsOffset()
+{
+    return Member_StartingItems.IsAvailable() ? Member_StartingItems.GetOffsetChecked() : -1;
 }
 
 ptrdiff_t AFortGameModeZone::ActiveSpawnPadOffset()

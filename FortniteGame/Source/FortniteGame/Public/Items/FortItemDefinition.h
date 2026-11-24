@@ -132,6 +132,11 @@ class UFortWorldItemDefinition : public UFortItemDefinition
     DefineUnrealClass(UFortWorldItemDefinition, FortniteGame)
 
 public:
+    // From 4.x (the Infinity Gauntlet's SpecialActor.Jim.Pickup): the special actor a pickup of this item is on the map.
+    // 8.50's Endgame stones' (SpecialActor.Ashton.Object.P.Pickup) name their stone under the mutator's
+    // StoneDataList GameplayTag.
+    DefineUProperty(FGameplayTag, SpecialActorPickupTag)
+    static bool HasSpecialActorPickupTag() { return Member_SpecialActorPickupTag.IsAvailable(); }
     DefineBitfieldUProperty(bCanBeDropped)
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineBitfieldUProperty(bPersistInInventoryWhenFinalStackEmpty)

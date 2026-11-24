@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
+#include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "AIController.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Building/BuildingContainer.h"
@@ -1135,7 +1136,19 @@ void FCoreAthenaBotManager::AddKillEventTags(const UObject* Target, AController*
 
 bool FCoreAthenaBotManager::ShouldHoldNativeWinCheck() const
 {
+    // An Endgame match (8.50) is won by its mutator (MutatorControlled: the stones, the villains' respawns), which the
+    // game's removal asks; the bots' last-team check stands aside there.
+    if (IsMutatorControlledMatch())
+    {
+        return false;
+    }
     return HasAliveBots();
+}
+
+bool FCoreAthenaBotManager::IsMutatorControlledMatch() const
+{
+    AFortGameModeAthena* Athena = GetGameMode();
+    return Athena && AFortAthenaMutator_Ashton::GetCurrent(Athena->GetWorld()) != nullptr;
 }
 
 void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
@@ -3562,7 +3575,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
     AFortGameModeAthena* Athena = GetGameMode();
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
     if (bMatchEnded || !bAircraftStarted || BotsAtStart == 0 || !GameState || GameState->GamePhase >= EAthenaGamePhase::GetEndGame()
-        || !Natives::AFortGameModeAthena_StartEndGamePhase)
+        || !Natives::AFortGameModeAthena_StartEndGamePhase || IsMutatorControlledMatch())
     {
         return;
     }

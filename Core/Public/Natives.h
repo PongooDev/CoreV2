@@ -1009,6 +1009,13 @@ namespace Natives
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_ModDurabilityIndex = -1;
+    // 8.50 (CL-6058028): the player controller's (0x16F8F60, 0x16F8ED0) pass the pickup to the game state's
+    // OnPickupPreGivenToPlayer / OnPickupPostGivenToPlayer (slots 0x11E, 0x11F), which ask its mutators. Finder::ResolvePickupGivenLive.
+    inline int32_t IFortInventoryOwnerInterface_OnPickupPreGivenIndex = -1;
+    inline int32_t IFortInventoryOwnerInterface_OnPickupPostGivenIndex = -1;
+    // 8.50: AFortGameModeAthena's (0xFA3A20, slot 0x190): StartingItems, then each mutator's
+    // FortGameModeAthena_GetInventoryOverride. Finder::ResolveGetStartingItemsLive.
+    inline int32_t AFortGameModeZone_GetStartingItemsIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
     inline int32_t UNetConnection_TickIndex = -1;

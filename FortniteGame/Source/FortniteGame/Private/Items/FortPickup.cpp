@@ -1206,6 +1206,14 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     {
         return;
     }
+    // The owner hears of the pickup before and after its items go to it: 8.50's player controller passes it on to the game
+    // state's mutators (Endgame's captures a stone, AFortAthenaMutator_Ashton's override of
+    // FortGameStateAthena_OnPickupPreGivenToPlayer, 0x10630C0). Found only on builds with the Endgame mutator.
+    const bool bTellOwner = IFortInventoryOwnerInterface::HasOnPickupGiven() && Cast<AFortPlayerController>(OwnerObject);
+    if (bTellOwner)
+    {
+        InventoryOwner->OnPickupPreGiven(this);
+    }
     if (AFortAIPawn* AIPawn = Cast<AFortAIPawn>(OwnerObject))
     {
         GivePickupToAI(AIPawn, InventoryOwner);
@@ -1213,6 +1221,10 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     else if (AFortPlayerController* PlayerController = Cast<AFortPlayerController>(OwnerObject))
     {
         GivePickupToPlayer(PlayerController);
+    }
+    if (bTellOwner)
+    {
+        InventoryOwner->OnPickupPostGiven(this);
     }
     BroadcastOnPickup();
 

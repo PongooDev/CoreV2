@@ -1468,6 +1468,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Fill.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Ashton.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Goose.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
     </ClInclude>
@@ -2280,6 +2283,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Barrier.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Ashton.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Goose.cpp">

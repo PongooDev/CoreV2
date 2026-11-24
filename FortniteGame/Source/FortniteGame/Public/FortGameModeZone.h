@@ -42,6 +42,13 @@ public:
     DefineUProperty(FMulticastScriptDelegate, OnHandleMatchHasStarted)
     static bool HasOnHandleMatchHasStarted() { return StaticClass() && Member_OnHandleMatchHasStarted.IsAvailable(); }
 
+    // 21.40's virtual GetStartingItems(bool, AController*): what the controller starts with. Battle Royale's (8.50
+    // 0xFA3A20) is StartingItems with each mutator's FortGameModeAthena_GetInventoryOverride added: Endgame's
+    // AshtonInventoryMutator gives its team loadouts there. OutItems is filled from empty; the caller empties it. Only
+    // where Finder::ResolveGetStartingItemsLive found the slot (builds with the Endgame mutator).
+    static bool HasGetStartingItems() { return Natives::AFortGameModeZone_GetStartingItemsIndex >= 0; }
+    void GetStartingItems(TStructArray<FItemAndCount>& OutItems, bool bInitialSpawn, AController* Controller);
+
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     // 21.40's names for the zone's own pad spawn, whose bodies the client builds strip (SpawnDefaultPawnFor_Implementation
     // above). GetLocationAndRotationForSpawnPad: where on the active spawn pad the player spawns, when it isn't the pad's
@@ -65,6 +72,7 @@ public:
     void OnZoneEnd();
 
     static ptrdiff_t EndOfZoneRemainTimeOffset();
+    static ptrdiff_t StartingItemsOffset();
     static ptrdiff_t ActiveSpawnPadOffset();
 
     static void Hook();

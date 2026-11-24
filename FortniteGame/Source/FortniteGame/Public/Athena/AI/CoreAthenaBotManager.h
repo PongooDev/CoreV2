@@ -201,6 +201,8 @@ public:
     // Core's death handler took a player out (AFortPlayerControllerAthena::OnPawnDied): whether the game's own win check
     // must be kept from running (bots still in the match), and the bots' recount and win check after it.
     bool ShouldHoldNativeWinCheck() const;
+    // An Endgame match (8.50's AFortAthenaMutator_Ashton): its mutator decides the win, so the bots' check stands aside.
+    bool IsMutatorControlledMatch() const;
     // The finisher's pawn, its weapon and the death cause are the elimination's, for the win it may end the match with.
     // Also for a player who left (the game's Logout took them out): AFortGameModeAthena::HandlePlayerStateDestroyed's,
     // the tick after, with none.

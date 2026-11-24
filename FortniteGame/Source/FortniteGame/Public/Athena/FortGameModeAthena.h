@@ -220,6 +220,8 @@ public:
 
     // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
+    // What GetStartingItems adds as the player leaves the aircraft, in an Endgame match (8.50): its team's loadout.
+    void GiveAircraftExitLoadout(AController* NewPlayer);
     void ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport);
 
     // Every player still in the match outlived the one who is out (a player, or a player bot, CoreV2 #233): an

@@ -16,6 +16,7 @@ class AFortAthenaSupplyDrop : public ABuildingActor
     DefineUnrealClass(AFortAthenaSupplyDrop, FortniteGame)
     DefineUFunction(SpawnPickup)
     DefineUFunction(SpawnPickupFromItemEntry)
+    DefineUFunction(SpawnGameModePickup)
 
 public:
     AFortPickup* SpawnPickup(UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, AFortPawn* TriggeringPawn, const FVector& Position, const FVector& Direction);
@@ -23,7 +24,13 @@ public:
     // supply drops (EndlessModeSupplyDrop_C's SpawnLoot) spawn each item PickLootDropsWithNamedWeights rolls with it.
     AFortPickup* SpawnPickupFromItemEntry(UFortWorldItemDefinition* ItemDefinition, const FFortItemEntry& InItemEntry, int32_t NumberToSpawn, AFortPawn* TriggeringPawn, const FVector& Position, const FVector& Direction);
 
+    // 8.50: a pickup of PickupClass (an AFortGameModePickup; that class itself when none or another is given) holding
+    // NumberToSpawn of ItemDefinition. Endgame's stone supply drops (AthenaSupplyDrop_Rock_*) land their Infinity Stone
+    // with it.
+    AFortPickup* SpawnGameModePickup(UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, AFortPawn* TriggeringPawn, const FVector& Position, const FVector& Direction);
+
     DECLARE_FUNCTION(execSpawnPickup);
+    DECLARE_FUNCTION(execSpawnGameModePickup);
     DECLARE_FUNCTION(execSpawnPickupFromItemEntry);
 
     static void HookNatives();
@@ -31,4 +38,5 @@ public:
 private:
     static void HookSpawnPickup();
     static void HookSpawnPickupFromItemEntry();
+    static void HookSpawnGameModePickup();
 };

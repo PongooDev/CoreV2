@@ -10,6 +10,7 @@
 #include "Athena/FortAthenaPlaylistBase.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
+#include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
 #include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Building/BGAConsumableSpawner.h"
@@ -608,6 +609,7 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         else if (Pawn)
         {
             Log::Info(L"Battle Royale: {} leaves the aircraft as {}", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString());
+            GiveAircraftExitLoadout(NewPlayer);
         }
         else
         {
@@ -617,6 +619,29 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     }
 #endif
     return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
+}
+
+void AFortGameModeAthena::GiveAircraftExitLoadout(AController* NewPlayer)
+{
+#if WITH_SERVER_CODE
+    // 8.50's Endgame: the team loadouts are AshtonInventoryMutator's answer to GetStartingItems (its
+    // FortGameModeAthena_GetInventoryOverride, 0x108C490): the Chitauri's AGID_AshtonPack_Milo Always, the heroes'
+    // AGID_Athena_Booty_Ashton, R and VR Ore guns, ammo and wood only while the game phase is Aircraft
+    // (AircraftPhaseOnly). Nothing left in the build calls GetStartingItems. Core's: the aircraft's exit, the one moment
+    // of the Aircraft phase a player gets a pawn (StartAircraftPhase's stripped per-player call, Core's
+    // ResetToStartingItems, comes before the phase is set). Only in an Endgame match.
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
+    if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_Ashton::GetCurrent(GetWorld()))
+    {
+        return;
+    }
+    TStructArray<FItemAndCount> Items;
+    // Core's: bInitialSpawn true, leaving the aircraft being the match's first spawn after the warmup.
+    GetStartingItems(Items, true, NewPlayer);
+    PlayerController->GiveStartingItems(Items);
+    Log::Info(L"Endgame: {} leaves the aircraft with its team's loadout ({} starting items)", NewPlayer->GetName().ToStdString(), Items.Num());
+    Items.Empty();
+#endif
 }
 
 void AFortGameModeAthena::ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport)
@@ -664,6 +689,9 @@ namespace
         // The other teams' players they eliminated who came back (NoteRespawnDeath), one at each elimination. EliminatedBy
         // has only the eliminations that took a player out, and only a player's first.
         int32_t RespawnKills = 0;
+        // 8.50's Endgame: "hero" or "villain" (the Chitauri and Thanos), for the backend's win challenges of each side
+        // (win_athena_ashton_side_a, Athena.LTM.Ashton.Hero; _side_b, Athena.LTM.Ashton.Villain). Empty in other modes.
+        const char* Side = nullptr;
         bool bReported = false;
     };
 
@@ -786,6 +814,10 @@ namespace
             return nullptr;
         }
         Player.Team = AthenaState->TeamIndex;
+        if (const AFortAthenaMutator_Ashton* Ashton = AFortAthenaMutator_Ashton::GetCurrent(AthenaState->GetWorld()))
+        {
+            Player.Side = Ashton->IsVillain(AthenaState) ? "villain" : "hero";
+        }
         Player.SecondsAlive = AthenaState->SecondsAlive;
         Player.Place = std::max<int32_t>(AthenaState->Place, 0);
         if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty() && !IsStayingDeath(Player, AthenaState))
@@ -869,8 +901,9 @@ namespace
             Reported.push_back(AccountId);
             std::string Id;
             std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
-            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"botKills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
-                Id, Player.Place, std::max(Player.Kills, 0), Player.BotKills, std::max(Player.SecondsAlive, 0));
+            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"botKills\":{},\"secondsAlive\":{}{}}}", Count++ > 0 ? "," : "",
+                Id, Player.Place, std::max(Player.Kills, 0), Player.BotKills, std::max(Player.SecondsAlive, 0),
+                Player.Side ? std::format(",\"side\":\"{}\"", Player.Side) : std::string());
             Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
         }
 

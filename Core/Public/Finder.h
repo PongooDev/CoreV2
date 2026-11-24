@@ -73,6 +73,19 @@ namespace Finder
         uint8_t* SpawnPickupCall = nullptr;
     };
 
+    // 8.50's Endgame mutator (AFortAthenaMutator_Ashton): the stripped calls left in its intact code. LeaderGiveCall: the
+    // promotion's call to the shared empty function where the gauntlet was given (this = the new leader's controller).
+    // LeaderRemoveCall and VillainRemoveCall: the villain death handler's calls to the shared return-zero function where
+    // K2_RemoveItemFromPlayer was inlined (controller, item definition, 1, true).
+    struct FAshtonMutatorSites
+    {
+        uint8_t* LeaderGiveCall = nullptr;
+        uint8_t* LeaderRemoveCall = nullptr;
+        uint8_t* VillainRemoveCall = nullptr;
+        // BeginPlay's lea of the shared empty function it binds as OnPickupSpawnedAndReady (stripped).
+        uint8_t* PickupSpawnedAndReadyLea = nullptr;
+    };
+
     struct FPlayerSpawnQuerySites
     {
         uintptr_t PickSpawnActor = 0;
@@ -554,6 +567,14 @@ namespace Finder
     bool ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites);
     // False (and OutSites empty) where the build has no Air Royale mutator or SpawnPlane has a body.
     bool ResolveGooseMutatorLive(FGooseMutatorSites& OutSites);
+    // False (and OutSites empty) where the build has no Endgame mutator or its calls aren't the stripped ones.
+    bool ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites);
+    // IFortInventoryOwnerInterface::OnPickupPreGiven and OnPickupPostGiven (Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex,
+    // _OnPickupPostGivenIndex), from the player controller's interface vtable; needs ResolveInventoryOwnerLive first.
+    bool ResolvePickupGivenLive();
+    // AFortGameModeZone::GetStartingItems' slot (Natives::AFortGameModeZone_GetStartingItemsIndex): Battle Royale's game mode's
+    // override, the one virtual that copies StartingItems.
+    bool ResolveGetStartingItemsLive(ptrdiff_t StartingItemsOffset);
     // AFortPlayerState's home actor setter (Natives::AFortPlayerState_SetHomeActor), the call in
     // AFortGameMode::SpawnDefaultPawnFor_Implementation that both reads and writes the player state's HomeActor.
     bool ResolveSetHomeActorLive(ptrdiff_t HomeActorOffset);

@@ -9958,6 +9958,230 @@ bool Finder::ResolveGooseMutatorLive(FGooseMutatorSites& OutSites)
     return true;
 }
 
+bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites)
+{
+    // 8.50 (CL-6058028), Endgame. The intact code around three stripped calls:
+    // - SelectNextVillainLeader's exec (0x195C970) tail-jumps to its native (0x1072530), which calls the promotion
+    //   (0x1070E70; the first stone's capture calls it too, 0x106EDD6). The promotion stores the new leader
+    //   (mov [rbx+0CF0h], rsi, VillainLeaderPC) and calls the shared empty function with him in rcx (0x1070F0F), then
+    //   builds an FFortItemEntry of VillainLeaderItemDef and destroys it unused: the gauntlet's give is gone.
+    // - The villain death handler (0x106F380, called by two of the mutator's pawn-death overrides) starts
+    //   SelectNextVillainLeader's timer for the leader and calls the shared return-zero function with (VillainLeaderPC,
+    //   VillainLeaderItemDef, 1, true) at 0x106F455, and with (the controller, each of VillainItemDefs, 1, true) at
+    //   0x106F60C: K2_RemoveItemFromPlayer, inlined and stripped.
+    OutSites = FAshtonMutatorSites();
+    UFunction* Select = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Ashton:SelectNextVillainLeader");
+    const uintptr_t Exec = Select ? reinterpret_cast<uintptr_t>(Select->GetNativeFunc()) : 0;
+    uintptr_t SelectNext = 0;
+    for (uintptr_t Site = IsInText(Exec) ? Exec : 0; Site && Site < Exec + 0x30 && !SelectNext; ++Site)
+    {
+        if ((Byte(Site) == 0xE8 || Byte(Site) == 0xE9) && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+        {
+            SelectNext = Finder::RelativeTarget(Site, 1, 5);
+        }
+    }
+    void** AshtonVTable = SelectNext ? CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_Ashton") : nullptr;
+    void** MutatorVTable = AshtonVTable ? CdoVTable(L"/Script/FortniteGame.FortAthenaMutator") : nullptr;
+    if (!MutatorVTable || VillainLeaderPCOffset <= 0 || VillainLeaderItemDefOffset <= 0 || VillainItemDefsOffset <= 0)
+    {
+        return false;
+    }
+    const int32_t LeaderPC = static_cast<int32_t>(VillainLeaderPCOffset);
+
+    uintptr_t Promote = 0;
+    int32_t Promotes = 0;
+    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(SelectNext))
+    {
+        if (Target != Promote && Finder::FunctionStart(Target) == Target && Finder::ReadsMemberAt(Target, LeaderPC) && Finder::ReadsMemberAt(Target, static_cast<int32_t>(VillainLeaderItemDefOffset)))
+        {
+            Promote = Target;
+            ++Promotes;
+        }
+    }
+    // mov [r64+VillainLeaderPC], r64, then within 0x10 bytes the call into a stub.
+    const uintptr_t PromoteEnd = Promotes == 1 ? Finder::FunctionEnd(Promote) : 0;
+    uintptr_t LeaderStore = 0;
+    for (uintptr_t Site = Promote; PromoteEnd && Site + 7 <= PromoteEnd && !LeaderStore; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 2);
+        if ((Byte(Site) & 0xF8) == 0x48 && Byte(Site + 1) == 0x89 && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == LeaderPC)
+        {
+            LeaderStore = Site;
+        }
+    }
+    for (const auto& [Site, Target] : LeaderStore ? Finder::DecodedDirectCalls(Promote) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (Site > LeaderStore && Site < LeaderStore + 0x10 && Finder::IsStubFunction(Target))
+        {
+            OutSites.LeaderGiveCall = reinterpret_cast<uint8_t*>(Site);
+        }
+    }
+
+    // The villain death handler: a callee of the mutator's own overrides that calls SelectNextVillainLeader and reads
+    // VillainItemDefs.
+    uintptr_t VillainDied = 0;
+    for (int32_t Index = 0; Index < 0x140 && !VillainDied; ++Index)
+    {
+        const uintptr_t Own = VTableEntry(AshtonVTable, Index);
+        if (!Own || Own == VTableEntry(MutatorVTable, Index))
+        {
+            continue;
+        }
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Own))
+        {
+            if (!VillainDied && IsInText(Target) && Finder::FunctionStart(Target) == Target && Finder::ReadsMemberAt(Target, static_cast<int32_t>(VillainItemDefsOffset)))
+            {
+                const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DecodedDirectCalls(Target);
+                if (std::any_of(Calls.begin(), Calls.end(), [SelectNext](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == SelectNext; }))
+                {
+                    VillainDied = Target;
+                }
+            }
+        }
+    }
+    int32_t RemoveCalls = 0;
+    for (const auto& [Site, Target] : VillainDied ? Finder::DecodedDirectCalls(VillainDied) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (!Finder::IsStubFunction(Target))
+        {
+            continue;
+        }
+        // mov r8d, 1 and mov r9b, 1 just before: (.., .., 1, true); the leader's controller is mov rcx, [r64+VillainLeaderPC].
+        bool bCount = false;
+        bool bForce = false;
+        bool bLeader = false;
+        for (uintptr_t At = Site - 0x18; At < Site; ++At)
+        {
+            bCount |= Byte(At) == 0x41 && Byte(At + 1) == 0xB8 && *reinterpret_cast<const int32_t*>(At + 2) == 1;
+            bForce |= Byte(At) == 0x41 && Byte(At + 1) == 0xB1 && Byte(At + 2) == 0x01;
+            bLeader |= (Byte(At) & 0xFA) == 0x48 && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xF8) == 0x88 && (Byte(At + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(At + 3) == LeaderPC;
+        }
+        if (!bCount || !bForce)
+        {
+            continue;
+        }
+        ++RemoveCalls;
+        (bLeader ? OutSites.LeaderRemoveCall : OutSites.VillainRemoveCall) = reinterpret_cast<uint8_t*>(Site);
+    }
+    // BeginPlay (0x1056F60) binds each handler with its name's string just after the lea of its address
+    // (lea rax, <handler>; ... lea rcx, L"&AFortAthenaMutator_Ashton::OnPickupSpawnedAndReady"): the stripped one is the stub.
+    for (const uintptr_t NameRef : Finder::StringRefs(L"&AFortAthenaMutator_Ashton::OnPickupSpawnedAndReady"))
+    {
+        const uintptr_t BeginPlay = Finder::FunctionStart(NameRef);
+        for (const auto& [Lea, Taken] : BeginPlay ? Finder::DecodedAddressesTaken(BeginPlay) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            if (Lea < NameRef && Lea + 0x20 > NameRef && Finder::IsStubFunction(Taken))
+            {
+                OutSites.PickupSpawnedAndReadyLea = reinterpret_cast<uint8_t*>(Lea);
+            }
+        }
+    }
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    if (!OutSites.LeaderGiveCall || !OutSites.LeaderRemoveCall || !OutSites.VillainRemoveCall || RemoveCalls != 2)
+    {
+        Log::Info(L"Finder: AFortAthenaMutator_Ashton's stripped calls not all found (SelectNextVillainLeader 0x{:X}, promotion 0x{:X} ({} candidates), give 0x{:X}, death handler 0x{:X}, {} removals: leader 0x{:X}, villain 0x{:X})",
+            Rva(SelectNext), Rva(Promote), Promotes, Rva(reinterpret_cast<uintptr_t>(OutSites.LeaderGiveCall)), Rva(VillainDied), RemoveCalls,
+            Rva(reinterpret_cast<uintptr_t>(OutSites.LeaderRemoveCall)), Rva(reinterpret_cast<uintptr_t>(OutSites.VillainRemoveCall)));
+        OutSites = FAshtonMutatorSites();
+        return false;
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_Ashton: the promotion 0x{:X} (off SelectNextVillainLeader 0x{:X}) gives nothing at 0x{:X}; the villain death handler 0x{:X} removes nothing at 0x{:X} (the leader's) and 0x{:X} (a villain's); BeginPlay binds the stub as OnPickupSpawnedAndReady at 0x{:X}",
+        Rva(Promote), Rva(SelectNext), Rva(reinterpret_cast<uintptr_t>(OutSites.LeaderGiveCall)), Rva(VillainDied), Rva(reinterpret_cast<uintptr_t>(OutSites.LeaderRemoveCall)),
+        Rva(reinterpret_cast<uintptr_t>(OutSites.VillainRemoveCall)), Rva(reinterpret_cast<uintptr_t>(OutSites.PickupSpawnedAndReadyLea)));
+    return true;
+}
+
+bool Finder::ResolvePickupGivenLive()
+{
+    // IFortInventoryOwnerInterface's OnPickupPreGiven and OnPickupPostGiven, two neighbouring slots. 8.50's player
+    // controller's (0x16F8F60, 0x16F8ED0: this - 0x598, GetWorld twice, then the game state's call [rax+8F0h] and
+    // [rax+8F8h] with the controller and the pickup) are the only pair whose this adjustment is the interface's and whose
+    // last calls are neighbouring slots.
+    if (Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex >= 0)
+    {
+        return true;
+    }
+    const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
+    UClass* ControllerClass = InterfaceOffset > 0 ? FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortPlayerController") : nullptr;
+    UObject* ControllerDefault = ControllerClass ? ControllerClass->GetDefaultObject() : nullptr;
+    void** InterfaceVTable = ControllerDefault ? *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(ControllerDefault) + InterfaceOffset) : nullptr;
+    if (!InterfaceVTable)
+    {
+        return false;
+    }
+    // The last virtual call's slot, for a small function that adjusts this back to the controller (disp32 -InterfaceOffset).
+    const auto GameStateSlot = [InterfaceOffset](uintptr_t Function) -> int32_t
+    {
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        if (!End || End - Function > 0x100)
+        {
+            return -1;
+        }
+        bool bAdjusts = false;
+        for (uintptr_t Site = Function; Site + 4 <= Function + 0x20 && Site + 4 <= End; ++Site)
+        {
+            bAdjusts |= *reinterpret_cast<const int32_t*>(Site) == -static_cast<int32_t>(InterfaceOffset);
+        }
+        int32_t Last = -1;
+        for (uintptr_t Site = bAdjusts ? FindVirtualCall(Function, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
+        {
+            Last = VirtualSlot(Site);
+        }
+        return Last;
+    };
+    // The first pair: the interface's vtable is followed by other classes' (no RTTI), which repeat it.
+    int32_t Found = -1;
+    for (int32_t Index = 0; Index + 1 < 0x40 && Found < 0; ++Index)
+    {
+        const uintptr_t Pre = VTableEntry(InterfaceVTable, Index);
+        const uintptr_t Post = VTableEntry(InterfaceVTable, Index + 1);
+        const int32_t PreSlot = Pre ? GameStateSlot(Pre) : -1;
+        // GetWorld is UObject's slot 0x28 (call [rax+140h]); the game state's own calls are far past it.
+        if (PreSlot > 0x100 && Post && GameStateSlot(Post) == PreSlot + 1)
+        {
+            Found = Index;
+        }
+    }
+    if (Found < 0)
+    {
+        Log::Info(L"Finder: IFortInventoryOwnerInterface::OnPickupPreGiven / OnPickupPostGiven not found");
+        return false;
+    }
+    Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex = Found;
+    Natives::IFortInventoryOwnerInterface_OnPickupPostGivenIndex = Found + 1;
+    Log::Info(L"Finder: IFortInventoryOwnerInterface::OnPickupPreGiven is slot 0x{:X}, OnPickupPostGiven 0x{:X} (the player controller's 0x{:X}, 0x{:X})", Found, Found + 1,
+        VTableEntry(InterfaceVTable, Found) - Finder::ImageBase(), VTableEntry(InterfaceVTable, Found + 1) - Finder::ImageBase());
+    return true;
+}
+
+bool Finder::ResolveGetStartingItemsLive(ptrdiff_t StartingItemsOffset)
+{
+    // AFortGameModeAthena::GetStartingItems (8.50 0xFA3A20, slot 0x190; 21.40's AFortGameModeZone virtual
+    // GetStartingItems(TArray<FItemAndCount>* result, bool, AController*)): copies StartingItems (reads its Num, +0x770)
+    // into the result, then asks each mutator's FortGameModeAthena_GetInventoryOverride. No code left in the build calls it.
+    if (Natives::AFortGameModeZone_GetStartingItemsIndex >= 0)
+    {
+        return true;
+    }
+    void** AthenaVTable = StartingItemsOffset > 0 ? CdoVTable(L"/Script/FortniteGame.FortGameModeAthena") : nullptr;
+    // The first match: the vtables of the game mode's subclasses follow it (no RTTI) and repeat it.
+    const int32_t Found = FirstVTableIndexWhere(AthenaVTable, [StartingItemsOffset](uintptr_t Function)
+    {
+        const uintptr_t End = Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+        return End && End - Function < 0x200 && Finder::ReadsMemberAt(Function, static_cast<int32_t>(StartingItemsOffset))
+            && Finder::ReadsMemberAt(Function, static_cast<int32_t>(StartingItemsOffset + 8)) && FindVirtualCall(Function, End);
+    });
+    if (Found < 0)
+    {
+        Log::Info(L"Finder: AFortGameModeZone::GetStartingItems not found (nothing reads StartingItems +0x{:X})", StartingItemsOffset);
+        return false;
+    }
+    Natives::AFortGameModeZone_GetStartingItemsIndex = Found;
+    Log::Info(L"Finder: AFortGameModeZone::GetStartingItems is slot 0x{:X} (AFortGameModeAthena's 0x{:X})", Found, VTableEntry(AthenaVTable, Found) - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset)
 {
     // 6.20 (CL-4497486) gives Battle Royale an AI of its own for the Fortnitemares Cube Monsters (the Deimos playlists'

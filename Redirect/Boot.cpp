@@ -4,6 +4,7 @@
 #include "Finder.h"
 #include "Hooks.h"
 #include "HttpRedirect.h"
+#include "IPlatformFilePak.h"
 #include "Log.h"
 #include "Natives.h"
 #include "Packed.h"
@@ -69,6 +70,14 @@ static void Start()
     }
 
     buzz::XmppClient::Private::Hook();
+
+    // 8.40+ (owner-approved exception, 2026-11-24): take over FPakPlatformFile's OpenRead slot so the engine treats
+    // paks as unsigned, letting Core's config and server-assets paks (and any other unsigned pak) load on client and
+    // server. This is a .rdata vtable swap, which goes in now, at the stub handover, because the pak chain is mounted
+    // early in PreInit, long before FEngineLoop::Init's code check that .text detours wait for; the swap is undone inside
+    // the thunk's one-shot. Self-gated to CL >= 6005771, so older builds are untouched.
+    FPakPlatformFile::TakeOverPakSigning();
+
     // Packed builds only: the packer checks its decrypted code as the initial load ends, and patches
     // present at that moment hang the game, so the detours go in once the engine is up.
     Packed::WaitForCodeCheck(true);

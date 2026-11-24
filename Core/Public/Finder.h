@@ -201,6 +201,9 @@ namespace Finder
     // FPlatformFileManager::Get and FindPlatformFile, from the game's own FindPlatformFile(TEXT("PakFile")) lookups, and
     // FPakPlatformFile::Mount with the offset of bSigned it reads. False (logged once) where they aren't found.
     bool ResolvePakPlatformFileMount();
+    // 8.40+: FPakPlatformFile's vtable and the InitializeAfterSetActive slot, from GetName's lea rax, [L"PakFile"]; ret
+    // (its own .rdata slot is slot 14). For CoreRedirect's pak-signing takeover. False (logged once) where not found.
+    bool ResolvePakPlatformFileVTable();
     // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).
     bool ResolveEngineInit();
     // FBaseServiceMcp::GetBasicAuth, which every MCP service's vtable holds (packed builds, FFortMcpConfig).

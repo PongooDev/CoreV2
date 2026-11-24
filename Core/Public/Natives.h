@@ -189,6 +189,12 @@ namespace Natives
     inline IPlatformFile* (*FPlatformFileManager_FindPlatformFile)(FPlatformFileManager* This, const wchar_t* Name) = nullptr;
     inline bool (*FPakPlatformFile_Mount)(FPakPlatformFile* This, const wchar_t* InPakFilename, uint32_t PakOrder, const wchar_t* InPath) = nullptr;
     inline ptrdiff_t FPakPlatformFile_bSigned = -1;
+    // 8.40+ (Finder::ResolvePakPlatformFileVTable): FPakPlatformFile's vtable (8.40 0x4899308), found from GetName's
+    // "PakFile" at slot 14. CoreRedirect takes over the OpenRead slot (25) on it to turn pak signing off: Initialize
+    // (slot 4) and InitializeAfterSetActive (slot 5) are called on the concrete type here, not through the vtable, so a
+    // vtable swap can't catch them, whereas file operations always go through IPlatformFile* -- and OpenRead is the one
+    // the engine routes through the pak platform file while the config system is still reading the inis.
+    inline void** FPakPlatformFile_VTable = nullptr;
     inline const wchar_t* (*FPlatformProcess_UserName)(bool bOnlyAlphaNumeric) = nullptr;
     inline bool (*FPackageName_FindPackagesInDirectory)(TArray<FString>& OutPackages, const FString& RootDir) = nullptr;
     inline FString* FPackageName_MapPackageExtension = nullptr;

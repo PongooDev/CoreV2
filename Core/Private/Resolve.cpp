@@ -17023,6 +17023,60 @@ bool Finder::ResolvePakPlatformFileMount()
     return bResolved;
 }
 
+bool Finder::ResolvePakPlatformFileVTable()
+{
+    static const bool bResolved = []
+    {
+        // FPakPlatformFile::GetName()/GetTypeName() is lea rax, [L"PakFile"]; ret (8.40 0x287F2D0): among the "PakFile"
+        // string references it's the only lea rax ... ret (the rest are the lea rdx compares in the FindPlatformFile
+        // lookups). Its own code pointer sits in slot 14 (+0x70) of FPakPlatformFile's vtable (21.40 FPakPlatformFile_vtbl
+        // order, size 0x1C0). CoreRedirect takes over the OpenRead slot (25, +0xC8, 8.40 0x2884D60) on it to turn pak
+        // signing off on 8.40+; the vtable is confirmed by slots 14 and 25 both landing in .text.
+        void** VTable = nullptr;
+        uintptr_t GetNameFound = 0;
+        uintptr_t OpenRead = 0;
+        for (const uintptr_t GetName : Finder::StringRefs(L"PakFile"))
+        {
+            if (Byte(GetName) != 0x48 || Byte(GetName + 1) != 0x8D || Byte(GetName + 2) != 0x05 || Byte(GetName + 7) != 0xC3)
+            {
+                continue;
+            }
+            for (void** Slot : Finder::ReadOnlySlotsHolding(GetName))
+            {
+                void** Candidate = Slot - 14;
+                if (!Finder::IsReadable(Candidate, 56 * sizeof(void*)))
+                {
+                    continue;
+                }
+                const uintptr_t Slot25 = reinterpret_cast<uintptr_t>(Candidate[25]);
+                if (reinterpret_cast<uintptr_t>(Candidate[14]) == GetName && Slot25 >= Finder::TextBegin() && Slot25 < Finder::TextEnd())
+                {
+                    VTable = Candidate;
+                    GetNameFound = GetName;
+                    OpenRead = Slot25;
+                    break;
+                }
+            }
+            if (VTable)
+            {
+                break;
+            }
+        }
+
+        if (!VTable)
+        {
+            Log::Error(L"Finder: FPakPlatformFile vtable not found (GetName 0x{:X})", GetNameFound ? GetNameFound - Finder::ImageBase() : 0);
+            return false;
+        }
+
+        Natives::FPakPlatformFile_VTable = VTable;
+        Log::Info(L"Finder: FPakPlatformFile vtable 0x{:X} (GetName +0x{:X}), OpenRead slot 25 +0x{:X}",
+            reinterpret_cast<uintptr_t>(VTable), GetNameFound - Finder::ImageBase(), OpenRead - Finder::ImageBase());
+        return true;
+    }();
+    return bResolved;
+}
+
 bool Finder::ResolveEngineInit()
 {
     if (Natives::UEngine_InitIndex >= 0)

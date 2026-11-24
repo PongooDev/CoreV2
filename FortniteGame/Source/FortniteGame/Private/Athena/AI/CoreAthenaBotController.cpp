@@ -1099,6 +1099,61 @@ namespace
         Weapon.MinPreferredRange = Ranges.MinPreferredRange;
         Weapon.MaxPreferredRange = Ranges.MaxPreferredRange;
         Weapon.EquipMaxDistance = Ranges.MaxActualRange;
+
+        // The row's spread (FCoreAthenaBotWeaponSpread), CoreV2 #637: the bots' shots went straight down their aim.
+        FCoreAthenaBotWeaponSpread& Spread = Weapon.Spread;
+        static constexpr const wchar_t* HeatXNames[] = { L"HeatX1", L"HeatX2", L"HeatX3" };
+        static constexpr const wchar_t* HeatYNames[] = { L"HeatY1", L"HeatY2", L"HeatY3" };
+        static constexpr const wchar_t* CoolXNames[] = { L"CoolX1", L"CoolX2", L"CoolX3" };
+        static constexpr const wchar_t* CoolYNames[] = { L"CoolY1", L"CoolY2", L"CoolY3" };
+        bool bHasSpread = ReadStat(Weapon.WeaponDefinition, L"Spread", Spread.Spread) && ReadStat(Weapon.WeaponDefinition, L"SpreadDownsights", Spread.SpreadDownsights)
+            && ReadStat(Weapon.WeaponDefinition, L"StandingStillSpreadMultiplier", Spread.StandingStillSpreadMultiplier)
+            && ReadStat(Weapon.WeaponDefinition, L"MinSpeedForSpreadMultiplier", Spread.MinSpeedForSpreadMultiplier);
+        for (int32_t Key = 0; bHasSpread && Key < 3; ++Key)
+        {
+            bHasSpread = ReadStat(Weapon.WeaponDefinition, HeatXNames[Key], Spread.HeatX[Key]) && ReadStat(Weapon.WeaponDefinition, HeatYNames[Key], Spread.HeatY[Key])
+                && ReadStat(Weapon.WeaponDefinition, CoolXNames[Key], Spread.CoolX[Key]) && ReadStat(Weapon.WeaponDefinition, CoolYNames[Key], Spread.CoolY[Key]);
+        }
+        // Battle Royale's own multiplier, and the cooling's delay, where the row has them.
+        if (!ReadStat(Weapon.WeaponDefinition, L"AthenaJumpingFallingSpreadMultiplier", Spread.AthenaJumpingFallingSpreadMultiplier))
+        {
+            Spread.AthenaJumpingFallingSpreadMultiplier = 1.0f;
+        }
+        if (!ReadStat(Weapon.WeaponDefinition, L"RecoilRecoveryDelay", Spread.RecoilRecoveryDelay))
+        {
+            Spread.RecoilRecoveryDelay = 0.0f;
+        }
+        Weapon.bHasSpread = bHasSpread;
+    }
+
+    // One of a stats row's three-key spread curves (an FRichCurve of linear keys, 1.9 0x946860): flat past its first and
+    // last key.
+    float EvalSpreadCurve(const float (&KeyX)[3], const float (&KeyY)[3], float Time)
+    {
+        int32_t Order[3] = { 0, 1, 2 };
+        std::sort(Order, Order + 3, [&KeyX](int32_t A, int32_t B) { return KeyX[A] < KeyX[B]; });
+        if (Time <= KeyX[Order[0]])
+        {
+            return KeyY[Order[0]];
+        }
+        for (int32_t Key = 1; Key < 3; ++Key)
+        {
+            const int32_t Previous = Order[Key - 1];
+            const int32_t Next = Order[Key];
+            if (Time <= KeyX[Next])
+            {
+                const float Span = KeyX[Next] - KeyX[Previous];
+                return Span > 0.0f ? FMath::Lerp(KeyY[Previous], KeyY[Next], (Time - KeyX[Previous]) / Span) : KeyY[Next];
+            }
+        }
+        return KeyY[Order[2]];
+    }
+
+    // The curve's first and last key's time: the range AFortWeaponRanged clamps the reticle spread to.
+    void SpreadCurveRange(const float (&KeyX)[3], float& OutMin, float& OutMax)
+    {
+        OutMin = FMath::Min(KeyX[0], FMath::Min(KeyX[1], KeyX[2]));
+        OutMax = FMath::Max(KeyX[0], FMath::Max(KeyX[1], KeyX[2]));
     }
 
     // A number (an int or a float property) of an object, by its name, or Default.
@@ -1782,6 +1837,10 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
         Movement->bUseAccelerationForPaths = true;
     }
     Pawn->ForceNetUpdate();
+
+    // The playlist's items, as a player's new pawn comes with them (CoreV2 #638).
+    GiveStartingItems(!bGivenFirstSpawnItems);
+    bGivenFirstSpawnItems = true;
 
     // The harvesting tool first (Core-held, 8.30's weapon list keeps the bot's weapons on its controller).
     bPickaxeEquipped = false;
@@ -3661,7 +3720,7 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
         return;
     }
     PlayFireMontage();
-    const FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
     // CoreV2 #452: a bot's warmup brawl is for show. Its shots and swings still play and show their fire and hit cues,
     // but take no health from another bot or a player: the game mode's bAllowDamageInWarmup is the players' own damage,
     // and a bot's hit there is Core's. So neither the game's fire (its ability hits and damages by itself) nor the pawn's
@@ -3708,24 +3767,46 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     }
 
     // The hit: the shot's line, from the bot's eyes through its aim point (where its tracking has the target, plus the
-    // shot's aim error), passes within the target's capsule, and nothing stands between them.
+    // shot's aim error), turned by the gun's reticle spread as a player's shot is (ApplyWeaponSpread, CoreV2 #637: the
+    // bots' shots went straight down their aim, with no bloom), passes within the target's capsule, and nothing stands
+    // between them. A shotgun's pellets each take their own line through the spread; the pellets that pass are its hit.
     const FVector Location = LocationOf(Pawn);
     const FVector Eye(Location.X, Location.Y, Location.Z + 60.0f);
     const FVector TargetLocation = LocationOf(Target);
     const FVector Center(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f);
     const FVector Tracked = TrackedTarget.Get() == Target ? FVector(TrackedTargetLocation.X, TrackedTargetLocation.Y, TrackedTargetLocation.Z + 20.0f) : Center;
     const FVector Aim = Tracked + AimError;
-    const FVector Ray = Aim - Eye;
-    const float RayLength = Ray.Size();
+    const float ShotTime = LastTickTime;
+    FVector Ray = Aim - Eye;
+    float RayLength = Ray.Size();
     bool bHit = false;
+    int32_t PelletsHit = 0;
     if (RayLength > 1.0f)
     {
-        const FVector Direction = Ray * (1.0f / RayLength);
+        const FVector AimDirection = Ray * (1.0f / RayLength);
         const FVector ToTarget = Center - Eye;
-        const float Along = ToTarget | Direction;
-        const FVector Closest = Eye + Direction * Along;
-        const float Horizontal = Dist2D(Closest, Center);
-        bHit = Along > 0.0f && Horizontal < 45.0f && std::fabs(Closest.Z - Center.Z) < 90.0f;
+        const auto PassesTarget = [&](const FVector& Direction)
+        {
+            const float Along = ToTarget | Direction;
+            const FVector Closest = Eye + Direction * Along;
+            return Along > 0.0f && Dist2D(Closest, Center) < 45.0f && std::fabs(Closest.Z - Center.Z) < 90.0f;
+        };
+        const int32_t Pellets = Held ? FMath::Max(Held->Pellets, 1) : 1;
+        FVector FirstDirection = AimDirection;
+        for (int32_t Pellet = 0; Pellet < Pellets; ++Pellet)
+        {
+            const FVector Direction = Held ? ApplyWeaponSpread(*Held, AimDirection, ShotTime) : AimDirection;
+            FirstDirection = Pellet == 0 ? Direction : FirstDirection;
+            PelletsHit += PassesTarget(Direction) ? 1 : 0;
+        }
+        bHit = PelletsHit > 0;
+        // The tracer and the blocking trace follow the first pellet's line.
+        Ray = FirstDirection * RayLength;
+        RayLength = Ray.Size();
+    }
+    if (Held)
+    {
+        AddWeaponSpreadHeat(*Held, ShotTime);
     }
     // A wall, a build or the ground in the way stops the shot (both the Visibility and the weapon channel), and a
     // building piece it stops takes the shot's damage as a player's shot gives it.
@@ -3801,13 +3882,21 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
         return;
     }
     float Damage = bPickaxeEquipped ? 20.0f : Held ? Held->Damage : 20.0f;
-    int32_t PelletsHit = 1;
-    if (Held && Held->Pellets > 1)
+    if (Held && Held->Pellets > 1 && Held->bHasSpread)
     {
-        // A shotgun's pellets: all of them close up, fewer with the distance 🟡.
+        // A shotgun's pellets that passed through the target, each through the gun's spread (above).
+        Damage *= static_cast<float>(PelletsHit);
+    }
+    else if (Held && Held->Pellets > 1)
+    {
+        // A row without the spread: all of the pellets close up, fewer with the distance 🟡.
         const float Share = std::clamp(1.0f - (Distance - 400.0f) / 2000.0f, 0.25f, 1.0f);
         Damage *= static_cast<float>(Held->Pellets) * Share;
         PelletsHit = std::max(static_cast<int32_t>(std::lround(static_cast<float>(Held->Pellets) * Share)), 1);
+    }
+    else
+    {
+        PelletsHit = 1;
     }
     // The game's damage where it decides the outcome itself (a player's pawn, and bots in solo playlists): the hit
     // numbers, the kill feed and the death are then the game's. Bots in team playlists take Core's damage, which downs
@@ -3823,6 +3912,83 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     }
     Manager->ApplyBotDamage(this, Target, Damage, Held ? Held->WeaponDefinition : nullptr);
 #endif
+}
+
+FVector FCoreAthenaBotController::ApplyWeaponSpread(FCoreAthenaBotWeapon& Weapon, const FVector& Direction, float Now) const
+{
+    if (!Weapon.bHasSpread)
+    {
+        return Direction;
+    }
+    const FCoreAthenaBotWeaponSpread& Spread = Weapon.Spread;
+    float HeatMin = 0.0f;
+    float HeatMax = 0.0f;
+    float CoolMin = 0.0f;
+    float CoolMax = 0.0f;
+    SpreadCurveRange(Spread.HeatX, HeatMin, HeatMax);
+    SpreadCurveRange(Spread.CoolX, CoolMin, CoolMax);
+    if (Weapon.CurrentReticleSpread < 0.0f)
+    {
+        Weapon.CurrentReticleSpread = HeatMin;
+    }
+    // The cooling a player's weapon does every frame from RecoilRecoveryDelay after its last shot (0x95C590), caught up
+    // here a server frame (30 Hz) at a time.
+    if (Weapon.LastFireTime >= 0.0f)
+    {
+        const float CoolFrom = FMath::Max(Weapon.LastFireTime + Spread.RecoilRecoveryDelay, Weapon.LastSpreadUpdateTime);
+        float Cooling = Now - CoolFrom;
+        if (Cooling > 30.0f)
+        {
+            Weapon.CurrentReticleSpread = CoolMin;
+            Cooling = 0.0f;
+        }
+        constexpr float FrameSeconds = 1.0f / 30.0f;
+        while (Cooling > 0.0f && Weapon.CurrentReticleSpread > CoolMin)
+        {
+            const float Step = FMath::Min(Cooling, FrameSeconds);
+            Weapon.CurrentReticleSpread = FMath::Clamp(Weapon.CurrentReticleSpread - EvalSpreadCurve(Spread.CoolX, Spread.CoolY, Weapon.CurrentReticleSpread) * Step, CoolMin, CoolMax);
+            Cooling -= Step;
+        }
+    }
+    Weapon.LastSpreadUpdateTime = FMath::Max(Weapon.LastSpreadUpdateTime, Now);
+    // The multiplier (0x95C590): aiming down sights, standing still, in the air. 0x95C590 eases each multiplier to its
+    // value (and the sights over ADSTransitionInTime); a bot's shot takes the value itself.
+    float Multiplier = bTargeting ? Spread.SpreadDownsights : 1.0f;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+    if (Movement)
+    {
+        // EMovementMode::MOVE_Falling.
+        constexpr uint8_t MoveFalling = 3;
+        if (static_cast<FVector>(Movement->Velocity).Size() < FMath::Max(Spread.MinSpeedForSpreadMultiplier, 0.0f))
+        {
+            Multiplier *= Spread.StandingStillSpreadMultiplier;
+        }
+        if (Movement->MovementMode == MoveFalling)
+        {
+            Multiplier *= Spread.AthenaJumpingFallingSpreadMultiplier;
+        }
+    }
+    // The reticle spread is the cone's half-angle in degrees 🟡 (the client's trace that draws a player's bullet in it
+    // isn't read; UE's VRandCone takes the half-angle).
+    const float HalfAngleDegrees = FMath::Max(Weapon.CurrentReticleSpread * Multiplier, 0.0f);
+    return FMath::VRandCone(Direction, HalfAngleDegrees * (3.14159265f / 180.0f));
+}
+
+void FCoreAthenaBotController::AddWeaponSpreadHeat(FCoreAthenaBotWeapon& Weapon, float Now) const
+{
+    if (!Weapon.bHasSpread)
+    {
+        return;
+    }
+    const FCoreAthenaBotWeaponSpread& Spread = Weapon.Spread;
+    float HeatMin = 0.0f;
+    float HeatMax = 0.0f;
+    SpreadCurveRange(Spread.HeatX, HeatMin, HeatMax);
+    const float Current = Weapon.CurrentReticleSpread < 0.0f ? HeatMin : Weapon.CurrentReticleSpread;
+    Weapon.CurrentReticleSpread = FMath::Clamp(Current + EvalSpreadCurve(Spread.HeatX, Spread.HeatY, Current) * Spread.Spread, HeatMin, HeatMax);
+    Weapon.LastFireTime = Now;
+    Weapon.LastSpreadUpdateTime = Now;
 }
 
 bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget, bool bForShow)
@@ -5003,8 +5169,24 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
     // Into the bot's own inventory (8.30 keeps it in the controller's AFortInventory; Core's brain holds it), and the
     // pickup is gone as when a player takes it.
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
-    UFortItemDefinition* Definition = Entry.ItemDefinition;
-    const int32_t Count = std::max(static_cast<int32_t>(Entry.Count), 1);
+    if (!GiveItem(Entry.ItemDefinition, std::max(static_cast<int32_t>(Entry.Count), 1), std::max(static_cast<int32_t>(Entry.LoadedAmmo), 0)))
+    {
+        MarkUnreachable(Pickup);
+        return;
+    }
+    Pickup->bPickedUp = true;
+    Manager->ForgetLoot(Pickup);
+    Pickup->K2_DestroyActor();
+#endif
+}
+
+bool FCoreAthenaBotController::GiveItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
+{
+#if WITH_SERVER_CODE
+    if (!Definition)
+    {
+        return false;
+    }
     if (const FCoreAthenaBotConsumable* Consumable = GetConsumableInfo(Definition))
     {
         // A new kind with both kinds taken: the one that restores nothing now is dropped for it, as a player swaps it.
@@ -5030,12 +5212,11 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
         const int32_t Slot = WeaponSlotFor(WeaponDefinition);
         if (Slot == -2)
         {
-            MarkUnreachable(Pickup);
-            return;
+            return false;
         }
         FCoreAthenaBotWeapon Weapon = GetWeaponInfo(WeaponDefinition);
         Weapon.ItemGuid = FGuid::NewGuid();
-        Weapon.LoadedAmmo = std::max(static_cast<int32_t>(Entry.LoadedAmmo), 0);
+        Weapon.LoadedAmmo = std::max(LoadedAmmo, 0);
         // A weapon found empty with no ammo to go with it gets a magazine 🟡.
         if (Weapon.LoadedAmmo == 0 && Ammo[Weapon.AmmoDefinition] == 0)
         {
@@ -5071,14 +5252,74 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
         }
         Log::Info(L"Battle Royale bots: {} picks up {} {} ({} wood, {} stone, {} metal)", BotName, Taken, NameOf(Definition), Materials[0], Materials[1], Materials[2]);
     }
-    else
+    else if (Cast<UFortAmmoItemDefinition>(Definition))
     {
         Ammo[Definition] += Count;
         Log::Info(L"Battle Royale bots: {} picks up {} {}", BotName, Count, NameOf(Definition));
     }
-    Pickup->bPickedUp = true;
-    Manager->ForgetLoot(Pickup);
-    Pickup->K2_DestroyActor();
+    else
+    {
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
+{
+#if WITH_SERVER_CODE
+    // What the playlist's mutators give its players (CoreV2 #638: bots ignored the LTM's loadouts): AFortGameModeZone::
+    // GetStartingItems (8.50 CL-6058028 0xFA3A20) is the game mode's StartingItems plus the answer of the first mutator's
+    // FortGameModeAthena_GetInventoryOverride that answers (its loop stops at the slot's 2). The bot already has the
+    // StartingItems it uses (the pickaxe); the override is AFortAthenaMutator_InventoryOverride's, asked with the bot's
+    // team. The weapons come loaded, as a granted weapon does; a gun the bot has no free slot for stays out (a grant adds,
+    // it doesn't swap).
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState)
+    {
+        return;
+    }
+    TArray<const FItemAndCount*> Items;
+    UClass* const OverrideClass = AFortAthenaMutator_InventoryOverride::StaticClass();
+    const TArray<UObject*>* MutatorList = OverrideClass && AFortAthenaMutator_InventoryOverride::HasInventoryLoadouts() ? GameState->GetGameplayMutatorList() : nullptr;
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    const uint8_t TeamIndex = PlayerState ? static_cast<uint8_t>(PlayerState->TeamIndex) : 0;
+    for (int32_t Index = 0; MutatorList && Index < MutatorList->Num(); ++Index)
+    {
+        UObject* Mutator = (*MutatorList)[Index];
+        if (!Mutator || !Mutator->IsA(OverrideClass) || (AFortAthenaMutator::HasMutatorActive() && !reinterpret_cast<AFortAthenaMutator*>(Mutator)->bMutatorActive))
+        {
+            continue;
+        }
+        if (reinterpret_cast<AFortAthenaMutator_InventoryOverride*>(Mutator)->GetInventoryOverrideForBot(bInitialSpawn, TeamIndex, GameState, Items))
+        {
+            break;
+        }
+    }
+    int32_t Given = 0;
+    for (const FItemAndCount* Entry : Items)
+    {
+        UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->Item) : nullptr;
+        if (!Definition)
+        {
+            continue;
+        }
+        UFortWeaponItemDefinition* Weapon = GetConsumableInfo(Definition) ? nullptr : Cast<UFortWeaponItemDefinition>(Definition);
+        if (Weapon && WeaponSlotFor(Weapon) != -1)
+        {
+            continue;
+        }
+        const int32_t LoadedAmmo = Weapon ? GetWeaponInfo(Weapon).ClipSize : 0;
+        Given += GiveItem(Definition, FMath::Max(static_cast<int32_t>(Entry->Count), 1), LoadedAmmo) ? 1 : 0;
+    }
+    if (Given > 0)
+    {
+        Log::Info(L"Battle Royale bots: {} gets the playlist's {} of {} items{}", BotName, Given, Items.Num(), bInitialSpawn ? L" (its first spawn)" : L"");
+    }
 #endif
 }
 

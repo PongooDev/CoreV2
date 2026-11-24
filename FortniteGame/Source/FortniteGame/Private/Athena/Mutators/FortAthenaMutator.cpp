@@ -132,6 +132,66 @@ bool AFortAthenaMutator_InventoryOverride::ShouldDropBotItem(const UFortItemDefi
 #endif
 }
 
+bool AFortAthenaMutator_InventoryOverride::GetInventoryOverrideForBot(bool bInitialSpawn, uint8_t TeamIndex, const AFortGameStateAthena* GameState, TArray<const FItemAndCount*>& OutItems) const
+{
+#if WITH_SERVER_CODE
+    if (!HasInventoryLoadouts())
+    {
+        return false;
+    }
+    const uint8_t Always = EAthenaInventorySpawnOverride::GetAlways();
+    const uint8_t InitialSpawn = EAthenaInventorySpawnOverride::GetIntialSpawn();
+    const uint8_t AircraftPhaseOnly = EAthenaInventorySpawnOverride::GetAircraftPhaseOnly();
+    const uint8_t ForceDrop = EAthenaLootDropOverride::GetForceDrop();
+    if (Always == Reflection::InvalidEnumValue || ForceDrop == Reflection::InvalidEnumValue)
+    {
+        return false;
+    }
+    const TStructArray<FItemLoadoutContainer>& Loadouts = InventoryLoadouts;
+    uint8_t UpdateOverride = InventoryUpdateOverride;
+    uint8_t DropAll = DropAllItemsOverride;
+    // The player's team's entry (TeamIndex matches and its LoadoutIndex is a loadout), which brings its own update and
+    // drop overrides; else InventoryLoadoutIndex, if it is a loadout.
+    int32_t LoadoutIndex = -1;
+    if (HasTeamLoadouts())
+    {
+        const TStructArray<FItemLoadoutTeamMap>& Teams = TeamLoadouts;
+        for (int32_t Index = 0; Index < Teams.Num(); ++Index)
+        {
+            const FItemLoadoutTeamMap& Team = Teams[Index];
+            if (Team.TeamIndex == TeamIndex && static_cast<int32_t>(Team.LoadoutIndex) < Loadouts.Num())
+            {
+                LoadoutIndex = Team.LoadoutIndex;
+                UpdateOverride = Team.UpdateOverrideType;
+                DropAll = Team.DropAllItemsOverride;
+                break;
+            }
+        }
+    }
+    if (LoadoutIndex < 0)
+    {
+        LoadoutIndex = InventoryLoadoutIndex;
+        if (LoadoutIndex < 0 || LoadoutIndex >= Loadouts.Num())
+        {
+            return false;
+        }
+    }
+    const bool bAircraftPhase = GameState && AFortGameStateAthena::StaticClass() && GameState->GamePhase == EAthenaGamePhase::GetAircraft();
+    if (DropAll == ForceDrop || (UpdateOverride != Always && !(bInitialSpawn && UpdateOverride == InitialSpawn) && !(UpdateOverride == AircraftPhaseOnly && bAircraftPhase)))
+    {
+        return false;
+    }
+    const TStructArray<FItemAndCount>& Items = Loadouts[LoadoutIndex].Loadout;
+    for (int32_t Index = 0; Index < Items.Num(); ++Index)
+    {
+        OutItems.Add(&Items[Index]);
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 void AFortAthenaMutator_ItemDropOnDeath::DropBotItemsOnDeath(AFortPawn* DeadPawn, const std::map<UFortItemDefinition*, int32_t>& Ammo) const
 {
 #if WITH_SERVER_CODE

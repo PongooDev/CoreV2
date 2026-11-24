@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdint>
 
+struct FVector;
+
 struct FMath
 {
     template <class T>
@@ -74,4 +76,7 @@ struct FMath
     static int32_t Rand();
     static float FRand();
     static float SRand();
+
+    // A random unit vector within ConeHalfAngleRad of Dir, as UnrealMath.cpp draws it.
+    static FVector VRandCone(const FVector& Dir, float ConeHalfAngleRad);
 };

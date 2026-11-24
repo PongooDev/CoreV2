@@ -217,6 +217,30 @@ enum class ECoreAthenaBotGoal : uint8_t
     Wander,
 };
 
+// A ranged weapon's spread, from its stats row (FFortRangedWeaponStats), as AFortWeaponRanged keeps it for a player's
+// shots (1.9 CL-3757339, whose row layout is 3.0's): every shot heats it, CurrentReticleSpread +=
+// HeatCurve(CurrentReticleSpread) * Spread, clamped to the heat curve's first and last keys (0x933ED0); once
+// RecoilRecoveryDelay has passed since the last shot it cools, -= CoolCurve(CurrentReticleSpread) * DeltaSeconds, clamped
+// to the cool curve's keys (0x95C590). Both curves are the row's three linear keys (HeatX1/HeatY1 ..., 0x946860;
+// CoolX1/CoolY1 ..., 0x946610), each X and Y shifted by HeatXScale/HeatYScale per weapon level above the row's BaseLevel,
+// which Battle Royale's rows leave at 0. The shot's multiplier is 1 lerped to SpreadDownsights aiming down sights, times
+// StandingStillSpreadMultiplier below MinSpeedForSpreadMultiplier, times AthenaJumpingFallingSpreadMultiplier in the air
+// (0x95C590). 8.40's Assault_Auto_Athena_C_Ore_T03: Spread 0.15, heat keys 2.85 to 5.5 at 7 to 8 a shot, cooling 3.25 to
+// 3.85 a second, SpreadDownsights 0.6, standing still 0.55, jumping 1.25.
+struct FCoreAthenaBotWeaponSpread
+{
+    float Spread = 0.0f;
+    float SpreadDownsights = 1.0f;
+    float StandingStillSpreadMultiplier = 1.0f;
+    float AthenaJumpingFallingSpreadMultiplier = 1.0f;
+    float MinSpeedForSpreadMultiplier = 0.0f;
+    float RecoilRecoveryDelay = 0.0f;
+    float HeatX[3] = {};
+    float HeatY[3] = {};
+    float CoolX[3] = {};
+    float CoolY[3] = {};
+};
+
 // One of the bot's weapons (8.30's FFortAthenaInventoryInformation is the weapon list's entry: EquipMaxDistance and
 // WeaponDefinition; the item itself lives in the controller's own AFortInventory there, in Core's brain here).
 struct FCoreAthenaBotWeapon
@@ -246,6 +270,14 @@ struct FCoreAthenaBotWeapon
     float EquipMaxDistance = 5000.0f;
     // When this gun can fire again (its FiringRate from its last shot): swapping guns doesn't skip a pump's delay.
     float ReadyTime = 0.0f;
+    // Its stats row's spread (bHasSpread false for a row without the spread fields: the shot goes where it aims), and the
+    // gun's AFortWeaponRanged reticle spread now: -1 before its first shot, which starts it at the heat curve's first key.
+    FCoreAthenaBotWeaponSpread Spread;
+    bool bHasSpread = false;
+    float CurrentReticleSpread = -1.0f;
+    // Its last shot, and how far the reticle spread has cooled since (a shotgun's pellets all come from one moment).
+    float LastFireTime = -1.0f;
+    float LastSpreadUpdateTime = -1.0f;
 };
 
 // A healing or shield item (21.40's UFortAthenaAIBotEvaluator_Heal uses them), from its fire ability's blueprint
@@ -438,6 +470,9 @@ private:
     void RespawnInWarmup(float Now);
     // What the bot carries goes (the bus leaving, a warmup respawn: a player's ResetToStartingItems).
     void ClearInventory();
+    // The loadout the playlist's AFortAthenaMutator_InventoryOverride gives a player at this point of the match (6.30+,
+    // FortGameModeAthena_GetInventoryOverride), into the bot's inventory. bInitialSpawn: the bot's first pawn of the match.
+    void GiveStartingItems(bool bInitialSpawn);
 
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);
@@ -644,6 +679,9 @@ private:
     // checks, with the bot's team; its materials paid.
     bool BuildPiece(const FCoreAthenaBotBuildDescriptor& Descriptor);
     void TakePickup(AFortPickup* Pickup);
+    // An item into the bot's own inventory, as a pickup gives it (TakePickup) or a grant does: false for what the bot
+    // doesn't carry (a gun it already has the better of, a gadget).
+    bool GiveItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
     // An item dropped where the bot stands, as a player drops it (a weapon with its magazine). A death drop is tossed onto
     // DeathSpot, its spot around the body (AFortPlayerControllerAthena::GetInventoryDropSpots).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo, const FVector* DeathSpot = nullptr);
@@ -670,6 +708,11 @@ private:
     // One shot at the target: the weapon's fire for everyone to see, the magazine, and its hit, by Core (no player
     // controller aims a bot's weapon ability, so the game's own fire neither spends ammo nor hits).
     void FireShot(AFortPawn* Target, float Distance);
+    // Where one bullet of the held gun goes from Direction, through the gun's reticle spread now
+    // (FCoreAthenaBotWeaponSpread), as AFortWeaponRanged spreads a player's shot.
+    FVector ApplyWeaponSpread(FCoreAthenaBotWeapon& Weapon, const FVector& Direction, float Now) const;
+    // A shot's heat into the held gun's reticle spread (AFortWeaponRanged, 1.9 0x933ED0).
+    void AddWeaponSpreadHeat(FCoreAthenaBotWeapon& Weapon, float Now) const;
     // A launcher's shot as the game's fire makes it for a player (Core-Backend #371: the bots' rockets were traced shots
     // that nobody saw): the weapon's projectile (UFortWeaponRangedItemDefinition::GetProjectileTemplate) spawned from
     // Start along Direction the way AFortWeaponRanged::SpawnProjectile spawns it (1.11 0x9C20A0, through
@@ -855,6 +898,8 @@ private:
     UObject* LoadoutGlider = nullptr;
     UObject* LoadoutContrail = nullptr;
     bool bLoadoutChosen = false;
+    // Its first pawn of the match came with the playlist's items (GiveStartingItems' bInitialSpawn).
+    bool bGivenFirstSpawnItems = false;
     float ReloadUntil = 0.0f;
     float TargetAcquiredTime = 0.0f;
     float NextStuckCheck = 0.0f;

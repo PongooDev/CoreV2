@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Containers/Array.h"
+#include "FortGameModeZone.h"
 #include "GameFramework/Info.h"
 #include "GameplayEffect.h"
 #include "Reflection.h"
@@ -65,6 +67,33 @@ class EAthenaLootDropOverride
     DefineUEnumValue(ForceKeep)
 };
 
+// When an inventory override's loadout replaces a player's inventory (from 6.30).
+class EAthenaInventorySpawnOverride
+{
+    DefineUnrealEnum(EAthenaInventorySpawnOverride, FortniteGame)
+    DefineUEnumValue(NoOverride)
+    DefineUEnumValue(Always)
+    DefineUEnumValue(IntialSpawn)
+    DefineUEnumValue(AircraftPhaseOnly)
+};
+
+// One of an inventory override mutator's loadouts.
+struct FItemLoadoutContainer
+{
+    DefineUnrealStruct(FItemLoadoutContainer, FortniteGame)
+    DefineUStructArrayProperty(FItemAndCount, Loadout)
+};
+
+// The loadout an inventory override mutator gives one team, and when.
+struct FItemLoadoutTeamMap
+{
+    DefineUnrealStruct(FItemLoadoutTeamMap, FortniteGame)
+    DefineUProperty(uint8_t, TeamIndex)
+    DefineUProperty(uint8_t, LoadoutIndex)
+    DefineUProperty(uint8_t, UpdateOverrideType)
+    DefineUProperty(uint8_t, DropAllItemsOverride)
+};
+
 // The mutator that says what an eliminated player drops and keeps (from 6.30; 6.31's Team Rumble has one,
 // RespawnInventoryDropMutator, with DropAllItemsOverride at ForceKeep). The game state's ShouldDropItem asks it through
 // its FortGameStateAthena_ShouldDropItem (6.31 CL-4573279 0xD3C4C0, slot 0xE2), with the player's controller.
@@ -90,6 +119,26 @@ public:
     // player's controller, and a bot's is a stock AAIController, so this answers as 0xD3C4C0 does from the item's type:
     // false when the mutator has no say, else true with bOutShouldDrop its answer. Core's.
     bool ShouldDropBotItem(const UFortItemDefinition* ItemDefinition, bool& bOutShouldDrop) const;
+
+    // The loadouts (CoreV2 #638): InventoryLoadouts[InventoryLoadoutIndex] for everyone, or a team's own from
+    // TeamLoadouts, given when InventoryUpdateOverride (or the team's UpdateOverrideType) says.
+    DefineUProperty(uint8_t, InventoryUpdateOverride)
+    DefineUStructArrayProperty(FItemLoadoutContainer, InventoryLoadouts)
+    DefineUProperty(int32_t, InventoryLoadoutIndex)
+    DefineUStructArrayProperty(FItemLoadoutTeamMap, TeamLoadouts)
+    static bool HasInventoryLoadouts()
+    {
+        return HasDropOverrides() && Member_InventoryUpdateOverride.IsAvailable() && Member_InventoryLoadouts.IsAvailable() && Member_InventoryLoadoutIndex.IsAvailable()
+            && FItemLoadoutContainer::StaticStruct() && FItemAndCount::StaticStruct();
+    }
+    // TeamLoadouts is 8.30's (none in 6.30 to 8.20).
+    static bool HasTeamLoadouts() { return Member_TeamLoadouts.IsAvailable() && FItemLoadoutTeamMap::StaticStruct(); }
+
+    // 21.40's FortGameModeAthena_GetInventoryOverride (8.30 CL-5793395 0xFF5660, vtable slot 0x7E8; 8.50 CL-6058028
+    // 0x108C490, slot 0x7D8): the loadout a player gets now, appended to OutItems, and true where the mutator answers (the
+    // slot's 2, which ends the game's loop over the mutators). It takes the player's team from their controller's team
+    // member interface, which a Core bot's controller isn't, so the team comes in here; the body is the slot's. Core's.
+    bool GetInventoryOverrideForBot(bool bInitialSpawn, uint8_t TeamIndex, const AFortGameStateAthena* GameState, TArray<const FItemAndCount*>& OutItems) const;
 };
 
 // One of the items AFortAthenaMutator_ItemDropOnDeath leaves where a player died.

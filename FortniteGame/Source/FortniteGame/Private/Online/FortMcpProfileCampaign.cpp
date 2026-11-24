@@ -96,3 +96,17 @@ FFortSavedModeLoadout UFortMcpProfileCampaign::GetModeLoadout(FString LoadoutNam
     }
     return ModeLoadout;
 }
+
+void UFortMcpProfileCampaign::GetCurrentHeroLoadoutItem(UFortCampaignHeroLoadoutItem*& OutCampaignHeroLoadoutItem) const
+{
+    OutCampaignHeroLoadoutItem = nullptr;
+    if (!FindStaticFunction_GetCurrentHeroLoadoutItem())
+    {
+        return;
+    }
+    Reflection::FParams Params(StaticFunction_GetCurrentHeroLoadoutItem());
+    if (Params.Call(const_cast<UFortMcpProfileCampaign*>(this)))
+    {
+        OutCampaignHeroLoadoutItem = Params.Take<UFortCampaignHeroLoadoutItem*>(L"OutCampaignHeroLoadoutItem");
+    }
+}

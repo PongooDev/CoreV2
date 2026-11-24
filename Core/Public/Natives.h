@@ -112,6 +112,7 @@ class UObject;
 class UAbilitySystemComponent;
 class IAbilitySystemInterface;
 class UFortHero;
+class UFortGadgetItemDefinition;
 class UFortAbilityKit;
 class UFortHomebaseManager;
 class UFortMcpProfileCampaign;
@@ -283,6 +284,9 @@ namespace Natives
     // only in Save the World (its subgame test, ESubGame::Campaign, before the call at 0x10539E8); 7.30 (0xFF4B8D) called it in
     // every mode. Battle Royale's players then get their generic ability set from UFortGlobals::InitializePlayerGameplayAbilities.
     inline bool UFortGlobals_ApplyHeroEffectsAndAbilitiesCampaignOnly = false;
+    // 8.00 (CL-5203069) on: UFortHero::DetermineCommanderGadgetsAndItems (8.40 0x1351470): the hero loadout commander's
+    // ability kit gadgets and items (OutItems is a TArray<FAbilityKitItem>). Null before the hero loadout system.
+    inline void (*UFortHero_DetermineCommanderGadgetsAndItems)(const UFortHero* Hero, TArray<UFortGadgetItemDefinition*>& OutGadgets, FScriptArray& OutItems) = nullptr;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
     inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;
     inline bool (*UAbilitySystemComponent_InternalTryActivateAbility)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle AbilityToActivate, const void* InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData) = nullptr;

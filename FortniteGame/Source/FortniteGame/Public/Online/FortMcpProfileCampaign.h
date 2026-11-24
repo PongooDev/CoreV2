@@ -6,6 +6,7 @@
 #include "UObject/Object.h"
 
 struct FFortQuestEarnedBadgeData;
+class UFortCampaignHeroLoadoutItem;
 
 struct FAccountIdAndScore
 {
@@ -48,6 +49,7 @@ class UFortMcpProfileCampaign : public UObject
     DefineUFunction(EarnScore)
     DefineUFunction(EndPrimaryMission)
     DefineUFunction(EndMatch)
+    DefineUFunction(GetCurrentHeroLoadoutItem)
 
 public:
     // Whether the build ends a mission with EndMatch (5.21), which replaced EndPrimaryMission and EarnScore's send.
@@ -62,4 +64,6 @@ public:
     // is moved into the command and left empty. False when the build has no such command.
     bool EndMatch(TStructArray<FAccountIdAndMatchEndData>& PlayersAndMatchEndData, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, int32_t DifficultyIncreaseTier);
     FFortSavedModeLoadout GetModeLoadout(FString LoadoutName) const;
+    // 8.00+ (CL-5203069): the account's active hero loadout; null where the build has none.
+    void GetCurrentHeroLoadoutItem(UFortCampaignHeroLoadoutItem*& OutCampaignHeroLoadoutItem) const;
 };

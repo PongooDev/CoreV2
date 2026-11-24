@@ -262,6 +262,10 @@ public:
     void AddHeroAbilityKitGadgetsToQuickBars();
     void ApplyHarvestingTool();
     void ApplyHomebaseGadgets();
+    // 8.00+ (CL-5203069), the hero loadout system: the active hero loadout's gadgets and its commander's ability kit
+    // gadgets and items go into the world inventory, where the client's quickbars find them. False where the build or
+    // the account has no hero loadout, so the homebase gadgets apply instead.
+    bool ApplyHeroLoadoutGadgetsAndItems();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     // A gadget with bDropAllOnEquip (4.1's Infinity Gauntlet) makes its taker drop everything else (#297): the pickup's

@@ -7,6 +7,8 @@
 
 class UCustomCharacterPart;
 class UFortAbilityKit;
+class UFortGadgetItemDefinition;
+struct FAbilityKitItem;
 class UFortHeroType;
 
 // One perk or ability of a hero specialization: the kit it grants (and the earlier one it replaces) from a hero level.
@@ -43,6 +45,10 @@ public:
     DefineUProperty(int32_t, Gender)
 
     UFortHeroType* GetHeroTypeBP() const;
+    // 8.00+ (CL-5203069): as the hero loadout's commander, the gadgets and items of the ability kits its hero type's class
+    // and its level unlock. False where the build has no hero loadout system.
+    bool DetermineCommanderGadgetsAndItems(TArray<UFortGadgetItemDefinition*>& OutGadgets, TStructArray<FAbilityKitItem>& OutItems) const;
+    static bool CanDetermineCommanderGadgetsAndItems();
 
     static bool HasGender() { return Member_Gender.IsAvailable(); }
 };

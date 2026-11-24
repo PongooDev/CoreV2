@@ -431,6 +431,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\BGAConsumableWrapperItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\AthenaGadgetItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortCampaignHeroLoadoutItem.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventory.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventoryOwnerInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItem.h" />
@@ -704,6 +705,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHeroType.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Homebase\FortHomebaseManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortBadgeItemDefinition.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortCampaignHeroLoadoutItem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortInventory.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootPackage.cpp" />

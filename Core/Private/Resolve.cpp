@@ -5183,6 +5183,15 @@ namespace
             }
         }
 
+        // 8.00 (CL-5203069) on, the hero loadout's commander gadgets and items: only the client calls it (8.40's
+        // AFortPlayerControllerPvE 0x16A3BF0, net mode not dedicated server) and slots the world items it finds for them.
+        Natives::UFortHero_DetermineCommanderGadgetsAndItems = reinterpret_cast<decltype(Natives::UFortHero_DetermineCommanderGadgetsAndItems)>(
+            FunctionOf(L"DetermineCommanderGadgetsAndItems failed!  Commander's HeroType is NULL!  Hero: %s"));
+        if (Natives::UFortHero_DetermineCommanderGadgetsAndItems)
+        {
+            Log::Info(L"Finder: UFortHero::DetermineCommanderGadgetsAndItems at +0x{:X}", reinterpret_cast<uintptr_t>(Natives::UFortHero_DetermineCommanderGadgetsAndItems) - Finder::ImageBase());
+        }
+
         const auto OnlyCaller = [](uintptr_t Function)
         {
             uintptr_t Caller = 0;

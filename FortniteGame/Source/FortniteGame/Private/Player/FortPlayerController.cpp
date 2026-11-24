@@ -28,6 +28,7 @@
 #include "FortKismetLibrary.h"
 #include "FortSpottableActorInterface.h"
 #include "FortTeamInfo.h"
+#include "Items/FortCampaignHeroLoadoutItem.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
@@ -1510,6 +1511,11 @@ void AFortPlayerController::ApplyHarvestingTool()
 void AFortPlayerController::ApplyHomebaseGadgets()
 {
 #if WITH_SERVER_CODE
+    if (ApplyHeroLoadoutGadgetsAndItems())
+    {
+        return;
+    }
+
     AFortInventory* Inventory = WorldInventory;
     AFortQuickBars* Bars = QuickBars;
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
@@ -1617,6 +1623,122 @@ void AFortPlayerController::ApplyHomebaseGadgets()
         FFortItemEntry::StaticStruct()->DestroyStruct(&SelectableGadgets[Index]);
     }
     FMemory::Free(SelectableGadgets.GetData());
+#endif
+}
+
+bool AFortPlayerController::ApplyHeroLoadoutGadgetsAndItems()
+{
+#if WITH_SERVER_CODE
+    // 8.00 (CL-5203069) replaced the homebase's gadgets with the hero loadout's: two slotted gadgets, and the commander's
+    // ability kits (its hero class abilities, which are gadgets, and their items). Only the client determines them
+    // (8.40 CL-6005771: AFortPlayerControllerPvE 0x16A3BF0 calls UFortHero::DetermineCommanderGadgetsAndItems 0x1351470,
+    // 0x1697AD0 walks GetGadgetDefinitionBySlotIndex; both return on a dedicated server) and slots the world item it finds
+    // for each (0x16A4FE0, 0x16A5180; again on each world inventory update). Nothing on the server puts those items in
+    // the world inventory, so the hotbar's gadget and ability slots stayed empty (#624). Core's: the same items, given
+    // once at possession, at the commander's level; ones from a previous loadout go.
+    // 7.x has hero loadouts too, but there Core's TrySetHeroImplementation hook gives the hero's kits
+    // (ApplyHeroAbilityKitItems) and the homebase gives the gadgets: only builds without that hook (8.00+) come here.
+    if (CanTrySetHero())
+    {
+        return false;
+    }
+    AFortInventory* Inventory = WorldInventory;
+    UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
+    UFortMcpProfileCampaign* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileCampaign*>(PlayerInfo->AccountProfile) : nullptr;
+    if (Role != ROLE_Authority || !Inventory || !AccountProfile || !UFortCampaignHeroLoadoutItem::IsAvailable() || !UFortHero::CanDetermineCommanderGadgetsAndItems())
+    {
+        return false;
+    }
+    UFortCampaignHeroLoadoutItem* HeroLoadout = nullptr;
+    AccountProfile->GetCurrentHeroLoadoutItem(HeroLoadout);
+    if (!HeroLoadout)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ApplyHeroLoadoutGadgetsAndItems: %s's account has no active hero loadout"), *GetName());
+        return true;
+    }
+
+    TArray<UFortGadgetItemDefinition*> Gadgets;
+    TStructArray<FAbilityKitItem> KitItems;
+    HeroLoadout->DetermineHeroLoadoutGadgetsAndItems(Gadgets, KitItems);
+
+    TArray<UFortItemDefinition*> Definitions;
+    for (UFortGadgetItemDefinition* Gadget : Gadgets)
+    {
+        Definitions.Add(static_cast<UFortItemDefinition*>(Gadget));
+    }
+    for (int32_t Index = 0; Index < KitItems.Num(); ++Index)
+    {
+        UFortItemDefinition* Definition = KitItems[Index].Item;
+        if (Definition && !Definitions.Contains(Definition))
+        {
+            Definitions.Add(Definition);
+        }
+    }
+
+    FHeroAbilityKitItems& Granted = GetHeroAbilityKitItems(this);
+    TArray<UFortItemDefinition*> PreviousDefinitions;
+    for (const TWeakObjectPtr<UFortItemDefinition>& GrantedDefinition : Granted.GrantedDefinitions)
+    {
+        if (UFortItemDefinition* Definition = GrantedDefinition.Get())
+        {
+            PreviousDefinitions.Add(Definition);
+        }
+    }
+    TArray<FGuid> StaleItems;
+    TArray<UFortWorldItem*>& Instances = static_cast<FFortItemList&>(Inventory->Inventory).ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->ItemDefinition) : nullptr;
+        if (Definition && PreviousDefinitions.Contains(Definition) && !Definitions.Contains(Definition))
+        {
+            StaleItems.Add(Entry->ItemGuid);
+        }
+    }
+    for (const FGuid& ItemGuid : StaleItems)
+    {
+        RemoveInventoryItem(ItemGuid, -1, true);
+    }
+
+    const UFortHero* Commander = HeroLoadout->GetCommanderHero();
+    const int32_t Level = Commander ? std::max(Commander->GetLevel(), 1) : 1;
+    int32_t GadgetsGiven = 0;
+    for (UFortGadgetItemDefinition* Gadget : Gadgets)
+    {
+        UFortWorldItemDefinition* GadgetDefinition = static_cast<UFortWorldItemDefinition*>(Gadget);
+        if (GadgetDefinition && !PreviousDefinitions.Contains(static_cast<UFortItemDefinition*>(Gadget)) && GetItemQuantity(GadgetDefinition) <= 0)
+        {
+            GadgetsGiven += AddHeroAbilityKitItem(this, Inventory, GadgetDefinition, 1, Level).empty() ? 0 : 1;
+        }
+    }
+    int32_t ItemsGiven = 0;
+    for (int32_t Index = 0; Index < KitItems.Num(); ++Index)
+    {
+        const FAbilityKitItem& KitItem = KitItems[Index];
+        UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(KitItem.Item));
+        if (!ItemDefinition || ItemDefinition->ItemType == EFortItemType::GetWeaponHarvest() || PreviousDefinitions.Contains(static_cast<UFortItemDefinition*>(KitItem.Item)))
+        {
+            continue;
+        }
+        const int32_t Count = AbilityKitItemCount(KitItem, GetItemQuantity(ItemDefinition));
+        if (Count > 0)
+        {
+            AddHeroAbilityKitItem(this, Inventory, ItemDefinition, Count, Level);
+            ++ItemsGiven;
+        }
+    }
+
+    Granted.GrantedDefinitions.clear();
+    for (UFortItemDefinition* Definition : Definitions)
+    {
+        Granted.GrantedDefinitions.emplace_back(Definition);
+    }
+    UE_LOG(LogFort, Log, TEXT("ApplyHeroLoadoutGadgetsAndItems: %s's hero loadout %s (commander %s, level %d): %d gadgets and %d kit items determined, %d and %d given"),
+        *GetName(), *HeroLoadout->GetName(), *GetNameSafe(Commander), Level, Gadgets.Num(), KitItems.Num(), GadgetsGiven, ItemsGiven);
+    KitItems.Empty();
+    return true;
+#else
+    return false;
 #endif
 }
 

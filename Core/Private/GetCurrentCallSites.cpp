@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Finder.h"
 #include "Log.h"
+#include "Natives.h"
 
 #include <algorithm>
 #include <chrono>
@@ -60,6 +61,8 @@ namespace
         int32_t GoalManager = 0;
         int32_t Director = 0;
         int32_t Other = 0;
+        // Calls of AFortAIDirector::StopEncounter (Natives::AFortAIDirector_StopEncounter) with the result as `this`.
+        int32_t StopEncounters = 0;
     };
 
     struct FContext
@@ -148,6 +151,24 @@ namespace
         if (IsGetWorldCall(Bytes, GetWorldIndex) && Bytes[6] == 0x48 && Bytes[7] == 0x8B && Bytes[8] == 0xC8)
         {
             return true;
+        }
+        // The null-checked world: call [r+GetWorld]; test rax, rax; jz ...; mov rcx, rax; [mov [rsp+disp8], r64;] call
+        // GetCurrent. 8.20 (CL-5625478) AFortMission_RiftSpawners' rift removal (0x1359B50, 8.30 0x1419360) saves rbp to its
+        // home slot between the two.
+        const uintptr_t Saved = Site - 5;
+        const uint8_t* Save = reinterpret_cast<const uint8_t*>(Saved);
+        const uintptr_t MoveRcx = (Save[0] == 0x48 || Save[0] == 0x4C) && Save[1] == 0x89 && (Save[2] & 0xC7) == 0x44 && Save[3] == 0x24 ? Saved - 3 : Site - 3;
+        const uint8_t* Move = reinterpret_cast<const uint8_t*>(MoveRcx);
+        if (Move[0] == 0x48 && Move[1] == 0x8B && Move[2] == 0xC8)
+        {
+            const uint8_t* Jz32 = reinterpret_cast<const uint8_t*>(MoveRcx - 6);
+            const uint8_t* Jz8 = reinterpret_cast<const uint8_t*>(MoveRcx - 2);
+            const uintptr_t Test = Jz32[0] == 0x0F && Jz32[1] == 0x84 ? MoveRcx - 9 : Jz8[0] == 0x74 ? MoveRcx - 5 : 0;
+            const uint8_t* TestBytes = reinterpret_cast<const uint8_t*>(Test);
+            if (Test && TestBytes[0] == 0x48 && TestBytes[1] == 0x85 && TestBytes[2] == 0xC0 && IsGetWorldCall(reinterpret_cast<const uint8_t*>(Test - 6), GetWorldIndex))
+            {
+                return true;
+            }
         }
         // The world kept in a stack slot from the function's start: 6.22 (CL-4543176) ABuildingActor's damage handling
         // (0xD298E0) does "call [rax+140h]; mov [rbp-60h], rax" first, and ends with "mov rcx, [rbp-60h]; call
@@ -491,6 +512,10 @@ namespace
                     ++Votes.GoalManager;
                 }
             }
+            else if (Depth == 0 && Use.Value == reinterpret_cast<uintptr_t>(Natives::AFortAIDirector_StopEncounter))
+            {
+                ++Votes.StopEncounters;
+            }
             else if (Use.Value != Context.Stub && Depth < 3)
             {
                 const FVotes Callee = Footprint(Context, Use.Value, Depth + 1);
@@ -604,7 +629,9 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             Result.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIGoalManager::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
-        else if (Votes.Director && !Votes.GoalManager && !Votes.Other && IsGetCurrentOfWorld(Site, Begin, GetWorldIndex))
+        // A director handed to AFortAIDirector::StopEncounter is the director, whatever its other callees' footprints say
+        // (8.20's AFortMission_RiftSpawners rift removal, #608: unclassified, it stopped no encounter when its rift went).
+        else if (((Votes.Director && !Votes.Other) || Votes.StopEncounters) && !Votes.GoalManager && IsGetCurrentOfWorld(Site, Begin, GetWorldIndex))
         {
             OutDirectorCalls.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIDirector::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);

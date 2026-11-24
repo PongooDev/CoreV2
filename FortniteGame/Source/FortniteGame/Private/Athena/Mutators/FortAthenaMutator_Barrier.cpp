@@ -86,6 +86,22 @@ namespace
     int32_t LastSafeZoneWithRadius(AFortGameStateAthena* GameState)
     {
         AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr;
+        if (MapInfo && AFortAthenaMapInfo::HasSafeZoneDefinition())
+        {
+            // 7.40+: one definition, its curve levels the circles, as the game mode reads it (8.40 0xF37510: Count at
+            // level 0, Radius at levels 0 to Count - 1). CoreV2 #610: 8.40's Food Fight: Deep Fried read no circles here.
+            FFortSafeZoneDefinition& Definition = MapInfo->SafeZoneDefinition;
+            const int32_t Count = static_cast<int32_t>(static_cast<FScalableFloat&>(Definition.Count).GetValueAtLevel(0.0f));
+            int32_t Last = -1;
+            for (int32_t Index = 0; Index < Count; ++Index)
+            {
+                if (static_cast<FScalableFloat&>(Definition.Radius).GetValueAtLevel(static_cast<float>(Index)) > 0.0f)
+                {
+                    Last = Index;
+                }
+            }
+            return Last;
+        }
         if (!MapInfo || !AFortAthenaMapInfo::HasSafeZoneDefinitions())
         {
             return -1;
@@ -201,9 +217,14 @@ void AFortAthenaMutator_Barrier::SpawnModeObjects(AFortGameModeAthena* GameMode)
     const FBarrierTeamState& Team0 = Team_0_State;
     FVector SafeZoneCenter;
     const int32_t SafeZoneIndex = LastSafeZoneWithRadius(GameState);
-    if (Team0.ObjectiveFlag || !GameState || GameState->GamePhase < EAthenaGamePhase::GetAircraft() || SafeZoneIndex < 0
-        || !UFortKismetLibrary::GetSafeZoneLocation(GameMode, SafeZoneIndex, SafeZoneCenter))
+    if (Team0.ObjectiveFlag || !GameState || GameState->GamePhase < EAthenaGamePhase::GetAircraft())
     {
+        return;
+    }
+    if (SafeZoneIndex < 0 || !UFortKismetLibrary::GetSafeZoneLocation(GameMode, SafeZoneIndex, SafeZoneCenter))
+    {
+        Log::Warning(L"Food Fight: no restaurants yet, {}", SafeZoneIndex < 0 ? std::wstring(L"the map info has no storm circle with a radius")
+                                                                              : std::format(L"storm circle {} has no location", SafeZoneIndex));
         return;
     }
     if (!BigBaseWall)
@@ -377,13 +398,14 @@ void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, co
         Log::Error(L"Food Fight: team {}'s restaurant ({}) couldn't be spawned", TeamState.TeamNum.ToString(), FlagClass->GetName().ToStdString());
         return;
     }
-    Flag->Team = TeamState.TeamNum;
+    // SetTeam: from 7.40 a building's team interface reads the replicated TeamIndex, which only SetTeam writes.
+    Flag->SetTeam(static_cast<uint8_t>(TeamState.TeamNum));
     Flag->FoodTeam = TeamState.FoodTeam;
     Flag->ForceNetUpdate();
     AAthenaBarrierObjective* Objective = Flag->GetObjectiveActor();
     if (Objective)
     {
-        Objective->Team = TeamState.TeamNum;
+        Objective->SetTeam(static_cast<uint8_t>(TeamState.TeamNum));
         Objective->FoodTeam = TeamState.FoodTeam;
         // TeamGenerator_C's OnHeadRotationSet turns the head to HeadRotationYaw + 90 (its mesh faces the side): so it
         // looks along Yaw, at the other team's mascot.

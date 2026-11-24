@@ -12,14 +12,18 @@ struct FVector;
 
 // One storm circle of a match (AFortAthenaMapInfo::SafeZoneDefinitions, index: the game mode's SafeZonePhase): how long
 // it holds before it shrinks, and how long it shrinks for (AthenaGameData's Default.SafeZone.NN.WaitTime and ShrinkTime
-// rows, which a playlist's own game data replaces).
+// rows, which a playlist's own game data replaces). From 7.40 (CL-5046157) the map info has one of these, SafeZoneDefinition,
+// whose curves are read by circle: Count at level 0 is how many circles the match has, and Radius, WaitTime and the rest at
+// level N are circle N's (8.40 0xF37510 fills RadiusCached and the other caches for levels 0 to Count - 1).
 struct FFortSafeZoneDefinition
 {
     DefineUnrealStruct(FFortSafeZoneDefinition, FortniteGame)
+    DefineUStructProperty(FScalableFloat, Count)
     DefineUStructProperty(FScalableFloat, Radius)
     DefineUStructProperty(FScalableFloat, WaitTime)
     DefineUStructProperty(FScalableFloat, ShrinkTime)
     static bool IsAvailable() { return StaticStruct() && Member_Radius.IsAvailable() && Member_WaitTime.IsAvailable() && Member_ShrinkTime.IsAvailable(); }
+    static bool HasCount() { return IsAvailable() && Member_Count.IsAvailable(); }
 };
 
 // Battle Royale's map settings (from 1.7.2; DefaultMapInfo_C, placed in Athena_Terrain). AFortGameModeAthena's own
@@ -58,6 +62,9 @@ public:
     DefineUStructArrayProperty(FFortSafeZoneDefinition, SafeZoneDefinitions)
     DefineUStructProperty(FScalableFloat, SafeZoneStartDelay)
     static bool HasSafeZoneDefinitions() { return Member_SafeZoneDefinitions.IsAvailable() && FFortSafeZoneDefinition::IsAvailable(); }
+    // 7.40+: the one definition whose curve levels are the circles (8.20 to 8.40 +0x538).
+    DefineUStructProperty(FFortSafeZoneDefinition, SafeZoneDefinition)
+    static bool HasSafeZoneDefinition() { return Member_SafeZoneDefinition.IsAvailable() && FFortSafeZoneDefinition::HasCount(); }
     // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
     DefineUProperty(FBox2D, AircraftDropZone)
     DefineUProperty(AVolume*, AircraftDropVolume)

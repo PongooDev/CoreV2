@@ -70,6 +70,13 @@ void UNavCollision::PostInitProperties()
 
 void UNavCollision::CreateOnServer()
 {
+    // Once: Save the World at boot, Creative once its playlist has loaded.
+    static bool bCreatedOnServer = false;
+    if (bCreatedOnServer)
+    {
+        return;
+    }
+    bCreatedOnServer = true;
     UClass* Class = StaticClass();
     UNavCollision* Default = Class && Member_bCreateOnClient.IsAvailable() ? static_cast<UNavCollision*>(Class->GetDefaultObject()) : nullptr;
     if (!Default)

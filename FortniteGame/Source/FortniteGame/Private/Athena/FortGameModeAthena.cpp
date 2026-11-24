@@ -2,6 +2,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "AI/Navigation/NavCollision.h"
 #include "Athena/AI/AthenaAISystem.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
@@ -3220,6 +3221,17 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
             Log::Info(L"Battle Royale: the match's playlist brings its players back as high as the bus flies, {:.0f} ({}; 10000 over a death where that is no height to skydive from)",
                 FlightHeight, FlightHeight >= 0.0f ? L"the map info's AircraftHeight over the map info" : L"this build's map info has no AircraftHeight");
         }
+    }
+    // Creative (#602, #604): the islands' AI (8.00+ creature spawners) walks the navmesh the islands' own invoker boxes
+    // build, on the geometry of the island levels and playsets that stream in during the match. Without the static
+    // meshes' navigation collision that geometry isn't navigation relevant: a headless 8.30 Creative server with
+    // Temp_Island_Flat_60x60_001 streamed into FortVolumeActor_2 had the volume's CreativeVolumeNavInvoker but no navmesh
+    // on the island for 4 minutes (the rift's Deimos_EQS_RiftSlots failed, every creature's spawn at the rift's own spot
+    // collided), and had it within 30 s once the meshes had theirs. The playlist is known only now; the meshes that
+    // stream in later get theirs in their own PostLoad.
+    if (AFortPlayerControllerAthena::IsCreativeMatch(this))
+    {
+        UNavCollision::CreateOnServer();
     }
     FMatchEvents& Events = MatchEventsOf(this);
     // 7.00's Creative, for the log only: what the hub has once the playlist's levels (Athena_Playground,

@@ -49,6 +49,6 @@ public:
     // Core turns bCreateOnClient on and runs the class default's PostInitProperties again, so the engine binds
     // UNavCollision::ConstructNew itself, then gives the meshes already loaded theirs as PostLoad would have
     // (UStaticMesh::CreateNavCollision). Meshes loaded from then on get theirs in their own PostLoad. Nothing on builds
-    // without bCreateOnClient (before 4.2).
+    // without bCreateOnClient (before 4.2). Creative servers (#602) run it once their playlist has loaded.
     static void CreateOnServer();
 };

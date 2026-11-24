@@ -1,8 +1,11 @@
 #include "pch.h"
 #include "Minigame/FortMinigame.h"
+#include "Minigame/FortMinigameStatFilter.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
+#include "GameplayTagContainer.h"
+#include "Hooks.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
@@ -444,6 +447,57 @@ DEFINE_FUNCTION(AFortMinigame::execAddStatToPlayerBucket)
     P_NATIVE_BEGIN;
     static_cast<AFortMinigame*>(Context)->AddStatToPlayerBucket(Z_Param_BucketIndex, Z_Param_InFilter, Z_Param_InValue);
     P_NATIVE_END;
+}
+
+int32_t AFortMinigame::GetBucketForPlayerState(const AFortPlayerState* PlayerState) const
+{
+    Reflection::FParams Params(FindStaticFunction_GetBucketForPlayerState(), true);
+    if (!Params.Set(L"PlayerState", reinterpret_cast<UObject*>(const_cast<AFortPlayerState*>(PlayerState))) || !Params.Call(const_cast<AFortMinigame*>(this)))
+    {
+        return -1;
+    }
+    return Params.Take<int32_t>(L"ReturnValue");
+}
+
+void AFortMinigame::NotifyStatEvent(uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
+    const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    // The body's gate (8.51 0x1498C76): the server, a game in progress, a player.
+    if (Role == ROLE_Authority && CurrentState == EFortMinigameState::GetInProgress() && PlayerController)
+    {
+        AController* const Controller = reinterpret_cast<AController*>(PlayerController);
+        AFortPlayerState* const PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState)));
+        const TArray<UClass*> Filters = TrackedStats;
+        for (UClass* Filter : Filters)
+        {
+            const UFortMinigameStatFilter* const FilterDefault = Filter && Filter->IsChildOf(UFortMinigameStatFilter::StaticClass())
+                ? static_cast<const UFortMinigameStatFilter*>(Filter->GetDefaultObject()) : nullptr;
+            if (!FilterDefault || !FilterDefault->Matches(Type, TargetObject, PlayerController, TargetTags, SourceTags, ContextTags))
+            {
+                continue;
+            }
+            AddStatToGroup(Filter, Count);
+            if (PlayerState)
+            {
+                AddStatToPlayer(PlayerState, Filter, Count);
+                // The body logs a player without a bucket ("Failed to find player bucket for player %s").
+                const int32_t BucketIndex = GetBucketForPlayerState(PlayerState);
+                if (BucketIndex != -1)
+                {
+                    AddStatToPlayerBucket(BucketIndex, Filter, Count);
+                }
+            }
+        }
+    }
+#endif
+    NotifyStatEventOG(this, Type, TargetObject, PlayerController, TargetTags, SourceTags, ContextTags, Count);
+}
+
+void AFortMinigame::NotifyStatEventCall(AFortMinigame* This, uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
+    const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count)
+{
+    This->NotifyStatEvent(Type, TargetObject, PlayerController, TargetTags, SourceTags, ContextTags, Count);
 }
 
 bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation, bool* bOutRespawningOnGround)
@@ -1673,6 +1727,29 @@ void AFortMinigame::HookNatives()
             }
         }
         Log::Info(L"Finder: AFortMinigame's stat adds (AddStatToPlayer, AddStatToGroup, AddStatToPlayerBucket): {} stripped, restored", Restored);
+
+        // NotifyStatEvent's adds went with them. Its body has two callers on 8.30-8.51, the exec (8.51 0x1A71B5B) and
+        // UFortMinigameManager::SendStatEventWithTags (0x14D4C8F), both with the full arguments (Count at [rsp+38h]).
+        UFunction* const Notify = Restored == 3 ? FindStaticFunction_NotifyStatEvent() : nullptr;
+        uint8_t* const ExecCall = Notify && Member_TrackedStats.IsAvailable() && FindStaticFunction_GetBucketForPlayerState() && UFortMinigameStatFilter::StaticClass()
+            && UFortMinigameStatFilter::FindStaticFunction_Matches() ? Finder::ImplementationCall(Notify) : nullptr;
+        const uintptr_t Body = ExecCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(ExecCall), 1, 5) : 0;
+        const auto Callers = Body ? Finder::CallsTo(Body, false) : decltype(Finder::CallsTo(0, false))();
+        if (Body && Callers.size() <= 2 && std::find(Callers.begin(), Callers.end(), reinterpret_cast<uintptr_t>(ExecCall)) != Callers.end())
+        {
+            NotifyStatEventOG = reinterpret_cast<decltype(NotifyStatEventOG)>(Body);
+            int32_t Redirected = 0;
+            for (const uintptr_t Call : Callers)
+            {
+                Redirected += Hooks::RedirectCall(L"AFortMinigame::NotifyStatEvent (stripped adds)", reinterpret_cast<uint8_t*>(Call), reinterpret_cast<void*>(&NotifyStatEventCall)) ? 1 : 0;
+            }
+            Log::Info(L"Finder: AFortMinigame::NotifyStatEvent's adds restored at {} of {} calls (body 0x{:X})", Redirected, Callers.size(), Body - Finder::ImageBase());
+        }
+        else if (Restored == 3)
+        {
+            Log::Error(L"Finder: AFortMinigame::NotifyStatEvent's adds not restored (body {}, {} calls), so Creative stat events (creature eliminations, score) count nothing",
+                Body ? L"found" : L"not found", Callers.size());
+        }
     }
 
     // #581: the starting health and shield a game's start gives (ApplyStartingHealthAndShield), found here to be logged.

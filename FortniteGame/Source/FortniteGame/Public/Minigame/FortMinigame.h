@@ -13,7 +13,9 @@
 
 class AActor;
 class AController;
+class AFortPlayerController;
 class AFortPlayerControllerAthena;
+struct FGameplayTagContainer;
 class AFortPlayerPawn;
 class AFortPlayerState;
 class AFortPlayerStateAthena;
@@ -292,6 +294,18 @@ public:
     DECLARE_FUNCTION(execAddStatToPlayer);
     DECLARE_FUNCTION(execAddStatToGroup);
     DECLARE_FUNCTION(execAddStatToPlayerBucket);
+    // 8.30+ NotifyStatEvent (8.51 CL-6165369 0x1498C50, 8.30 0x13F2770) lost its adds with the stripped AddStatTo*: it
+    // never reads Count, and is left with the player bucket lookup and the end conditions' completion times. 8.00's
+    // (0x12281E0) adds Count for each TrackedStats filter whose Matches takes the event, to the group, then to the
+    // player's own stats. Every creature elimination and score event reaches it: AFortGameMode::Killed (8.51 0x12E1170)
+    // -> UFortMinigameManager::SendStatEventWithTags (0x14D4B20) -> NotifyStatEvent. Core's restores the adds and then
+    // runs the build's body (NotifyStatEventOG) for the rest.
+    DefineUProperty(TArray<UClass*>, TrackedStats)
+    DefineUFunction(NotifyStatEvent)
+    DefineUFunction(GetBucketForPlayerState)
+    void NotifyStatEvent(uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
+        const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count);
+    int32_t GetBucketForPlayerState(const AFortPlayerState* PlayerState) const;
     DECLARE_FUNCTION(execHandleStateChangedForTransition);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
@@ -313,6 +327,12 @@ private:
     static inline UFunction* HandleStateChangedForWarmupFunction = nullptr;
     static inline UFunction* HandleVolumeStateChangedForResetFunction = nullptr;
     static inline UFunction* HandleStateChangedForTransitionFunction = nullptr;
+    // The build's NotifyStatEvent body; its two callers (the exec and UFortMinigameManager::SendStatEventWithTags) call
+    // NotifyStatEventCall instead.
+    static inline void (*NotifyStatEventOG)(AFortMinigame* This, uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
+        const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count) = nullptr;
+    static void NotifyStatEventCall(AFortMinigame* This, uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
+        const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count);
     // AdvanceState once Transitioning has no player still teleporting (or bForce, the failsafe's).
     void AdvanceTransitionWhenArrived(bool bForce);
     void AdvanceTransitionNextTick();

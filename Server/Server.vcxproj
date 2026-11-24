@@ -447,6 +447,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortSchematicItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigame.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameScoreRegistry.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameStatFilter.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortItemCollectedParams.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMission.h" />
@@ -716,6 +717,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortSchematicItemDefinition.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigame.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameScoreRegistry.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameStatFilter.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortItemCollectedParams.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMission.cpp" />

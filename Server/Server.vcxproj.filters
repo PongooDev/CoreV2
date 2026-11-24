@@ -1600,6 +1600,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameScoreRegistry.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Minigame</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameStatFilter.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Minigame</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameState.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Minigame</Filter>
     </ClInclude>
@@ -2391,6 +2394,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Minigame</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameScoreRegistry.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Minigame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameStatFilter.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Minigame</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameState.cpp">

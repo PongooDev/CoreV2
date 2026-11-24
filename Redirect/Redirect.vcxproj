@@ -429,6 +429,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHeroType.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Homebase\FortHomebaseManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\BGAConsumableWrapperItemDefinition.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\AthenaGadgetItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventory.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventoryOwnerInterface.h" />

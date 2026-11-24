@@ -15,6 +15,7 @@
 #include "GameThread.h"
 #include "Math/UnrealMathUtility.h"
 #include "Hooks.h"
+#include "Items/AthenaGadgetItemDefinition.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
@@ -326,6 +327,76 @@ namespace
         Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {} (slot 0 is the harvesting tool's)", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);
         OutDroppedDefinition = FocusedDefinition;
         return FocusedSlot;
+    }
+
+    // Battle Royale's gadgets are singletons in the inventory: a second Glider Redeploy picked up swaps with the one the
+    // player holds instead of becoming another stack (#620). The glider's definition allows several stacks
+    // (bAllowMultipleStacks) and carries no stack limit, so GiveItemEntry's add took every one; the check that stops it
+    // is the AthenaGadgetItemDefinition's bIgnoreSingletonInventoryCheck (7.00 to 7.40), which no code in the exe reads
+    // (7.20 CL-4727874: no reader of 0xA49 on the definition), so it is in the stripped server give. The held one is
+    // dropped and the new one takes its place, as for a full backpack. Returns whether it was dropped; OutSlot is the
+    // primary quickbar slot it left where the build has server quickbars, else -1.
+    bool DropSingletonItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const UFortItemDefinition*& OutDroppedDefinition, int32_t& OutSlot)
+    {
+        OutSlot = -1;
+        const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
+        AFortInventory* Inventory = PlayerController->WorldInventory;
+        const EFortItemType AthenaGadget = EFortItemType::GetAthenaGadget();
+        if (!ItemDefinition || !Inventory || ItemEntry.Count <= 0 || AthenaGadget == Reflection::InvalidEnumValue || static_cast<EFortItemType>(ItemDefinition->ItemType) != AthenaGadget
+            || !UAthenaGadgetItemDefinition::HasIgnoreSingletonInventoryCheck() || !AFortGameModeAthena::GetCurrent(PlayerController))
+        {
+            return false;
+        }
+        const UAthenaGadgetItemDefinition* GadgetDefinition = Cast<UAthenaGadgetItemDefinition>(const_cast<UFortItemDefinition*>(ItemDefinition));
+        if (!GadgetDefinition || GadgetDefinition->bIgnoreSingletonInventoryCheck || !GadgetDefinition->bCanBeDropped)
+        {
+            return false;
+        }
+
+        UFortWorldItem* Held = nullptr;
+        FFortItemList& ItemList = Inventory->Inventory;
+        for (UFortWorldItem* Item : ItemList.ItemInstances)
+        {
+            if (Item && static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(Item->ItemEntry).ItemDefinition) == ItemDefinition)
+            {
+                Held = Item;
+                break;
+            }
+        }
+        if (!Held)
+        {
+            return false;
+        }
+
+        const FGuid HeldGuid = static_cast<FFortItemEntry&>(Held->ItemEntry).ItemGuid;
+        const int32_t HeldCount = static_cast<FFortItemEntry&>(Held->ItemEntry).Count;
+        AFortQuickBars* Bars = PlayerController->QuickBars;
+        if (AFortPlayerController::HasQuickBars() && Bars)
+        {
+            const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
+            const int32_t SlotCount = Bars->GetQuickBar(Primary).Slots.Num();
+            for (int32_t Slot = 1; Slot < SlotCount; ++Slot)
+            {
+                if (Bars->GetSlot(Primary, Slot).Items.Contains(HeldGuid))
+                {
+                    OutSlot = Slot;
+                    break;
+                }
+            }
+        }
+        {
+            AFortQuickBars::FKeepFocusOnRemove KeepFocus;
+            PlayerController->ServerSpawnInventoryDrop_Implementation(HeldGuid, HeldCount);
+        }
+        if (Inventory->FindWorldItem(HeldGuid))
+        {
+            Log::Warning(L"Battle Royale: {}'s {} wasn't dropped, so the {} picked up isn't swapped in", PlayerController->GetName().ToStdString(), GadgetDefinition->GetName().ToStdString(), GadgetDefinition->GetName().ToStdString());
+            OutSlot = -1;
+            return false;
+        }
+        Log::Info(L"Battle Royale: {} swaps its {} for the one picked up (a gadget has one stack, quickbar slot {})", PlayerController->GetName().ToStdString(), GadgetDefinition->GetName().ToStdString(), OutSlot);
+        OutDroppedDefinition = GadgetDefinition;
+        return true;
     }
 
     // How close two pickups of the same item must lie to merge, and how long the one flies into the other. The search
@@ -1220,7 +1291,13 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
 
         int32_t EntrySwappedSlot = -1;
         bool bEntrySwapped = false;
-        if (!AFortPlayerController::HasQuickBars())
+        int32_t SingletonSlot = -1;
+        if (DropSingletonItemForSwap(PlayerController, *Entry, DroppedDefinition, SingletonSlot))
+        {
+            // The held one is gone; the pickup has room, so it is given into the slot the held one left.
+            SwappedSlot = EntrySwappedSlot = SingletonSlot;
+        }
+        else if (!AFortPlayerController::HasQuickBars())
         {
             // 7.40: the client's named item, once (DropRequestedItemForSwap).
             bEntrySwapped = !bRequestedSwapDone && DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition, bHoldSwap);

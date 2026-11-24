@@ -1904,7 +1904,12 @@ void AFortPlayerController::DropSpecificItem(const UFortItemDefinition* DropItem
 //
 // This drops what a manual drop could (bCanBeDropped: not the pickaxe, the edit tool or the building pieces), each whole
 // stack, except the item being kept, tossed from the pawn as ServerSpawnInventoryDrop tosses one.
-void AFortPlayerController::DropAllItems(const UFortItemDefinition* IgnoreItemDef)
+//
+// The DropAllItems UFunction (from 4.0) is stripped the same way: 8.50's exec (CL-6058028 0x19572D0) reads IgnoreItemDef
+// and bIgnoreBuildingMaterials and tail-jumps to the empty function. GA_Blade_InitialEquip calls it as the Infinity
+// Blade is pulled from the stone, before it gives AGID_Sword, so the puller kept their inventory (#633).
+// bIgnoreBuildingMaterials keeps the wood, stone and metal (UFortResourceItemDefinition) as well.
+void AFortPlayerController::DropAllItems(const UFortItemDefinition* IgnoreItemDef, bool bIgnoreBuildingMaterials)
 {
 #if WITH_SERVER_CODE
     AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
@@ -1914,15 +1919,17 @@ void AFortPlayerController::DropAllItems(const UFortItemDefinition* IgnoreItemDe
         return;
     }
 
-    std::vector<FGuid> Drops;
+    static UClass* const ResourceClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortResourceItemDefinition");
+    TArray<FGuid> Drops;
     TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
     for (int32_t Index = 0; Index < Instances.Num(); ++Index)
     {
         FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
         const UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
-        if (ItemDefinition && ItemDefinition != IgnoreItemDef && ItemDefinition->bCanBeDropped && ItemEntry->Count > 0)
+        if (ItemDefinition && ItemDefinition != IgnoreItemDef && ItemDefinition->bCanBeDropped && ItemEntry->Count > 0
+            && !(bIgnoreBuildingMaterials && ResourceClass && ItemDefinition->IsA(ResourceClass)))
         {
-            Drops.push_back(ItemEntry->ItemGuid);
+            Drops.Add(ItemEntry->ItemGuid);
         }
     }
 
@@ -1936,7 +1943,8 @@ void AFortPlayerController::DropAllItems(const UFortItemDefinition* IgnoreItemDe
             ServerSpawnInventoryDrop_Implementation(ItemGuid, static_cast<int32_t>(ItemEntry.Count));
         }
     }
-    UE_LOG(LogFort, Log, TEXT("DropAllItems: %s dropped %d items, keeping %s"), *GetName(), static_cast<int32_t>(Drops.size()), IgnoreItemDef ? *IgnoreItemDef->GetName() : TEXT("nothing"));
+    UE_LOG(LogFort, Log, TEXT("DropAllItems: %s dropped %d items, keeping %s%s"), *GetName(), Drops.Num(), IgnoreItemDef ? *IgnoreItemDef->GetName() : TEXT("nothing"),
+        bIgnoreBuildingMaterials ? TEXT(" and the building materials") : TEXT(""));
 #endif
 }
 
@@ -2456,6 +2464,29 @@ void AFortPlayerController::HookVTables()
             Log::Info(L"Hook AFortPlayerController::DropSpecificItem: native");
         }
     }
+    // DropAllItems (#633): only where its exec ends in a stub. 8.50's tail-jumps to the empty function (CL-6058028
+    // 0x19572D0 -> jmp 0x1957382) instead of calling it, so the exec's jumps are read as well as its call.
+    if (UFunction* DropAllFunction = FindStaticFunction_DropAllItems(); DropAllFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        const uint8_t* DropAllCall = Finder::ImplementationCall(DropAllFunction);
+        bool bStripped = DropAllCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(DropAllCall), 1, 5));
+        const uintptr_t Exec = reinterpret_cast<uintptr_t>(DropAllFunction->GetNativeFunc());
+        const uintptr_t ExecEnd = !DropAllCall && Exec ? Finder::FunctionEnd(Exec) : 0;
+        for (uintptr_t Site = Exec; ExecEnd && !bStripped && Site + 5 <= ExecEnd; ++Site)
+        {
+            const uintptr_t Target = *reinterpret_cast<const uint8_t*>(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+            bStripped = Target && (Target < Exec || Target >= ExecEnd) && Finder::IsStubFunction(Target);
+        }
+        if (bStripped)
+        {
+            DropAllFunction->SetNativeFunc(&execDropAllItems);
+            Log::Info(L"Hook AFortPlayerController::DropAllItems: native");
+        }
+        else
+        {
+            Log::Info(L"Hook AFortPlayerController::DropAllItems: the build's own (not stripped, or its end not read)");
+        }
+    }
     // SwapQuickBarFocus is stripped only where its exec calls a stub (Cert's, 0xA313C0). Other builds keep their own
     // (3.3 0xED0250: QuickBars->SwapQuickBarFocus(InQuickBar, -1)), and 5.10 adds SlotOverride to it (5.30 0x11D3170,
     // 5.41 0x11E0640, 6.00 0x1230E00); those stay. Core's took their place too, and stepped only InQuickBar (#405).
@@ -2864,6 +2895,22 @@ DEFINE_FUNCTION(AFortPlayerController::execDropSpecificItem)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<AFortPlayerController*>(Context)->DropSpecificItem(Z_Param_DropItemDef);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execDropAllItems)
+{
+    static const bool bHasIgnoreBuildingMaterials = StaticFunction_DropAllItems()->FindPropertyByName(FName(L"bIgnoreBuildingMaterials", FNAME_Find)) != nullptr;
+    P_GET_OBJECT(UFortItemDefinition, Z_Param_IgnoreItemDef);
+    bool Z_Param_bIgnoreBuildingMaterials = false;
+    if (bHasIgnoreBuildingMaterials)
+    {
+        P_GET_UBOOL(Z_Param_bIgnoreBuildingMaterialsParam);
+        Z_Param_bIgnoreBuildingMaterials = Z_Param_bIgnoreBuildingMaterialsParam;
+    }
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->DropAllItems(Z_Param_IgnoreItemDef, Z_Param_bIgnoreBuildingMaterials);
     P_NATIVE_END;
 }
 

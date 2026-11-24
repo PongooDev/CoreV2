@@ -125,7 +125,7 @@ its module and name. Core-only glue (finders, hook installers, cheats, bots) sti
 
 **Adding a source file:** add it to all three projects and their filters (`Server/Server.vcxproj`,
 `Client/Client.vcxproj`, `Redirect/Redirect.vcxproj` and each `.vcxproj.filters`).
-`python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>` regenerates them from the folder tree.
+Add the entries **by hand**. Don't run `sync_vcxproj.py`: it is out of date with the hand-kept projects, and it drops the full link-time code generation setting (which prevents a known 7.00 crash) and some source files (2026-11-24).
 
 ## 4. Build and test commands
 

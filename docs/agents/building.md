@@ -30,11 +30,8 @@ After any failed build, check that the three DLLs in `x64\Release` still exist.
 ## Adding files
 
 All three projects compile the shared tree. Add a new `.cpp`/`.h` to `Server/Server.vcxproj`,
-`Client/Client.vcxproj`, `Redirect/Redirect.vcxproj` and their `.vcxproj.filters`, or regenerate them:
-
-```
-python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>
-```
+`Client/Client.vcxproj`, `Redirect/Redirect.vcxproj` and their `.vcxproj.filters` **by hand**. Don't regenerate them with
+`sync_vcxproj.py`: it is out of date and drops the full link-time code generation setting and some source files.
 
 Review the diff it makes; commit only the project files your change needs.
 

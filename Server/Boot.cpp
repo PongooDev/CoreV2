@@ -40,6 +40,7 @@
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "McpProfileGroup.h"
+#include "Athena/AI/AthenaAIPerceptionComponent.h"
 #include "Building/BuildingProp_DeimosSpawner.h"
 #include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
@@ -438,6 +439,8 @@ static void InstallHooks()
         AFortAthenaSupplyDrop::HookNatives();
         if (Configuration::Get().IsBattleRoyale())
         {
+            // The Athena AI controllers' sight (#605), before the first one is made.
+            UAthenaAIPerceptionComponent::EnableServerSenses();
             Finder::ResolveLootTierRedirectLive();
             Finder::ResolvePlaylistDataTablesLive();
             AFortPlayerControllerAthena::HookCallSites();

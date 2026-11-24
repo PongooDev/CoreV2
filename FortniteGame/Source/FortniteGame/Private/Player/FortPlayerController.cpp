@@ -42,6 +42,7 @@
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortCheatManager.h"
+#include "Player/FortPlayerControllerPvE.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "RemoteControlledPawn/FortRemoteControlledPawnAthena.h"
@@ -700,9 +701,13 @@ void AFortPlayerController::Possess(APawn* InPawn)
         // Login it was lost, as the controller had no connection yet (#533: the client never built its quickbars).
         // The client takes only the first (ClientUpdateQuickBarRecordsCache_Implementation 0x13F4D20 checks
         // bHasReceivedQuickBarRecords), then runs UpdateQuickBars (slot 0x338, 0x143CC30), which builds the quickbars.
-        if (!HasQuickBars() && HasQuickBarRecordsCache() && FindStaticFunction_ClientUpdateQuickBarRecordsCache())
+        // 8.20+ has the RPC on AFortPlayerControllerPvE: 8.40 CL-6005771's _Implementation 0x1682890 sets +0x246D, the
+        // only thing its UpdateQuickBars (slot 0x32F, 0x165A480) waits on (slot 0x32E, 0x16A2290); without it no
+        // quickbar was built (#624).
+        FQuickBar* PrimaryRecord = nullptr;
+        FQuickBar* SecondaryRecord = nullptr;
+        if (!HasQuickBars() && GetQuickBarRecordsCache(PrimaryRecord, SecondaryRecord) && ClientUpdateQuickBarRecordsCache(*PrimaryRecord, *SecondaryRecord))
         {
-            ClientUpdateQuickBarRecordsCache(CachedPrimaryQuickBarRecord, CachedSecondaryQuickBarRecord);
             UE_LOG(LogFort, Log, TEXT("Possess: %s is sent its quickbar layout"), *GetNameSafe(this));
         }
     }
@@ -1041,12 +1046,14 @@ void AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation(cons
     // are built). Core's: kept in the controller's cache, and as the player's saved layout (their world profile's loadout,
     // which a rejoin in this mission hands back, as 7.30's server kept its own quickbars there).
     UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
-    if (!HasQuickBarRecordsCache() || !QuickBarStruct)
+    FQuickBar* CachedPrimary = nullptr;
+    FQuickBar* CachedSecondary = nullptr;
+    if (!QuickBarStruct || !GetQuickBarRecordsCache(CachedPrimary, CachedSecondary))
     {
         return;
     }
-    QuickBarStruct->CopyScriptStruct(&static_cast<FQuickBar&>(CachedPrimaryQuickBarRecord), &PrimaryQuickBarRecord);
-    QuickBarStruct->CopyScriptStruct(&static_cast<FQuickBar&>(CachedSecondaryQuickBarRecord), &SecondaryQuickBarRecord);
+    QuickBarStruct->CopyScriptStruct(CachedPrimary, &PrimaryQuickBarRecord);
+    QuickBarStruct->CopyScriptStruct(CachedSecondary, &SecondaryQuickBarRecord);
 
     UWorld* World = GetWorld();
     AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
@@ -1062,12 +1069,47 @@ void AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation(cons
 #endif
 }
 
-void AFortPlayerController::ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
+bool AFortPlayerController::HasQuickBarRecordsCache()
 {
+    return (Member_CachedPrimaryQuickBarRecord.IsAvailable() && Member_CachedSecondaryQuickBarRecord.IsAvailable()) || AFortPlayerControllerPvE::HasQuickBarRecordsCache();
+}
+
+bool AFortPlayerController::GetQuickBarRecordsCache(FQuickBar*& OutPrimary, FQuickBar*& OutSecondary)
+{
+    if (Member_CachedPrimaryQuickBarRecord.IsAvailable() && Member_CachedSecondaryQuickBarRecord.IsAvailable())
+    {
+        OutPrimary = &static_cast<FQuickBar&>(CachedPrimaryQuickBarRecord);
+        OutSecondary = &static_cast<FQuickBar&>(CachedSecondaryQuickBarRecord);
+        return true;
+    }
+    // 8.20+: only Save the World's controllers (AFortPlayerControllerPvE's subclasses) have them.
+    AFortPlayerControllerPvE* PvEController = AFortPlayerControllerPvE::HasQuickBarRecordsCache() ? Cast<AFortPlayerControllerPvE>(reinterpret_cast<UObject*>(this)) : nullptr;
+    if (!PvEController)
+    {
+        return false;
+    }
+    OutPrimary = &static_cast<FQuickBar&>(PvEController->CachedPrimaryQuickBarRecord);
+    OutSecondary = &static_cast<FQuickBar&>(PvEController->CachedSecondaryQuickBarRecord);
+    return true;
+}
+
+bool AFortPlayerController::ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
+{
+    if (!FindStaticFunction_ClientUpdateQuickBarRecordsCache())
+    {
+        AFortPlayerControllerPvE* PvEController = Cast<AFortPlayerControllerPvE>(reinterpret_cast<UObject*>(this));
+        if (!PvEController || !AFortPlayerControllerPvE::FindStaticFunction_ClientUpdateQuickBarRecordsCache())
+        {
+            return false;
+        }
+        PvEController->ClientUpdateQuickBarRecordsCache(PrimaryQuickBarRecord, SecondaryQuickBarRecord);
+        return true;
+    }
     Reflection::FParams Params(StaticFunction_ClientUpdateQuickBarRecordsCache(), true);
     Params.CopyStruct(L"PrimaryQuickBarRecord", &PrimaryQuickBarRecord);
     Params.CopyStruct(L"SecondaryQuickBarRecord", &SecondaryQuickBarRecord);
     Params.Call(this);
+    return true;
 }
 
 void AFortPlayerController::ServerAcknowledgeDelayedQuickBarAction_Implementation(const TArray<uint16_t>& ProcessedActionIds)

@@ -90,9 +90,11 @@ public:
     // 7.40's client-side quickbars: the layout records the server and the client keep (the client sends its own with
     // ServerUpdateQuickBarRecordsCache, the server hands the saved ones over with ClientUpdateQuickBarRecordsCache), and
     // the changes the server queues for them (ServerAcknowledgeDelayedQuickBarAction takes the done ones out).
+    // 8.20 (CL-5625478) moves the records and both RPCs to AFortPlayerControllerPvE: use GetQuickBarRecordsCache.
     DefineUStructProperty(FQuickBar, CachedPrimaryQuickBarRecord)
     DefineUStructProperty(FQuickBar, CachedSecondaryQuickBarRecord)
-    static bool HasQuickBarRecordsCache() { return Member_CachedPrimaryQuickBarRecord.IsAvailable() && Member_CachedSecondaryQuickBarRecord.IsAvailable(); }
+    static bool HasQuickBarRecordsCache();
+    bool GetQuickBarRecordsCache(FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);
     DefineUStructArrayProperty(FDelayedQuickBarAction, DelayedQuickBarActions)
     static bool HasDelayedQuickBarActions() { return Member_DelayedQuickBarActions.IsAvailable(); }
     // Replicated (RepNotify UpdateQuickBars). From 7.40 the client builds its quickbars once both are set and it has the
@@ -249,8 +251,9 @@ public:
     // (AFortWorldManager::UpdatePlayerQuickBarRecords). The _Implementation is stripped (slot 0x20F).
     void ServerUpdateQuickBarRecordsCache_Implementation(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
     // Hands the saved layout to the client (its _Implementation, 0x13F4D20, keeps the first it gets and builds the
-    // quickbars). Nothing in the client exe sends it: the server's caller is stripped.
-    void ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
+    // quickbars). Nothing in the client exe sends it: the server's caller is stripped. False where the controller has no
+    // such RPC (8.20+ declares it on AFortPlayerControllerPvE only).
+    bool ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
     // 7.40: the client acknowledges the queued quickbar changes it has carried out (0x141FF90), and the server takes them
     // out of DelayedQuickBarActions. The _Implementation is stripped (slot 0x212).
     void ServerAcknowledgeDelayedQuickBarAction_Implementation(const TArray<uint16_t>& ProcessedActionIds);

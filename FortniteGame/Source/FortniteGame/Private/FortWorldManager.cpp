@@ -935,12 +935,14 @@ bool AFortWorldManager::UpdatePlayerQuickBarRecords(AFortPlayerController* Playe
     // 7.40 (CL-5046157): the client's own quickbars, as it last sent them (ServerUpdateQuickBarRecordsCache).
     if (!AFortPlayerController::HasQuickBars())
     {
-        if (!PlayerController || !AFortPlayerController::HasQuickBarRecordsCache() || !GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord))
+        FQuickBar* CachedPrimary = nullptr;
+        FQuickBar* CachedSecondary = nullptr;
+        if (!PlayerController || !PlayerController->GetQuickBarRecordsCache(CachedPrimary, CachedSecondary) || !GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord))
         {
             return false;
         }
-        QuickBarStruct->CopyScriptStruct(PrimaryRecord, &static_cast<FQuickBar&>(PlayerController->CachedPrimaryQuickBarRecord));
-        QuickBarStruct->CopyScriptStruct(SecondaryRecord, &static_cast<FQuickBar&>(PlayerController->CachedSecondaryQuickBarRecord));
+        QuickBarStruct->CopyScriptStruct(PrimaryRecord, CachedPrimary);
+        QuickBarStruct->CopyScriptStruct(SecondaryRecord, CachedSecondary);
         return true;
     }
 
@@ -966,12 +968,14 @@ bool AFortWorldManager::CachePlayerQuickBarRecords(AFortPlayerController* Player
     // world profile's loadout, theater0's player_loadout, as up to 7.30) or, without one, empty records go into the
     // controller's CachedPrimary/SecondaryQuickBarRecord here, at login; AFortPlayerController::Possess sends them, as the
     // controller has no connection yet during Login (UWorld::SpawnPlayActor 0x2959210 calls SetPlayer after it, #533).
-    if (!PlayerController || !AFortPlayerController::HasQuickBarRecordsCache())
+    FQuickBar* CachedPrimaryRecord = nullptr;
+    FQuickBar* CachedSecondaryRecord = nullptr;
+    if (!PlayerController || !PlayerController->GetQuickBarRecordsCache(CachedPrimaryRecord, CachedSecondaryRecord))
     {
         return false;
     }
-    FQuickBar& CachedPrimary = PlayerController->CachedPrimaryQuickBarRecord;
-    FQuickBar& CachedSecondary = PlayerController->CachedSecondaryQuickBarRecord;
+    FQuickBar& CachedPrimary = *CachedPrimaryRecord;
+    FQuickBar& CachedSecondary = *CachedSecondaryRecord;
     FQuickBar* PrimaryRecord = nullptr;
     FQuickBar* SecondaryRecord = nullptr;
     const bool bSaved = GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord);

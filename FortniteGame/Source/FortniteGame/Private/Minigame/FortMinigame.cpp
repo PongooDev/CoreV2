@@ -1007,6 +1007,23 @@ DEFINE_FUNCTION(AFortMinigame::execHandleVolumeStateChangedForReset)
     P_NATIVE_END;
 }
 
+bool AFortMinigame::IsRestartPending() const
+{
+    if (PendingRestartOffset < 0)
+    {
+        return false;
+    }
+    const uint8_t* const Flags = reinterpret_cast<const uint8_t*>(this) + PendingRestartOffset;
+    return Flags[0] != 0 || Flags[1] != 0;
+}
+
+bool AFortMinigame::IsRestarting() const
+{
+    // Written by SetMinigameState: set on PreGame's restart, cleared on InProgress (8.20 0x1341CAC/0x1341FC5, 8.30 0x1401983, 8.40
+    // 0x141F8E3/0x141FBD9). Setup reads it to go to Transitioning even when every player starts where they stand.
+    return PendingRestartOffset >= 0 && EFortMinigameState::HasTransitioning() && *(reinterpret_cast<const uint8_t*>(this) + PendingRestartOffset + 2) != 0;
+}
+
 void AFortMinigame::AdvanceState()
 {
     Reflection::FParams(FindStaticFunction_AdvanceState(), true).Call(this);
@@ -1150,7 +1167,10 @@ void AFortMinigame::TransitionPlayersToMinigameStart()
     // with all of them on CurrentLocation it goes straight to Warmup). Each is marked teleporting while the client streams the
     // start in (FMinigamePlayer::bIsTeleportingOrRespawningForGameplay, which OnClientFinishTeleportingForMinigame clears),
     // the way AddMinigamePlayer sends a player who joins in progress (DelayedTeleportPlayer, 0x1321C30, whose move is
-    // stripped too).
+    // stripped too). A restart sends everyone (#607): Setup goes to Transitioning on bIsRestarting even when all start
+    // where they stand, and DetermineSpawnLocation answers CurrentLocation with the pawn's own place (8.40 0x13FC0D0).
+    // The arrival is where the start's stasis and the Game Starting Inventory's items come from.
+    const bool bRestarting = IsRestarting();
     const uint8_t CurrentLocation = EFortMinigamePlayerSpawnLocationSetting::GetCurrentLocation();
     int32_t Travelling = 0;
     int32_t Moved = 0;
@@ -1160,7 +1180,7 @@ void AFortMinigame::TransitionPlayersToMinigameStart()
         AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
         AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
         APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-        if (!Pawn || GetSpawnLocationSetting(PlayerState) == CurrentLocation)
+        if (!Pawn || (!bRestarting && GetSpawnLocationSetting(PlayerState) == CurrentLocation))
         {
             continue;
         }
@@ -1185,8 +1205,8 @@ void AFortMinigame::TransitionPlayersToMinigameStart()
         DelayedTeleportPlayer(Controller, Location, Rotation, !bSkydive);
         ++Moved;
     }
-    Log::Info(L"Minigame: {} sends {} of its {} players to their start through the travel screen{}", GetName().ToStdString(), Travelling, Players.Num(),
-        Moved ? std::format(L", {} moved at once", Moved) : std::wstring());
+    Log::Info(L"Minigame: {} sends {} of its {} players to their start through the travel screen{}{}", GetName().ToStdString(), Travelling, Players.Num(),
+        Moved ? std::format(L", {} moved at once", Moved) : std::wstring(), bRestarting ? L" (a restart)" : L"");
     UWorld* World = GetWorld();
     if (!World)
     {
@@ -1289,6 +1309,12 @@ void AFortMinigame::PostGameResetPlayers()
     // Core's reconstruction too: nothing else in the build takes a spectator out of SpectatingPlayerArray, so one who
     // joined during a game stayed dead and spectating through the next (#583).
     const int32_t Spectators = ReturnSpectatorsToGame();
+    // A restart is set before PostGameReset (RestartMinigame_Implementation, 8.40 0x141C140: bPendingRestart, then
+    // PostGameReset 0x1413F00; the next round and bAutoRestart likewise), and PreGame starts the game at once. Sent back
+    // now, a player was still on the travel screen at Transitioning, which can't send them to the start (#607): no
+    // arrival, so no stasis for the countdown and no starting items. Core's trip back is skipped then; the restart's
+    // Transitioning takes them from where they are.
+    const bool bRestartPending = IsRestartPending();
     const bool bToPreGameLocation = Member_PostGameSpawnLocationSetting.IsAvailable() && PostGameSpawnLocationSetting == EFortMinigamePostGameSpawnLocationSetting::GetPreGameLocation();
     AFortVolume* GameVolume = Volume;
     AFortPlayerStartCreative* IslandStart = GameVolume ? GameVolume->FindIslandStart() : nullptr;
@@ -1337,7 +1363,7 @@ void AFortMinigame::PostGameResetPlayers()
         }
         Entry.bHasValidResetData = false;
         APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-        if (!bDestination || !Pawn || Controller->IsDelayedTeleporting())
+        if (bRestartPending || !bDestination || !Pawn || Controller->IsDelayedTeleporting())
         {
             continue;
         }
@@ -1359,8 +1385,9 @@ void AFortMinigame::PostGameResetPlayers()
             reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
         }
     }
-    Log::Info(L"Minigame: {} resets its {} players after the game ({} of them spectators until now): {} back on their team, {} sent back to {} through the travel screen", GetName().ToStdString(),
-        Players, Spectators, Teams, Travelling, bToPreGameLocation ? L"where they were before it" : L"the island's start");
+    Log::Info(L"Minigame: {} resets its {} players after the game ({} of them spectators until now): {} back on their team, {}", GetName().ToStdString(), Players, Spectators, Teams,
+        bRestartPending ? std::wstring(L"none sent back: the game restarts")
+                        : std::format(L"{} sent back to {} through the travel screen", Travelling, bToPreGameLocation ? L"where they were before it" : L"the island's start"));
 #endif
 }
 

@@ -321,8 +321,13 @@ private:
     // Each spectator back among the game's players (RemoveMinigamePlayer, then AddMinigamePlayer, which adds to
     // PlayerArray once the game is post-game) with a pawn again (the game mode's RestartPlayer). How many came back.
     int32_t ReturnSpectatorsToGame();
-    // bPendingRestart, the unreflected flag after MinigameStarter (-1 without it).
+    // bPendingRestart, the unreflected flag after MinigameStarter (-1 without it). bAutoRestart and bIsRestarting follow
+    // it (21.40's order; 8.20 +0x690..+0x692, 8.30 and 8.40 +0x730..+0x732).
     static inline ptrdiff_t PendingRestartOffset = -1;
+    // 8.20+: a restart (Restart Game, the scoreboard's Play Again, an auto restart, the next round) starts the game
+    // again from PreGame, which sets bIsRestarting.
+    bool IsRestartPending() const;
+    bool IsRestarting() const;
 
     // OutRotation and bOutRespawningOnGround where the build answers them (7.40: OutRotation from 7.30).
     bool OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation = nullptr, bool* bOutRespawningOnGround = nullptr);

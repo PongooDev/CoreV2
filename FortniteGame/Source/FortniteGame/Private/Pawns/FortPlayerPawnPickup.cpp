@@ -77,6 +77,10 @@ namespace
         const FGameplayTag InteractUse{ FName(L"Gameplay.Action.Player.InteractUse") };
         return CallVirtual<bool>(PlayerController, Natives::AFortPlayerController_CanPerformActionIndex, &InteractUse);
     }
+
+    // The pickups on their way to a player who held interact on them (ServerHandlePickupWithRequestedSwap). The build
+    // reflects nowhere to keep it, so Core does; GivePickupToPlayer takes each off when it arrives.
+    TArray<TWeakObjectPtr<AFortPickup>> RequestedSwapPickups;
 }
 
 void AFortPlayerPawn::ServerHandlePickup(AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
@@ -140,6 +144,32 @@ void AFortPlayerPawn::ServerHandlePickupWithSwap_Implementation(AFortPickup* Pic
 #endif
 }
 
+void AFortPlayerPawn::ServerHandlePickupWithRequestedSwap_Implementation(AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
+{
+#if WITH_SERVER_CODE
+    if (Pickup && !Pickup->IsPendingKill() && FFortPickupLocationData::HasPickupGuid() && !static_cast<AFortPawn*>(static_cast<FFortPickupLocationData&>(Pickup->PickupLocationData).PickupTarget))
+    {
+        RequestedSwapPickups.Add(TWeakObjectPtr<AFortPickup>(Pickup));
+    }
+    ServerHandlePickupWithSwap_Implementation(Pickup, Swap, InFlyTime, InStartDirection, bPlayPickupSound);
+#endif
+}
+
+bool AFortPlayerPawn::ConsumeRequestedSwap(const AFortPickup* Pickup)
+{
+    bool bRequested = false;
+    for (int32_t Index = RequestedSwapPickups.Num() - 1; Index >= 0; --Index)
+    {
+        AFortPickup* Requested = RequestedSwapPickups[Index].Get(true);
+        if (!Requested || Requested == Pickup)
+        {
+            bRequested = bRequested || Requested == Pickup;
+            RequestedSwapPickups.RemoveAtSwap(Index);
+        }
+    }
+    return bRequested;
+}
+
 void AFortPlayerPawn::HookPickupVTables()
 {
     const int32_t Index = Finder::ImplementationIndex(StaticFunction_ServerHandlePickup());
@@ -186,6 +216,20 @@ void AFortPlayerPawn::HookPickupVTables()
             Hooks::SwapVTable(L"AFortPlayerPawn::ServerHandlePickupWithSwap_Implementation", VTable, SwapIndex, reinterpret_cast<void*>(&ServerHandlePickupWithSwap_ImplementationHK));
         }
     }
+
+    // ServerHandlePickupWithRequestedSwap: 8.50 on, stripped as ServerHandlePickupWithSwap is.
+    UFunction* WithRequestedSwap = SwapIndex >= 0 ? FindStaticFunction_ServerHandlePickupWithRequestedSwap() : nullptr;
+    const int32_t RequestedSwapIndex = WithRequestedSwap ? Finder::ImplementationIndex(WithRequestedSwap) : -1;
+    for (TObjectIterator<UClass> It; RequestedSwapIndex >= 0 && It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[RequestedSwapIndex])))
+        {
+            Hooks::SwapVTable(L"AFortPlayerPawn::ServerHandlePickupWithRequestedSwap_Implementation", VTable, RequestedSwapIndex, reinterpret_cast<void*>(&ServerHandlePickupWithRequestedSwap_ImplementationHK));
+        }
+    }
 }
 
 void AFortPlayerPawn::ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
@@ -196,6 +240,11 @@ void AFortPlayerPawn::ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This,
 void AFortPlayerPawn::ServerHandlePickupWithSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
 {
     This->ServerHandlePickupWithSwap_Implementation(Pickup, Swap, InFlyTime, InStartDirection, bPlayPickupSound);
+}
+
+void AFortPlayerPawn::ServerHandlePickupWithRequestedSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
+{
+    This->ServerHandlePickupWithRequestedSwap_Implementation(Pickup, Swap, InFlyTime, InStartDirection, bPlayPickupSound);
 }
 
 namespace

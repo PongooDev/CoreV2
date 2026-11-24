@@ -47,6 +47,8 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(OnRep_ZiplineState)
     DefineUFunction(ServerHandlePickup)
     DefineUFunction(ServerHandlePickupWithSwap)
+    // 8.50 (CL-6058028).
+    DefineUFunction(ServerHandlePickupWithRequestedSwap)
     DefineUFunction(IsUsingPersonalVehicle)
     DefineUFunction(PushAnimBPOverride)
     DefineUFunction(PopAnimBPOverride)
@@ -121,6 +123,13 @@ public:
     // player holds interact on a pickup ("swap the item in the currently selected slot"), the only way the server learns
     // which item to give up there, as 7.40 keeps the quickbars on the client.
     void ServerHandlePickupWithSwap_Implementation(AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
+    // 8.50's hold to swap (CL-6058028: the shared empty function, slot 0x1B8). The pickup's interact (0x1462D10) sends it
+    // in place of ServerHandlePickup while the controller's bTryPickupSwap is set (interact held), Swap being the held
+    // weapon's ItemEntryGuid: the held item goes even when the backpack has room.
+    void ServerHandlePickupWithRequestedSwap_Implementation(AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
+    // Whether Pickup was taken with ServerHandlePickupWithRequestedSwap; asked once, when it arrives
+    // (AFortPickup::GivePickupToPlayer).
+    static bool ConsumeRequestedSwap(const AFortPickup* Pickup);
 
     static ptrdiff_t LastEquippedWeaponGUIDOffset();
     static ptrdiff_t StasisModeOffset() { return Member_StasisMode.GetOffsetChecked(); }
@@ -173,4 +182,5 @@ private:
     static void PopFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride);
     static void ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
     static void ServerHandlePickupWithSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
+    static void ServerHandlePickupWithRequestedSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
 };

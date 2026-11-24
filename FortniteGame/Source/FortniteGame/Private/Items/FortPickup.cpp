@@ -1251,6 +1251,8 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         {
             RequestedSwap = FGuid();
         }
+        // 8.50 sends the hold to swap as ServerHandlePickupWithRequestedSwap, naming the held item.
+        bHoldSwap = AFortPlayerPawn::ConsumeRequestedSwap(this) && RequestedSwap.IsValid();
         // Without a named item, the one given up is the one in the player's hands, the pawn's current weapon's item (the
         // quickbars are the client's alone, so the server has no focused slot). A plain interact gives it up only when
         // the pickup has no room. 7.40's hold to swap (7.30 to 8.00 declare it): holding interact sends

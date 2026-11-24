@@ -141,6 +141,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Map.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\ScriptArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Set.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\ScriptMap.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\SparseArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\Delegate.h" />
@@ -364,6 +365,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySystemComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbilityAthena_PeriodicItemGrant.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Animation\FortAnimNotify_TriggerGameplayAbility.h" />
@@ -645,6 +647,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\Navigation\FortNavigationGraph.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortAbilitySystemComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbilityAthena_PeriodicItemGrant.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierFlag.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierObjective.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBigBaseWall.cpp" />

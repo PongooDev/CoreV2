@@ -92,6 +92,7 @@
 #include "FortKismetLibrary.h"
 #include "Abilities/FortAbilitySystemComponent.h"
 #include "Abilities/FortGameplayAbility.h"
+#include "Abilities/FortGameplayAbilityAthena_PeriodicItemGrant.h"
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "VivoxVoiceChatToken.h"
@@ -382,6 +383,7 @@ static void InstallHooks()
         AFortMission::HookNatives();
         AFortMission_RiftSpawners::HookNatives();
         UFortGameplayAbility::HookNatives();
+        UFortGameplayAbilityAthena_PeriodicItemGrant::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();
         AFortPlayerControllerPvE::HookVTables();

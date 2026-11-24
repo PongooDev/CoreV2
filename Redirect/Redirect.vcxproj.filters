@@ -682,6 +682,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Set.h">
       <Filter>Engine\Source\Runtime\Core\Public\Containers</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\ScriptMap.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Containers</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\SparseArray.h">
       <Filter>Engine\Source\Runtime\Core\Public\Containers</Filter>
     </ClInclude>
@@ -1349,6 +1352,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbilityAthena_PeriodicItemGrant.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h">
@@ -2172,6 +2178,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbilityAthena_PeriodicItemGrant.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierFlag.cpp">

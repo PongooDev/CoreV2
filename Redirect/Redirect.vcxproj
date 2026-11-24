@@ -372,6 +372,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierFlag.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierObjective.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBigBaseWall.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaFillFloor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraft.h" />
@@ -401,6 +402,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_AI.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Barrier.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Fill.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Goose.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaGoosePickup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortMutatorListComponent.h" />
@@ -651,6 +653,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierFlag.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierObjective.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBigBaseWall.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaFillFloor.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraft.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraftSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp" />

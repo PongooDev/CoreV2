@@ -3,11 +3,14 @@
 #include "Athena/AthenaBarrierFlag.h"
 #include "Athena/AthenaBarrierObjective.h"
 #include "Athena/AthenaBigBaseWall.h"
+#include "Athena/AthenaFillFloor.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Athena/Mutators/FortAthenaMutator_Fill.h"
 #include "Building/BuildingStructuralSupportSystem.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "FortKismetLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -312,6 +315,10 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
     const FVector Right(-std::sin(Yaw), std::cos(Yaw), 0.0f);
     const float Distance = static_cast<FScalableFloat&>(ObjectiveDistanceFromWall).GetValueAtLevel(0.0f);
     const float ZOffset = static_cast<FScalableFloat&>(ObjectiveZOffset).GetValueAtLevel(0.0f);
+    // Deep Fried's restaurants float over the lava: its ObjectiveZOffset (Barrier.Lava.Objective.Zoffset, 15) is in
+    // building levels, as its ObjectiveMaxZDiff (Barrier.Lava.Objective.MaxZdiff, 384) is one level. CoreV2 #614: taken
+    // as units, they stood on the ground. Standard Food Fight (no Fill mutator) is placed as before.
+    const bool bFloating = FindFillMutator(GameMode) != nullptr;
 
     // A team's side is the one its own bus flies on (TeamFlightPaths is in the teams' order).
     TStructArray<FAircraftFlightInfo>& TeamPaths = GameState->TeamFlightPaths;
@@ -323,6 +330,9 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
     }
     FBarrierTeamState* States[2] = { &static_cast<FBarrierTeamState&>(Team_0_State), &static_cast<FBarrierTeamState&>(Team_1_State) };
     UBuildingStructuralSupportSystem* SupportSystem = GameState->StructuralSupportSystem;
+    FVector Spots[2];
+    float LevelZs[2] = {};
+    float FacingYaws[2] = {};
     for (int32_t Index = 0; Index < 2; ++Index)
     {
         const float Side = Index == 0 ? Team0Side : -Team0Side;
@@ -354,17 +364,29 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
             }
         }
         // The level: the grid's own (its levels are 384 uu from GridOrigin's Z), the one whose bottom is at or over the floor wanted.
-        const float WantedZ = FloorZ + ZOffset;
+        const float WantedZ = FloorZ + (bFloating ? ZOffset * BuildingLevelHeight : ZOffset);
         float LevelZ = std::ceil(WantedZ / BuildingLevelHeight) * BuildingLevelHeight;
         const FBox Level = SupportSystem ? SupportSystem->K2_GetGridBoxFromWorldLoc(FVector(Spot.X, Spot.Y, WantedZ)) : FBox();
         if (Level.IsValid)
         {
             LevelZ = Level.Min.Z < WantedZ - 1.0f ? Level.Min.Z + BuildingLevelHeight : Level.Min.Z;
         }
-        const FVector Location(Spot.X, Spot.Y, LevelZ);
+        Spots[Index] = Spot;
+        LevelZs[Index] = LevelZ;
         // The mascot faces the barrier (and the other team's mascot across it).
-        const float FacingYaw = std::atan2(-Right.Y * Side, -Right.X * Side) * RadiansToDegrees;
-        SpawnObjective(*States[Index], Location, FacingYaw, Index);
+        FacingYaws[Index] = std::atan2(-Right.Y * Side, -Right.X * Side) * RadiansToDegrees;
+    }
+    if (bFloating)
+    {
+        PlaceFloatingObjectives(LevelZs);
+    }
+    for (int32_t Index = 0; Index < 2; ++Index)
+    {
+        SpawnObjective(*States[Index], FVector(Spots[Index].X, Spots[Index].Y, LevelZs[Index]), FacingYaws[Index], Index);
+    }
+    if (bFloating)
+    {
+        CapLavaAtMascots(GameMode);
     }
     ForceNetUpdate();
     FVector GridOrigin;
@@ -373,6 +395,80 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
     Log::Info(L"Food Fight: the restaurants stand {:.0f} either side of ({:.0f}, {:.0f}), the barrier's line nearest storm circle {}'s centre ({:.0f}, {:.0f}, {:.0f} off the line), {} team paths; building grid origin {}",
         Distance, Center.X, Center.Y, SafeZoneIndex, SafeZoneCenter.X, SafeZoneCenter.Y, std::sqrt(FVector::DistSquared(FlatCenter, Center)), TeamPaths.Num(),
         bHasGrid ? std::format(L"({:.0f}, {:.0f}, {:.0f})", GridOrigin.X, GridOrigin.Y, GridOrigin.Z) : std::wstring(SupportSystem ? L"unknown" : L"none (no structural support system)"));
+#endif
+}
+
+AFortAthenaMutator_Fill* AFortAthenaMutator_Barrier::FindFillMutator(AFortGameModeAthena* GameMode)
+{
+    const TArray<UObject*>* MutatorList = GameMode && AFortAthenaMutator_Fill::StaticClass() ? GameMode->GetGameplayMutatorList() : nullptr;
+    if (!MutatorList)
+    {
+        return nullptr;
+    }
+    const TArray<UObject*>& Mutators = *MutatorList;
+    for (int32_t Index = 0; Index < Mutators.Num(); ++Index)
+    {
+        if (AFortAthenaMutator_Fill* Fill = Cast<AFortAthenaMutator_Fill>(Mutators[Index]))
+        {
+            return Fill;
+        }
+    }
+    return nullptr;
+}
+
+void AFortAthenaMutator_Barrier::PlaceFloatingObjectives(float (&InOutLevelZ)[2]) const
+{
+    // The levels stay on the grid: whole levels are taken off or added.
+    const float MaxSpawnHeight = Member_ObjectiveMaxSpawnHeight.IsAvailable() ? static_cast<FScalableFloat&>(ObjectiveMaxSpawnHeight).GetValueAtLevel(0.0f) : 0.0f;
+    const float MaxZDiff = Member_ObjectiveMaxZDiff.IsAvailable() ? static_cast<FScalableFloat&>(ObjectiveMaxZDiff).GetValueAtLevel(0.0f) : 0.0f;
+    const bool bSameHeight = Member_ObjectivesSpawnSameHeight.IsAvailable() && static_cast<FScalableFloat&>(ObjectivesSpawnSameHeight).GetValueAtLevel(0.0f) > 0.0f;
+    const int32_t High = InOutLevelZ[0] >= InOutLevelZ[1] ? 0 : 1;
+    if (bSameHeight)
+    {
+        InOutLevelZ[1 - High] = InOutLevelZ[High];
+    }
+    else if (MaxZDiff > 0.0f && InOutLevelZ[High] - InOutLevelZ[1 - High] > MaxZDiff)
+    {
+        InOutLevelZ[1 - High] += std::ceil((InOutLevelZ[High] - InOutLevelZ[1 - High] - MaxZDiff) / BuildingLevelHeight) * BuildingLevelHeight;
+    }
+    for (float& LevelZ : InOutLevelZ)
+    {
+        if (MaxSpawnHeight > 0.0f && LevelZ > MaxSpawnHeight)
+        {
+            LevelZ -= std::ceil((LevelZ - MaxSpawnHeight) / BuildingLevelHeight) * BuildingLevelHeight;
+        }
+    }
+    Log::Info(L"Food Fight: the restaurants float at Z {:.0f} and {:.0f} (ObjectiveZOffset {:.0f} levels, at most Z {:.0f}, {})", InOutLevelZ[0], InOutLevelZ[1],
+        static_cast<FScalableFloat&>(ObjectiveZOffset).GetValueAtLevel(0.0f), MaxSpawnHeight, bSameHeight ? std::wstring(L"one height") : std::format(L"at most {:.0f} apart", MaxZDiff));
+}
+
+void AFortAthenaMutator_Barrier::CapLavaAtMascots(AFortGameModeAthena* GameMode)
+{
+#if WITH_SERVER_CODE
+    // The lava stops LavaLevelRelativeToMascot (Mutator_Barrier_Lava_C: 100) over the lower mascot: the floor's tick
+    // (8.40 0xEACB50) ends its move once it is over CapHeight, and a floor still waiting ends its next step there.
+    AFortAthenaMutator_Fill* Fill = FindFillMutator(GameMode);
+    AAthenaFillFloor* Floor = Fill ? static_cast<AAthenaFillFloor*>(Fill->LavaFloor) : nullptr;
+    float MascotZ = 0.0f;
+    bool bFoundMascot = false;
+    for (const FBarrierTeamState* State : { &static_cast<FBarrierTeamState&>(Team_0_State), &static_cast<FBarrierTeamState&>(Team_1_State) })
+    {
+        AAthenaBarrierObjective* Objective = State->ObjectiveObject;
+        USceneComponent* Root = Objective ? Objective->GetRootComponent() : nullptr;
+        if (Root && (!bFoundMascot || Root->GetComponentLocation().Z < MascotZ))
+        {
+            MascotZ = Root->GetComponentLocation().Z;
+            bFoundMascot = true;
+        }
+    }
+    if (!Floor || !bFoundMascot || !Member_LavaLevelRelativeToMascot.IsAvailable())
+    {
+        Log::Warning(L"Food Fight: the lava isn't capped ({})", !Floor ? L"the Fill mutator has no LavaFloor" : !bFoundMascot ? L"no mascot" : L"no LavaLevelRelativeToMascot in this build");
+        return;
+    }
+    const float CapHeight = MascotZ + static_cast<FScalableFloat&>(LavaLevelRelativeToMascot).GetValueAtLevel(0.0f);
+    const bool bCapped = Floor->SetCapHeight(CapHeight, true);
+    Log::Info(L"Food Fight: the lava {} at Z {:.0f} (the lower mascot at Z {:.0f}, the floor at Z {:.0f})", bCapped ? L"stops" : L"can't be capped", CapHeight, MascotZ, static_cast<float>(Floor->FloorZ));
 #endif
 }
 

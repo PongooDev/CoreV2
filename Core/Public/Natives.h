@@ -1233,6 +1233,11 @@ namespace Natives
     // ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings calls it for each override its wave data has.
     inline void (*FFortEncounterSettings_InjectOverrideCategory)(UClass* OptionClass, void* EncounterSettings) = nullptr;
 
+    // From 8.40 (Food Fight: Deep Fried), Finder::ResolveFillFloorSetCapHeightLive: ABuildingFillFloor::SetCapHeight
+    // (8.40 0xEA91B0), the one callee of the Fill mutator's OnPlaylistLoaded native (0xFE9F00) that starts by writing its
+    // float argument to CapHeight ("movss dword ptr [rcx+708h], xmm1").
+    inline void (*ABuildingFillFloor_SetCapHeight)(void* This, float NewCapHeight, bool bUpdateMovement) = nullptr;
+
     // From 3.5 (vending machines), Finder::ResolveItemCollectorSelectionSetupLive, off the collector's BeginPlay (6.21
     // slot 0x5F, 0xD52510): FinishItemSelectionSetup (6.21 0xD5B380), the client half the builds keep: it unbinds the
     // playlist-tables delegate, sets bHasFinishedSelectionSetup and picks the first active input. BeginPlay calls it at

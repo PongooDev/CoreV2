@@ -26,6 +26,7 @@
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
+#include "Athena/AthenaFillFloor.h"
 #include "Athena/FortAthenaExitCraftSpawner.h"
 #include "Athena/Mutators/FortAthenaMutator_Goose.h"
 #include "Athena/FortAthenaSupplyDrop.h"
@@ -457,6 +458,8 @@ static void InstallHooks()
             AFortAthenaVehicle::HookVTables();
             // 8.40's Air Royale: the mutator's planes and its floating upgrades (#609, #611).
             AFortAthenaMutator_Goose::HookNatives();
+            // 8.40's Food Fight: Deep Fried: the lava stops at the mascots (#614).
+            AAthenaFillFloor::HasSetCapHeight();
             // 8.30's Pirate Cannon: firing the passenger (ServerFireActorInCannon_Implementation, stripped).
             AFortWeaponRangedMountedCannon::HookVTables();
             AFortOctopusVehicle::HookCallSites();

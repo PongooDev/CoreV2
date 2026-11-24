@@ -11,6 +11,7 @@
 
 class AAthenaBarrierFlag;
 class AAthenaBigBaseWall;
+class AFortAthenaMutator_Fill;
 class AFortGameModeAthena;
 class UClass;
 class UCustomCharacterPart;
@@ -72,6 +73,13 @@ public:
     DefineUStructProperty(FBarrierTeamState, Team_1_State)
     DefineUStructProperty(FScalableFloat, ObjectiveDistanceFromWall)
     DefineUStructProperty(FScalableFloat, ObjectiveZOffset)
+    // From 8.40, set by Deep Fried's Mutator_Barrier_Lava_C (Barrier.Lava.Objective.*): the most two restaurants' floors
+    // may differ by, the highest a restaurant's floor goes, whether both stand at one height, and where the lava stops
+    // from the mascot.
+    DefineUStructProperty(FScalableFloat, ObjectiveMaxZDiff)
+    DefineUStructProperty(FScalableFloat, ObjectiveMaxSpawnHeight)
+    DefineUStructProperty(FScalableFloat, ObjectivesSpawnSameHeight)
+    DefineUStructProperty(FScalableFloat, LavaLevelRelativeToMascot)
     DefineUStructProperty(FScalableFloat, TimeToBringDownWall)
     DefineUStructProperty(FScalableFloat, SafeZonePhaseWhenToBringDownWall)
     DefineUStructProperty(FScalableFloat, PercentAmmoToDrop)
@@ -116,6 +124,14 @@ private:
     // other; the mascot's destroyed delegate, the team's CheckHealthThreshold timer and the HUD's objective entry.
     void SpawnObjectives(AFortGameModeAthena* GameMode, const FVector& SafeZoneCenter, int32_t SafeZoneIndex);
     void SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float HeadYaw, int32_t ObjectId);
+    // Core's names, like the spawning functions'.
+    // Deep Fried (a Fill mutator in the playlist): the restaurants' floors ObjectiveZOffset building levels over the ground,
+    // under ObjectiveMaxSpawnHeight, at one height (ObjectivesSpawnSameHeight) or at most ObjectiveMaxZDiff apart.
+    void PlaceFloatingObjectives(float (&InOutLevelZ)[2]) const;
+    // Deep Fried: the lava's cap, LavaLevelRelativeToMascot over the lower mascot (ABuildingFillFloor::SetCapHeight).
+    void CapLavaAtMascots(AFortGameModeAthena* GameMode);
+    // The playlist's Fill mutator (Deep Fried's lava), null without one.
+    static AFortAthenaMutator_Fill* FindFillMutator(AFortGameModeAthena* GameMode);
     // The build's CheckHealthThreshold(TeamNum) (0xD30510): the mascot's damage state from its health against
     // ObjectiveHealthTiers, and the game message of a new one.
     void CheckHealthThreshold(uint8_t TeamNum);

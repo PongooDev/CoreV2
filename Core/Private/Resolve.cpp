@@ -9784,6 +9784,48 @@ bool Finder::ResolveEncounterOverrideCategoryLive()
     return true;
 }
 
+bool Finder::ResolveFillFloorSetCapHeightLive(int32_t CapHeightOffset)
+{
+    // 8.40 (CL-6005771). The Fill mutator's OnPlaylistLoaded native (0xFE9F00) spawns its floor and, when its
+    // LavaCapHeight isn't FLT_MAX, calls ABuildingFillFloor::SetCapHeight (0xEA91B0) with it, whose first write is the
+    // float argument to CapHeight (0xEA91BD: movss dword ptr [rcx+708h], xmm1). No other code calls it.
+    static bool bResolved = false;
+    static bool bLogged = false;
+    if (bResolved || bLogged)
+    {
+        return bResolved;
+    }
+    bLogged = true;
+    if (!FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Fill") || CapHeightOffset <= 0 || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        Log::Info(L"Finder: ABuildingFillFloor::SetCapHeight not looked for (no Fill mutator in this build)");
+        return false;
+    }
+    const uintptr_t PlaylistLoaded = ExecImplementation(L"/Script/FortniteGame.FortAthenaMutator_Fill:OnPlaylistLoaded");
+    const uint8_t* Offset = reinterpret_cast<const uint8_t*>(&CapHeightOffset);
+    uintptr_t SetCapHeight = 0;
+    int32_t Matches = 0;
+    for (const auto& [Site, Target] : IsInText(PlaylistLoaded) ? Finder::DecodedDirectCalls(PlaylistLoaded) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Target != SetCapHeight && IsInText(Target) && FindInstruction(Target, Target + 0x20, { 0xF3, 0x0F, 0x11, 0x89, Offset[0], Offset[1], Offset[2], Offset[3] }))
+        {
+            SetCapHeight = Target;
+            ++Matches;
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: ABuildingFillFloor::SetCapHeight not found ({} callees of the Fill mutator's OnPlaylistLoaded 0x{:X} write CapHeight +0x{:X} first), Deep Fried's lava won't stop under the restaurants",
+            Matches, PlaylistLoaded ? PlaylistLoaded - Finder::ImageBase() : 0, CapHeightOffset);
+        return false;
+    }
+    Natives::ABuildingFillFloor_SetCapHeight = reinterpret_cast<decltype(Natives::ABuildingFillFloor_SetCapHeight)>(SetCapHeight);
+    bResolved = true;
+    Log::Info(L"Finder: ABuildingFillFloor::SetCapHeight 0x{:X} (CapHeight +0x{:X}), off the Fill mutator's OnPlaylistLoaded 0x{:X}", SetCapHeight - Finder::ImageBase(), CapHeightOffset,
+        PlaylistLoaded - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveGooseMutatorLive(FGooseMutatorSites& OutSites)
 {
     // 8.40 (CL-6005771), Air Royale. SpawnPlane (Core's name, 0xFF2460) keeps only its loop over SpawnedVehicles and

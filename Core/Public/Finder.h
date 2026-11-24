@@ -232,6 +232,9 @@ namespace Finder
     // UFortKismetLibrary::ApplyEncounterOptionOverridesFromWaveDataToEncounterSettings' native calls once for each of its
     // wave data's overrides (8.20 0x11CC6D0: nine calls of 0x11CD310). False (logged once) where it isn't found.
     bool ResolveEncounterOverrideCategoryLive();
+    // From 8.40 (Food Fight: Deep Fried): Natives::ABuildingFillFloor_SetCapHeight, off the Fill mutator's OnPlaylistLoaded
+    // native. CapHeightOffset is the floor's unreflected CapHeight. False (logged once) where it isn't found.
+    bool ResolveFillFloorSetCapHeightLive(int32_t CapHeightOffset);
     // From 6.20 (Battle Royale's AI, the Fortnitemares Cube Monsters): the direct call AFortGameModeAthena's own
     // CreateAIDirector makes to AFortGameModeZone::CreateAIDirector (Super::), stripped into the shared empty function.
     // AISettingsOffset: AFortGameModeAthena's AISettings, which the function tests first. Null where the build's Athena

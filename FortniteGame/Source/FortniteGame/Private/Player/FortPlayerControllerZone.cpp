@@ -309,11 +309,14 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         return;
     }
 
-    // 6.31-7.20 keep a map of each gadget to its item's guid; 7.30+ keep a set of the items' guids, whose gadget is the
-    // item's definition (Finder::GadgetTrackedAttributeBind tells which). Both are a sparse array read element by element.
+    // 3.5-6.10 keep the one applied gadget's item (GadgetTrackedAttributeItemInstanceId); 6.20-7.20 keep a map of each
+    // gadget to its item's guid; 7.30+ keep a set of the items' guids, whose gadget is the item's definition
+    // (Finder::GadgetTrackedAttributeBind tells which). The containers are a sparse array read element by element.
     const uint8_t* const Container = reinterpret_cast<const uint8_t*>(this) + ItemInstanceIdsOffset;
+    const bool bSingleItemGuid = HasGadgetTrackedAttributeItemInstanceId();
     const bool bItemGuidSet = Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet;
-    const int32_t NumElements = bItemGuidSet ? reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container)->Num()
+    const int32_t NumElements = bSingleItemGuid ? 1
+        : bItemGuidSet ? reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container)->Num()
         : reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(Container)->Num();
     struct FUsedUpGadget
     {
@@ -328,7 +331,11 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         // definition, for the map) are read further.
         FGuid ItemGuid;
         const UFortGadgetItemDefinition* Gadget = nullptr;
-        if (bItemGuidSet)
+        if (bSingleItemGuid)
+        {
+            ItemGuid = *reinterpret_cast<const FGuid*>(Container);
+        }
+        else if (bItemGuidSet)
         {
             ItemGuid = (*reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container))[Index].ItemGuid;
         }
@@ -340,7 +347,7 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         }
         UFortWorldItem* Item = Inventory->FindWorldItem(ItemGuid);
         FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
-        if (Entry && bItemGuidSet)
+        if (Entry && (bSingleItemGuid || bItemGuidSet))
         {
             Gadget = Cast<UFortGadgetItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition));
         }
@@ -428,12 +435,14 @@ void AFortPlayerControllerZone::HookGadgetTrackedAttributeDelegate()
     {
         return;
     }
-    const Finder::FGadgetTrackedAttributeBind Bind = Finder::GadgetTrackedAttributeBind(UFortGadgetItemDefinition::TrackedAttributesOffset());
-    if (!Bind.Lea || Bind.ItemInstanceIds < 0)
+    const bool bSingleItemGuid = HasGadgetTrackedAttributeItemInstanceId();
+    const Finder::FGadgetTrackedAttributeBind Bind = Finder::GadgetTrackedAttributeBind(UFortGadgetItemDefinition::TrackedAttributesOffset(), bSingleItemGuid);
+    const ptrdiff_t ItemInstanceIds = bSingleItemGuid ? GadgetTrackedAttributeItemInstanceIdOffset() : Bind.ItemInstanceIds;
+    if (!Bind.Lea || ItemInstanceIds < 0)
     {
         return;
     }
-    Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = Bind.ItemInstanceIds;
+    Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = ItemInstanceIds;
     Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet = Bind.bItemGuidSet;
     Hooks::RedirectAddress(L"AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged (ApplyGadgetItemAttributeSet's binding)", Bind.Lea, reinterpret_cast<void*>(&OnGadgetTrackedAttributeChangedHK));
 }

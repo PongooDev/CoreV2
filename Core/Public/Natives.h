@@ -239,7 +239,8 @@ namespace Natives
     inline int32_t FVoicePacket_GetSenderIndex = -1;
     inline ptrdiff_t APlayerController_VoiceHandshakeCompletedOffset = -1;
     // AFortPlayerControllerZone's unreflected TMap<const UFortGadgetItemDefinition*, FGuid>: each applied gadget with
-    // tracked attributes and its item (7.20 +0x1DF8), from Finder::GadgetTrackedAttributeBind. -1 when not found.
+    // tracked attributes and its item (7.20 +0x1DF8), from Finder::GadgetTrackedAttributeBind; on 3.5-6.10 the reflected
+    // FGuid GadgetTrackedAttributeItemInstanceId (5.10 +0x1A80). -1 when not found.
     inline ptrdiff_t AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = -1;
     // 7.30+: that member is a TSet<FGuid> of the items (Finder::GadgetTrackedAttributeBind's bItemGuidSet).
     inline bool AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet = false;

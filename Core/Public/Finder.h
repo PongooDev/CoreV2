@@ -473,7 +473,9 @@ namespace Finder
     // change delegate: lea rax, <the shared empty function> (0x13F3CC2), the handler being server code. And the
     // controller's map of applied gadgets to their items (lea rcx, [r14+1DF8h] before its FindId and its Add).
     // TrackedAttributesOffset: UFortGadgetItemDefinition::TrackedAttributes, whose Num the function reads. Lea is null
-    // where the build binds a handler of its own or the function isn't found (logged).
+    // where the build binds a handler of its own or the function isn't found (logged). bSingleItemGuid: 3.5-6.10 keep
+    // one reflected FGuid (GadgetTrackedAttributeItemInstanceId, 5.10 movups [r14+1A80h], xmm0 at 0x1191042) instead of
+    // the container, so only the binding is looked for and ItemInstanceIds stays -1.
     struct FGadgetTrackedAttributeBind
     {
         uint8_t* Lea = nullptr;
@@ -481,7 +483,7 @@ namespace Finder
         // 7.30+: the container is a TSet<FGuid> of the items, not 6.31-7.20's TMap of each gadget to its item's guid.
         bool bItemGuidSet = false;
     };
-    FGadgetTrackedAttributeBind GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset);
+    FGadgetTrackedAttributeBind GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset, bool bSingleItemGuid);
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);

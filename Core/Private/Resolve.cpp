@@ -15130,7 +15130,7 @@ Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorit
     return Calls;
 }
 
-Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset)
+Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset, bool bSingleItemGuid)
 {
     // UFortGadgetItemDefinition::ApplyGadgetData (7.20 0x111B1C0), on the authority and for a gadget whose AttributeSet
     // is an attribute set, calls AFortPlayerControllerZone::ApplyGadgetItemAttributeSet(Gadget, Item) (0x13F3910). That
@@ -15197,6 +15197,14 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
     if (Leas.size() != 1)
     {
         Log::Error(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) takes the shared empty function's address {} times, not once", Function - Finder::ImageBase(), Leas.size());
+        return Bind;
+    }
+    // 3.5-6.10 (5.10 CL-4240749 0x1190D90): the item's guid goes into the controller's one GadgetTrackedAttributeItemInstanceId.
+    if (bSingleItemGuid)
+    {
+        Bind.Lea = reinterpret_cast<uint8_t*>(Leas.front());
+        Log::Info(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) binds the stripped tracked attribute handler at 0x{:X}, the applied gadget's item in GadgetTrackedAttributeItemInstanceId",
+            Function - Finder::ImageBase(), Leas.front() - Finder::ImageBase());
         return Bind;
     }
 

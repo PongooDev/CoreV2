@@ -30,6 +30,10 @@ class AFortPlayerControllerZone : public AFortPlayerController
     DefineUFunction(ServerBeginGameplayVote)
     DefineUFunction(ServerSubmitGameplayVote)
     DefineUFunction(ServerEndGameplayVote)
+    // 3.5-6.10 (Transient): the applied gadget's item, where 6.20+ keep a container of them.
+    DefineUProperty(FGuid, GadgetTrackedAttributeItemInstanceId)
+    static bool HasGadgetTrackedAttributeItemInstanceId() { return Member_GadgetTrackedAttributeItemInstanceId.IsAvailable(); }
+    static ptrdiff_t GadgetTrackedAttributeItemInstanceIdOffset() { return Member_GadgetTrackedAttributeItemInstanceId.GetOffsetChecked(); }
 
 public:
     void ServerTriggerSetupTeleportCameraEvent_Implementation();
@@ -49,7 +53,7 @@ public:
     // to each tracked attribute's change delegate (the ability system's RegisterGameplayAttributeEvent): the item keeps
     // its gadget's tracked attributes in its entry (GenericAttributeValues, GenericAttributeValueSet), which
     // ApplyGadgetItemAttributeSet sets back on the next holder, and an item whose gadget has
-    // bDestroyGadgetWhenTrackedAttributesIsZero goes once one of them is used up. The build binds the shared empty
+    // bDestroyGadgetWhenTrackedAttributesIsZero goes once all of them are used up. The build binds the shared empty
     // function instead (server code); Core's name, 21.40 binds a lambda (IFortInventoryOwnerInterface::
     // BindGadgetAttributeChangeDelegate).
     void OnGadgetTrackedAttributeChanged(float NewValue, const void* ModCallbackData);

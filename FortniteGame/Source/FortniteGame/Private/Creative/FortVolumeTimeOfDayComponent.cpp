@@ -180,14 +180,14 @@ void UFortVolumeTimeOfDayComponent::HookVTables()
     }
     if (!Member_TimeOfDayManager.IsAvailable() || !Member_TimeOfDayConfig.IsAvailable() || !AFortTimeOfDayManager::IsAvailable()
         || !AFortAthenaMutator_TODOverride::IsAvailable() || !UFortMutatorListComponent::HasSettingsChanged()
-        || !UFortMutatorListComponent::FindStaticFunction_GetMutatorByClass() || !EAthenaTimeOfDayOverride::StaticEnum())
+        || !UFortMutatorListComponent::CanGetMutatorByClass() || !EAthenaTimeOfDayOverride::StaticEnum())
     {
         Log::Error(L"Finder: UFortVolumeTimeOfDayComponent's island time of day not restored (a member, the time of day manager's setters, the TOD mutator or the mutator list's settings delegates are missing)");
         return;
     }
 
-    // BeginPlay is the first of the two adjacent UActorComponent slots it overrides (EndPlay the second; 8.20 0x60/0x61,
-    // 8.30 and 8.40 0x5F/0x60) whose override starts by calling UActorComponent's.
+    // BeginPlay is the first of the two adjacent UActorComponent slots it overrides (EndPlay the second; 8.00 and 8.20
+    // 0x60/0x61, 8.30 and 8.40 0x5F/0x60) whose override starts by calling UActorComponent's.
     UObject* const ComponentDefault = UActorComponent::StaticClass()->GetDefaultObject(false);
     UObject* const Default = Class->GetDefaultObject(false);
     void** const ComponentVTable = ComponentDefault ? *reinterpret_cast<void***>(ComponentDefault) : nullptr;
@@ -204,7 +204,11 @@ void UFortVolumeTimeOfDayComponent::HookVTables()
             continue;
         }
         const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DecodedDirectCalls(reinterpret_cast<uintptr_t>(VTable[Index]));
-        if (!Calls.empty() && Calls.front().second == reinterpret_cast<uintptr_t>(ComponentVTable[Index]))
+        // 8.00 (CL-5203069, slot 0x60 0xFDC1E0): no replay binding yet, so BeginPlay is only a jmp to UActorComponent's.
+        const uint8_t* const Code = reinterpret_cast<const uint8_t*>(VTable[Index]);
+        const bool bForwards = Code[0] == 0xE9
+            && reinterpret_cast<uintptr_t>(Code) + 5 + *reinterpret_cast<const int32_t*>(Code + 1) == reinterpret_cast<uintptr_t>(ComponentVTable[Index]);
+        if (bForwards || (!Calls.empty() && Calls.front().second == reinterpret_cast<uintptr_t>(ComponentVTable[Index])))
         {
             BeginPlayIndex = Index;
             break;

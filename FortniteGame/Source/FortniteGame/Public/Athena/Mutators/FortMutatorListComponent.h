@@ -33,7 +33,9 @@ public:
     DefineUProperty(FMulticastScriptDelegate, OnSettingsInitialized)
     DefineUProperty(FMulticastScriptDelegate, OnSettingsChanged)
     DefineUStructProperty(FPropertyOverrideData, PropertyOverrideArray)
+    // 8.20+ a UFunction; 8.00 has none, so GetMutatorByClass looks through Mutators there.
     DefineUFunction(GetMutatorByClass)
+    static bool CanGetMutatorByClass() { return FindStaticFunction_GetMutatorByClass() || Member_Mutators.IsAvailable(); }
     static bool HasSettingsChanged() { return Member_OnSettingsInitialized.IsAvailable() && Member_OnSettingsChanged.IsAvailable() && Member_PropertyOverrideArray.IsAvailable(); }
 
     UObject* GetMutatorByClass(UClass* MutatorClass) const;

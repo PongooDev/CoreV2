@@ -35,13 +35,17 @@ namespace
         return Result ? Cast<T>(*Result) : nullptr;
     }
 
+    // OnPreLaunchPawn and OnLaunchPawn are BlueprintEvents: their thunk calls ProcessEvent(FindFunctionChecked(NAME_...)),
+    // which finds PushCannon_C's override. AFortAthenaSKPushCannon's own UFunction has an empty script, so calling it
+    // directly ran no launch (#623: the passenger only exited).
     void SendLaunchEvent(AFortAthenaSKPushCannon* Cannon, UFunction* Event, AFortPlayerPawn* Pawn, const FVector& LaunchDir)
     {
-        if (!Event)
+        UFunction* Override = Cannon && Event ? Cannon->FindFunction(Event->GetFName()) : nullptr;
+        if (!Override)
         {
             return;
         }
-        Reflection::FParams Params(Event, true);
+        Reflection::FParams Params(Override, true);
         Params.Set<AFortPlayerPawn*>(L"Pawn", Pawn);
         Params.Set<FVector>(L"LaunchDir", LaunchDir);
         Params.Call(Cannon);

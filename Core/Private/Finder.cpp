@@ -608,6 +608,11 @@ ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
     constexpr int32_t MaxMovesBeforeCall = 3;
     ptrdiff_t Inlined = -1;
     ptrdiff_t InlinedAfterOne = -1;
+    // 8.50 (CL-6058028) bases the lea on r12, a SIB form: lea r14, [r12+1F8h]; inc dword ptr [r14+14h]
+    // (FActiveGameplayEffectsContainer::AddActiveGameplayEffectGrantedTagsAndModifiers 0x8ACD33). Taken after the plain forms.
+    ptrdiff_t InlinedSib = -1;
+    int32_t SibLeaDestination = -1;
+    ptrdiff_t SibLeaDisplacement = 0;
     ptrdiff_t Called = -1;
     int32_t LeaDestination = -1;
     ptrdiff_t LeaDisplacement = 0;
@@ -634,6 +639,10 @@ ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
         {
             InlinedAfterOne = EarlierLeaDisplacement;
         }
+        if (SibLeaDestination >= 0 && IsLockIncrement(Instruction, SibLeaDestination))
+        {
+            InlinedSib = SibLeaDisplacement;
+        }
         const bool bNamesLeaRegister = (Instruction.flags & F_MODRM) && ((Instruction.modrm_reg | (Instruction.rex_r << 3)) == LeaDestination
             || (Instruction.modrm_rm | (Instruction.rex_b << 3)) == LeaDestination);
         EarlierLeaDestination = LeaDestination >= 0 && (Instruction.flags & F_MODRM) && !bNamesLeaRegister && Instruction.opcode != 0xE8 ? LeaDestination : -1;
@@ -657,13 +666,15 @@ ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
         }
         LeaDestination = MemberLeaDestination(Instruction);
         LeaDisplacement = static_cast<int32_t>(Instruction.disp.disp32);
+        SibLeaDestination = MemberSibLeaDestination(Instruction);
+        SibLeaDisplacement = LeaDisplacement;
         if (LeaDestination == 1)
         {
             ThisLoaded = 0;
             ThisDisplacement = LeaDisplacement;
         }
     });
-    return Inlined >= 0 ? Inlined : InlinedAfterOne >= 0 ? InlinedAfterOne : Called;
+    return Inlined >= 0 ? Inlined : InlinedAfterOne >= 0 ? InlinedAfterOne : InlinedSib >= 0 ? InlinedSib : Called;
 }
 
 uintptr_t Finder::NextCall(uintptr_t From, size_t MaxDistance)

@@ -802,15 +802,35 @@ namespace
             Engine = 0;
             InitOnes.clear();
         }
+        // GEngine is also the global the PIE online-subsystem check loads first: if (GEngine && GEngine->IsA<UGameEngine>()).
+        const auto EngineOfOssCheck = []() -> uintptr_t
+        {
+            const uintptr_t Check = FunctionOf(L"Failed to determine if OSS is server in PIE, OSS requests will fail");
+            uintptr_t Load = Check ? FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x1D }) : 0;
+            if (Check && !Load)
+            {
+                // 8.50 (CL-6058028 0x323BFA) loads it into rdi: mov rdi, [GEngine].
+                Load = FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x3D });
+            }
+            return Load ? Finder::RelativeTarget(Load, 3, 7) : 0;
+        };
+        if (Engine && Finder::HasMovedCode())
+        {
+            // 8.50 (CL-6058028) puts the class line in packer-scrambled code (0x31C147): the function .pdata gives it starts
+            // at 0x31BF85, whose first store is a counter (0x31BF8F, +0x58D2C88), and GEngine's store (0x31C1D0) comes later.
+            const uintptr_t OssEngine = EngineOfOssCheck();
+            if (OssEngine && OssEngine != Engine)
+            {
+                Log::Info(L"Finder: GEngine: FEngineLoop::Init's first store (+0x{:X}) isn't the PIE OSS check's engine (+0x{:X}), taking the check's", Engine - Finder::ImageBase(), OssEngine - Finder::ImageBase());
+                Engine = OssEngine;
+            }
+        }
         if (!Engine)
         {
             // 1.9.1's FEngineLoop::Init sits outside .text, in pieces with no .pdata entry, so there is no function to
             // read the store out of. 2.3 leaves the piece that names the class in .text, which does have one, but the
-            // store is in a piece of its own, so the function is found and holds no store. GEngine is also the global
-            // the PIE online-subsystem check loads first.
-            const uintptr_t Check = FunctionOf(L"Failed to determine if OSS is server in PIE, OSS requests will fail");
-            const uintptr_t Load = Check ? FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x1D }) : 0;
-            Engine = Load ? Finder::RelativeTarget(Load, 3, 7) : 0;
+            // store is in a piece of its own, so the function is found and holds no store.
+            Engine = EngineOfOssCheck();
         }
         if (!Engine)
         {
@@ -4696,6 +4716,10 @@ namespace
                 ++MaxTickRateSites;
             }
         }
+        if (!bMaxTickRateAgree || MaxTickRateSites < 2)
+        {
+            Log::Info(L"Finder: UEngine::GetMaxTickRate: {} engine call sites before the \"Bringing ... up for play\" lines (GEngine +0x{:X})", MaxTickRateSites, Engine ? Engine - Finder::ImageBase() : 0);
+        }
         RequireSlot(L"UEngine::GetMaxTickRate", Natives::UEngine_GetMaxTickRateIndex, bMaxTickRateAgree && MaxTickRateSites >= 2 ? MaxTickRate : -1);
 
         const uintptr_t CreateChannelEnd = Finder::FunctionEnd(CreateChannel);
@@ -5041,12 +5065,16 @@ namespace
         {
             const uintptr_t ProfileFailed = First(Finder::StringRefs(L"Failed to initialize profile for player: UniqueId:[%s]"));
             uintptr_t WrapperToDebugString = 0;
-            for (uintptr_t Call = ProfileFailed ? FindRawCall(ProfileFailed - 0x30, ProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ProfileFailed))
+            // 8.50 (CL-6058028) calls it 0x34 bytes before the line (0x12D9BFE), past the 0x30 the older builds need.
+            for (const uintptr_t Window : { 0x30, 0x48 })
             {
-                const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-                if (FindInstruction(Target, Target + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }))
+                for (uintptr_t Call = ProfileFailed && !WrapperToDebugString ? FindRawCall(ProfileFailed - Window, ProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ProfileFailed))
                 {
-                    WrapperToDebugString = Target;
+                    const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+                    if (FindInstruction(Target, Target + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }))
+                    {
+                        WrapperToDebugString = Target;
+                    }
                 }
             }
             const uintptr_t IsValid = WrapperToDebugString ? FindInstruction(WrapperToDebugString, WrapperToDebugString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
@@ -18103,7 +18131,7 @@ uint8_t* Finder::SpawnMachineResurrectionTimerBind(UObject* SpawnMachineDefault,
     //   lea rax, nullsub_2 (0x1072705; the shared empty function as the delegate's method), mov [rsp+48h], rax
     //   lea rcx, [r14+4D0h] (ResurrectionStartDelay, +0x710, off the interface pointer), call FScalableFloat::GetValueAtLevel
     //   call FTimerManager::InternalSetTimer (0x10727F8, a local handle)
-    // The one stub lea followed within 0x100 bytes by both.
+    // The one stub lea followed within 0x140 bytes by both.
     const auto SetTimer = reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
     void* Interface = SpawnMachineDefault && InteractInterface && SetTimer && ResurrectionStartDelayOffset > 0 && ResolveServerOnAttemptInteractLive()
         ? Natives::UObject_GetInterfaceAddress(SpawnMachineDefault, InteractInterface) : nullptr;
@@ -18119,7 +18147,8 @@ uint8_t* Finder::SpawnMachineResurrectionTimerBind(UObject* SpawnMachineDefault,
         {
             continue;
         }
-        const uintptr_t End = std::min(Lea + 0x100, InteractEnd);
+        // 8.50 (CL-6058028 0x10FCBB0) puts the InternalSetTimer call 0xFC bytes after the stub lea (0x10FD186 -> 0x10FD282).
+        const uintptr_t End = std::min(Lea + 0x140, InteractEnd);
         // lea rcx, [r64+disp32]
         bool bReadsDelay = false;
         for (uintptr_t Site = Lea + 7; Site + 7 <= End && !bReadsDelay; ++Site)

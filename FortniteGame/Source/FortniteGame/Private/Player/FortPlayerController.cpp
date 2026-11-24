@@ -43,6 +43,7 @@
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerControllerPvE.h"
+#include "Player/FortPlayerControllerZone.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "RemoteControlledPawn/FortRemoteControlledPawnAthena.h"
@@ -488,7 +489,8 @@ void AFortPlayerController::ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwn
 void AFortPlayerController::Possess(APawn* InPawn)
 {
     const bool bAthenaPossess = AthenaPossessOG && Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this));
-    (bAthenaPossess ? AthenaPossessOG : PossessOG)(this, InPawn);
+    const FPossessFunction* ZonePossess = ZonePossessOGs.Find(*reinterpret_cast<void***>(this));
+    (ZonePossess ? *ZonePossess : bAthenaPossess ? AthenaPossessOG : PossessOG)(this, InPawn);
 
 #if WITH_SERVER_CODE
     // The server forwards a player's voice only to players whose voice handshake it completed (UNetConnection's
@@ -2274,6 +2276,31 @@ void AFortPlayerController::HookVTables()
                 if (VTable && VTable[PossessIndex] == AthenaPossess)
                 {
                     Hooks::SwapVTable(L"AFortPlayerControllerAthena::Possess", VTable, PossessIndex, reinterpret_cast<void*>(&PossessHK));
+                }
+            }
+        }
+
+        // 8.20 (CL-5625478) on, AFortPlayerControllerZone overrides it too (8.20 0x15A8C40, 8.40 0x1693940: this class's,
+        // called directly, then its own part), so the loop above missed every Save the World controller and Possess's
+        // Save the World part never ran there (#624: no quickbar layout for the client, so no hotbar). 8.40's Save the
+        // World classes override Zone's again (0x1693330, which calls it directly). Each class below Zone with its own
+        // gets the hook, which calls that class's. Up to 8.00 Zone keeps this class's and nothing changes.
+        UClass* ZoneClass = AFortPlayerControllerZone::StaticClass();
+        UObject* ZoneDefault = ZoneClass ? ZoneClass->GetDefaultObject(false) : nullptr;
+        void** ZoneVTable = ZoneDefault ? *reinterpret_cast<void***>(ZoneDefault) : nullptr;
+        if (ZoneVTable && ZoneVTable[PossessIndex] != PlayerControllerPossess && ZoneVTable[PossessIndex] != reinterpret_cast<void*>(&PossessHK))
+        {
+            for (TObjectIterator<UClass> It; It; ++It)
+            {
+                UClass* Class = *It;
+                const bool bZoneClass = Class->IsChildOf(ZoneClass) && !(AthenaClass && Class->IsChildOf(AthenaClass));
+                UObject* ClassDefault = bZoneClass ? Class->GetDefaultObject(false) : nullptr;
+                void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+                void* const ClassPossess = VTable ? VTable[PossessIndex] : nullptr;
+                if (ClassPossess && ClassPossess != PlayerControllerPossess && ClassPossess != reinterpret_cast<void*>(&PossessHK) && !ZonePossessOGs.Contains(VTable))
+                {
+                    ZonePossessOGs.Add(VTable, reinterpret_cast<FPossessFunction>(ClassPossess));
+                    Hooks::SwapVTable(L"AFortPlayerControllerZone::Possess", VTable, PossessIndex, reinterpret_cast<void*>(&PossessHK));
                 }
             }
         }

@@ -384,6 +384,10 @@ private:
     static bool InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete);
     static inline void (*PossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
     static inline void (*AthenaPossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
+    // 8.20+ (CL-5625478): AFortPlayerControllerZone overrides it (it calls this class's, then its own part), and 8.40's
+    // Save the World classes override that in turn. Each such class's own, by its vtable.
+    using FPossessFunction = void (*)(AFortPlayerController* This, APawn* InPawn);
+    static inline TMap<void**, FPossessFunction> ZonePossessOGs;
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
     static void PushToTalkPressedHK(AFortPlayerController* This);
     static void PushToTalkReleasedHK(AFortPlayerController* This);

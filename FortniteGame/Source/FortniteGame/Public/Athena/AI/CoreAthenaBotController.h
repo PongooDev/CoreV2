@@ -238,7 +238,11 @@ struct FCoreAthenaBotWeapon
     // partial reload takes its share of ReloadTime.
     bool bReloadIndividualBullets = false;
     ECoreAthenaBotWeaponType Type = ECoreAthenaBotWeaponType::Other;
-    // 8.30's FFortAthenaInventoryInformation::EquipMaxDistance: the farthest target the bot takes this weapon out for.
+    // The stats row's AI ranges (FFortBaseWeaponStats::MinPreferredRange, MaxPreferredRange, MaxActualRange): where the
+    // weapon is at its best, and the farthest it reaches. MaxActualRange is 8.30's
+    // FFortAthenaInventoryInformation::EquipMaxDistance, the farthest target the bot takes this weapon out for.
+    float MinPreferredRange = 336.0f;
+    float MaxPreferredRange = 3008.0f;
     float EquipMaxDistance = 5000.0f;
     // When this gun can fire again (its FiringRate from its last shot): swapping guns doesn't skip a pump's delay.
     float ReadyTime = 0.0f;
@@ -521,9 +525,13 @@ private:
     bool HasUsableWeapon() const;
     bool HasAmmoFor(const FCoreAthenaBotWeapon& Weapon) const;
     int32_t BestWeaponIndex() const;
-    // 8.30's _ManageWeapon: the weapon whose EquipMaxDistance suits a target this far (a shotgun close, an assault
-    // rifle or SMG at mid range, a sniper far, a pistol when nothing better has ammo).
+    // 21.40's AFortAthenaAIBotController::EquipBestWeapon: the weapon most effective at a target this far
+    // (UFortAthenaAIBotInventoryDigestedSkillSet::EquipWeaponInfo's DistanceEffectivenessWithThreat), so a shotgun or SMG
+    // close, an assault rifle at mid range, a sniper far, a pistol when nothing better has ammo.
     int32_t WeaponIndexForRange(float Distance) const;
+    // How well a weapon suits a target this far (DistanceEffectiveness): its kind's weight inside its preferred range,
+    // less below it and past it.
+    static float DistanceEffectiveness(const FCoreAthenaBotWeapon& Weapon, float Distance);
     // Where a weapon found on the floor would go: -1 a free slot, an index the weapon it replaces, -2 not wanted.
     int32_t WeaponSlotFor(UFortWeaponItemDefinition* Definition) const;
     void EquipWeapon(int32_t Index);

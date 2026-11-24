@@ -887,35 +887,50 @@ namespace
         }
     }
 
-    // Core's EquipMaxDistance per kind 🟡 (8.30's values are in its bot blueprints, which don't ship).
-    float EquipMaxDistanceOf(ECoreAthenaBotWeaponType Type)
+    struct FWeaponRanges
+    {
+        float MinPreferredRange;
+        float MaxPreferredRange;
+        float MaxActualRange;
+    };
+
+    // A kind's AI ranges where its stats row has none: 8.40's AthenaRangedWeapons rows (pump shotgun, SMG, semi-auto
+    // pistol, assault rifle, grenade launcher). The sniper's is Core's 🟡: every sniper and scoped row has the same untuned
+    // block (144 / 512 / 640 with flat damage), which would make it a close-range gun.
+    FWeaponRanges DefaultRangesOf(ECoreAthenaBotWeaponType Type)
     {
         switch (Type)
         {
-        case ECoreAthenaBotWeaponType::Shotgun: return 1200.0f;
-        case ECoreAthenaBotWeaponType::SMG: return 2500.0f;
-        case ECoreAthenaBotWeaponType::Pistol: return 3500.0f;
-        case ECoreAthenaBotWeaponType::Launcher: return 4000.0f;
-        case ECoreAthenaBotWeaponType::AssaultRifle: return 6000.0f;
-        case ECoreAthenaBotWeaponType::Sniper: return 100000.0f;
-        default: return 3000.0f;
+        case ECoreAthenaBotWeaponType::Shotgun: return { 144.0f, 1280.0f, 1408.0f };
+        case ECoreAthenaBotWeaponType::SMG: return { 336.0f, 3008.0f, 3248.0f };
+        case ECoreAthenaBotWeaponType::Pistol: return { 464.0f, 4752.0f, 5312.0f };
+        case ECoreAthenaBotWeaponType::AssaultRifle: return { 832.0f, 7504.0f, 8128.0f };
+        case ECoreAthenaBotWeaponType::Launcher: return { 288.0f, 2496.0f, 3120.0f };
+        case ECoreAthenaBotWeaponType::Sniper: return { 6000.0f, 100000.0f, 100000.0f };
+        default: return { 336.0f, 3008.0f, 3248.0f };
         }
     }
 
-    // How much a bot wants a kind of gun at a range band (0 close, under 10 m; 1 mid, under 35 m; 2 far) 🟡.
-    float RangePreference(ECoreAthenaBotWeaponType Type, int32_t Band)
+    // How effective a kind is inside its preferred range: the height of 21.40's per-tag DistanceEffectivenessWithThreat
+    // curves, skill-set data that ships in no supported build 🟡. Close kinds first, so a shotgun wins up close and a sniper
+    // wins once the target is past everything else's preferred range.
+    float EffectivenessWeightOf(ECoreAthenaBotWeaponType Type)
     {
-        static const float Table[7][3] = {
-            { 1.0f, 1.0f, 1.0f },  // Other
-            { 3.0f, 3.5f, 3.0f },  // Pistol
-            { 5.0f, 5.0f, 2.5f },  // SMG
-            { 4.0f, 6.0f, 5.0f },  // AssaultRifle
-            { 6.0f, 2.0f, 0.5f },  // Shotgun
-            { 1.0f, 2.5f, 6.0f },  // Sniper
-            { 0.5f, 2.0f, 2.0f },  // Launcher
-        };
-        return Table[static_cast<size_t>(Type)][static_cast<size_t>(std::clamp(Band, 0, 2))];
+        switch (Type)
+        {
+        case ECoreAthenaBotWeaponType::Shotgun:
+        case ECoreAthenaBotWeaponType::Sniper: return 1.0f;
+        case ECoreAthenaBotWeaponType::SMG: return 0.9f;
+        case ECoreAthenaBotWeaponType::AssaultRifle: return 0.85f;
+        case ECoreAthenaBotWeaponType::Launcher: return 0.75f;
+        case ECoreAthenaBotWeaponType::Pistol: return 0.7f;
+        default: return 0.5f;
+        }
     }
+
+    // 21.40's UFortAthenaAIBotInventoryDigestedSkillSet::DefaultWeaponSelectionDistance: with no target in sight, the bot
+    // holds the gun for a fight this far away 🟡 (the value is skill-set data).
+    constexpr float DefaultWeaponSelectionDistance = 2000.0f;
 
     // How much a bot wants a kind of gun in its inventory at all (it carries one of each kind).
     float TypePriority(ECoreAthenaBotWeaponType Type)
@@ -970,8 +985,8 @@ namespace
         }
     }
 
-    // The bots' shots this match and how many hit, by the kind of gun and the range band (RangePreference's: under 10 m,
-    // under 35 m, farther), logged every 100 shots, so the aim's tuning can be checked against a player's hit rate.
+    // The bots' shots this match and how many hit, by the kind of gun and the range band (under 10 m, under 35 m,
+    // farther), logged every 100 shots, so the aim's tuning can be checked against a player's hit rate.
     struct FBotShotStats
     {
         int32_t Shots[7][3] = {};
@@ -1069,7 +1084,21 @@ namespace
         }
         Weapon.bReloadIndividualBullets = ReadByteStat(Weapon.WeaponDefinition, L"ReloadType") == ReloadIndividualBullets;
         Weapon.Type = WeaponTypeOf(Weapon.WeaponDefinition, Weapon.Pellets);
-        Weapon.EquipMaxDistance = EquipMaxDistanceOf(Weapon.Type);
+        // The row's AI ranges (FFortBaseWeaponStats, set per weapon family), unless they are the untuned block every sniper
+        // and scoped row shares (MaxActualRange 640: no gun reaches only 6 m), or the build's row lacks them.
+        FWeaponRanges Ranges = DefaultRangesOf(Weapon.Type);
+        float MinPreferred = 0.0f;
+        float MaxPreferred = 0.0f;
+        float MaxActual = 0.0f;
+        if (Weapon.Type != ECoreAthenaBotWeaponType::Sniper && ReadStat(Weapon.WeaponDefinition, L"MinPreferredRange", MinPreferred)
+            && ReadStat(Weapon.WeaponDefinition, L"MaxPreferredRange", MaxPreferred) && ReadStat(Weapon.WeaponDefinition, L"MaxActualRange", MaxActual)
+            && MinPreferred >= 0.0f && MaxPreferred > MinPreferred && MaxActual >= MaxPreferred && MaxActual > 640.0f)
+        {
+            Ranges = { MinPreferred, MaxPreferred, MaxActual };
+        }
+        Weapon.MinPreferredRange = Ranges.MinPreferredRange;
+        Weapon.MaxPreferredRange = Ranges.MaxPreferredRange;
+        Weapon.EquipMaxDistance = Ranges.MaxActualRange;
     }
 
     // A number (an int or a float property) of an object, by its name, or Default.
@@ -3183,14 +3212,36 @@ bool FCoreAthenaBotController::HasUsableWeapon() const
 
 int32_t FCoreAthenaBotController::BestWeaponIndex() const
 {
-    // Out of a fight: the weapon for a mid-range fight, the likeliest next one.
-    const int32_t Index = WeaponIndexForRange(2000.0f);
+    // Out of a fight (21.40's DistanceEffectivenessNoThreat at DefaultWeaponSelectionDistance): the weapon for a mid-range
+    // fight, the likeliest next one.
+    const int32_t Index = WeaponIndexForRange(DefaultWeaponSelectionDistance);
     return Index >= 0 ? Index : WeaponList.empty() ? -1 : 0;
+}
+
+float FCoreAthenaBotController::DistanceEffectiveness(const FCoreAthenaBotWeapon& Weapon, float Distance)
+{
+    // Full inside the preferred range; from a quarter at point blank up to full at its start (a sniper at 20 m beats a
+    // pump out of its reach, not an SMG); down to half at MaxActualRange; past that a fraction that keeps falling, so a
+    // gun out of its reach is only taken when nothing else has ammo.
+    float Effectiveness = 1.0f;
+    if (Distance < Weapon.MinPreferredRange)
+    {
+        Effectiveness = 0.25f + 0.75f * Distance / FMath::Max(Weapon.MinPreferredRange, 1.0f);
+    }
+    else if (Distance > Weapon.EquipMaxDistance)
+    {
+        Effectiveness = 0.25f * Weapon.EquipMaxDistance / Distance;
+    }
+    else if (Distance > Weapon.MaxPreferredRange)
+    {
+        Effectiveness = 1.0f - 0.5f * (Distance - Weapon.MaxPreferredRange) / FMath::Max(Weapon.EquipMaxDistance - Weapon.MaxPreferredRange, 1.0f);
+    }
+    return EffectivenessWeightOf(Weapon.Type) * Effectiveness;
 }
 
 int32_t FCoreAthenaBotController::WeaponIndexForRange(float Distance) const
 {
-    const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
+    // EquipBestWeapon: the most effective weapon with ammo; a loaded one wins a near tie (no reload before its first shot).
     int32_t Best = -1;
     float BestScore = -1.0f;
     for (size_t Index = 0; Index < WeaponList.size(); ++Index)
@@ -3200,9 +3251,7 @@ int32_t FCoreAthenaBotController::WeaponIndexForRange(float Distance) const
         {
             continue;
         }
-        float Score = RangePreference(Weapon.Type, Band) + std::min(DamagePerSecond(Weapon) / 200.0f, 1.0f);
-        Score += Weapon.LoadedAmmo > 0 ? 1.0f : 0.0f;
-        Score -= Distance > Weapon.EquipMaxDistance ? 3.0f : 0.0f;
+        const float Score = DistanceEffectiveness(Weapon, Distance) + (Weapon.LoadedAmmo > 0 ? 0.05f : 0.0f);
         if (Score > BestScore)
         {
             BestScore = Score;
@@ -3263,8 +3312,9 @@ const FCoreAthenaBotWeapon& FCoreAthenaBotController::GetWeaponInfo(UFortWeaponI
         Weapon.AmmoDefinition = KeepLoaded(static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous());
         ReadWeaponStats(Weapon);
         Weapon.Rarity = UFortItemDefinition::HasRarity() ? Definition->GetRarity() : 0;
-        Log::Info(L"Battle Royale bots: {}: {} {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, equipped within {:.0f} m)", NameOf(Definition), RarityName(Weapon.Rarity), WeaponTypeName(Weapon.Type),
-            Weapon.Damage, Weapon.Pellets, Weapon.FiringRate, Weapon.ClipSize, Weapon.ReloadTime, Weapon.bReloadIndividualBullets ? L" by the shell" : L"", std::min(Weapon.EquipMaxDistance, 99999.0f) / 100.0f);
+        Log::Info(L"Battle Royale bots: {}: {} {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, best from {:.0f} to {:.0f} m, equipped within {:.0f} m)", NameOf(Definition), RarityName(Weapon.Rarity), WeaponTypeName(Weapon.Type),
+            Weapon.Damage, Weapon.Pellets, Weapon.FiringRate, Weapon.ClipSize, Weapon.ReloadTime, Weapon.bReloadIndividualBullets ? L" by the shell" : L"", Weapon.MinPreferredRange / 100.0f,
+            FMath::Min(Weapon.MaxPreferredRange, 99999.0f) / 100.0f, FMath::Min(Weapon.EquipMaxDistance, 99999.0f) / 100.0f);
     }
     return Found->second;
 }
@@ -3538,10 +3588,9 @@ void FCoreAthenaBotController::ManageWeapon(float Now)
         if (ForRange >= 0 && ForRange != EquippedIndex)
         {
             const FCoreAthenaBotWeapon& Next = WeaponList[static_cast<size_t>(ForRange)];
-            // A loaded weapon that suits the range as well stays out: only a clearly better one is worth the swap.
-            const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
-            // A margin past the held gun's range keeps a target at the edge of it from swapping guns back and forth.
-            if (Entry.LoadedAmmo == 0 || RangePreference(Next.Type, Band) > RangePreference(Entry.Type, Band) + 0.5f || Distance > Entry.EquipMaxDistance * 1.2f)
+            // A loaded weapon that suits the range about as well stays out: only a clearly better one is worth the swap,
+            // which keeps a target at the edge of two guns' ranges from swapping them back and forth.
+            if (Entry.LoadedAmmo == 0 || DistanceEffectiveness(Next, Distance) > DistanceEffectiveness(Entry, Distance) + 0.1f)
             {
                 NextWeaponSwitch = Now + 3.0f;
                 static int32_t LoggedSwitches = 0;

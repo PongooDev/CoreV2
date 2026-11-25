@@ -48,6 +48,13 @@ public:
     // Finds that native (Finder::ResolveTeamPrivateHealthAndShieldLive) from the player state's offsets, as the match's
     // world starts: Battle Royale's player bots resolve it then, so its search doesn't hold their first frame.
     static bool ResolveSetHealthAndShield();
+    // From 8.30 AFortTeamInfo::AddToTeam and RemoveFromTeam skip a bot's player state here (bIsABot), so a player bot
+    // gets and loses its RepData entries through these, the same calls they make for a player. False where the build
+    // has no such gate (AddToTeam already gave the bot its entries) or the calls weren't found.
+    bool AddPlayerState(AFortPlayerStateZone* PlayerState);
+    bool RemovePlayerState(AFortPlayerStateZone* PlayerState);
+    // Finds those calls (Finder::ResolveTeamPrivatePlayerStateLive) as the match's world starts.
+    static bool ResolvePlayerStateEntries();
 };
 
 class AFortTeamInfo : public AInfo
@@ -60,6 +67,9 @@ public:
     DefineUProperty(TArray<AController*>, TeamMembers)
     static bool HasTeamMembers() { return Member_TeamMembers.IsAvailable(); }
     DefineUProperty(EFortTeam, Team)
+    // The team's AFortTeamPrivateInfo (8.50 +0x390).
+    DefineUProperty(AFortTeamPrivateInfo*, PrivateInfo)
+    static bool HasPrivateInfo() { return Member_PrivateInfo.IsAvailable(); }
     DefineUStructProperty(FTeamSpottedActorInfoArray, TeamSpottedActors)
 
     void AddSpottedActor(AFortPlayerController* Spotter, AActor* SpottedActor);

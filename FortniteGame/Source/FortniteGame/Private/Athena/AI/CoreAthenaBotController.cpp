@@ -1994,6 +1994,11 @@ void FCoreAthenaBotController::Destroy()
         // on the squad bar and as a teammate marker where it had stood (CoreV2 #330). By hand where it isn't found.
         AFortPlayerStateAthena* PlayerState = GetPlayerState();
         AFortTeamInfo* TeamInfo = PlayerState ? static_cast<AFortTeamInfo*>(PlayerState->PlayerTeam) : nullptr;
+        // 8.30+: RemoveFromTeam skips a bot's private info entries, which PlaceBotOnTeam added (CoreV2 #641).
+        if (AFortTeamPrivateInfo* TeamPrivate = PlayerState && AFortPlayerState::HasPlayerTeamPrivate() ? static_cast<AFortTeamPrivateInfo*>(PlayerState->PlayerTeamPrivate) : nullptr)
+        {
+            TeamPrivate->RemovePlayerState(PlayerState);
+        }
         if (TeamInfo && Finder::ResolveTeamRemoveLive())
         {
             Natives::AFortTeamInfo_RemoveFromTeam(TeamInfo, reinterpret_cast<AController*>(AIController));

@@ -496,6 +496,10 @@ namespace Finder
     // AFortTeamInfo::RemoveFromTeam (Natives::AFortTeamInfo_RemoveFromTeam), from its log line, for Battle Royale's player
     // bots: one leaving the match leaves its team as a player changing teams does.
     bool ResolveTeamRemoveLive();
+    // Natives::AFortTeamPrivateInfo_AddPlayerState and _RemovePlayerState: the calls AFortTeamInfo::AddToTeam (its log
+    // line) and RemoveFromTeam make on the team's PrivateInfo (PrivateInfoOffset, AFortTeamInfo's) behind their player
+    // state's bIsABot test. Builds without that test (before 8.30) give a bot its entries in AddToTeam and find none.
+    bool ResolveTeamPrivatePlayerStateLive(ptrdiff_t PrivateInfoOffset);
     // AFortPlayerPawn::TryToAutoPickupWeapon (Natives::AFortPlayerPawn_TryToAutoPickupWeapon) and its local player
     // controller lookup, from its log line, only where the pawn's tick also reaches it (7.40, 8.00) and it reads the
     // controller it looked up without checking it. None elsewhere.

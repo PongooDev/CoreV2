@@ -47,6 +47,46 @@ bool AFortTeamPrivateInfo::SetHealthAndShield(AFortPlayerStateZone* PlayerState)
 #endif
 }
 
+bool AFortTeamPrivateInfo::ResolvePlayerStateEntries()
+{
+#if WITH_SERVER_CODE
+    UClass* TeamClass = AFortTeamInfo::HasPrivateInfo() ? AFortTeamInfo::StaticClass() : nullptr;
+    AFortTeamInfo* Team = TeamClass ? reinterpret_cast<AFortTeamInfo*>(TeamClass->GetDefaultObject()) : nullptr;
+    return Team && Finder::ResolveTeamPrivatePlayerStateLive(reinterpret_cast<const uint8_t*>(&Team->PrivateInfo) - reinterpret_cast<const uint8_t*>(Team));
+#else
+    return false;
+#endif
+}
+
+bool AFortTeamPrivateInfo::AddPlayerState(AFortPlayerStateZone* PlayerState)
+{
+#if WITH_SERVER_CODE
+    if (!PlayerState || !ResolvePlayerStateEntries())
+    {
+        return false;
+    }
+    // Adds nothing for a player state it already has.
+    Natives::AFortTeamPrivateInfo_AddPlayerState(this, PlayerState);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool AFortTeamPrivateInfo::RemovePlayerState(AFortPlayerStateZone* PlayerState)
+{
+#if WITH_SERVER_CODE
+    if (!PlayerState || !ResolvePlayerStateEntries())
+    {
+        return false;
+    }
+    Natives::AFortTeamPrivateInfo_RemovePlayerState(this, PlayerState);
+    return true;
+#else
+    return false;
+#endif
+}
+
 void AFortTeamInfo::AddSpottedActor(AFortPlayerController* Spotter, AActor* SpottedActor)
 {
 #if WITH_SERVER_CODE

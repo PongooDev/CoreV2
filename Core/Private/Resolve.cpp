@@ -20442,6 +20442,78 @@ bool Finder::ResolveTeamRemoveLive()
     return true;
 }
 
+namespace
+{
+    // The bIsABot-gated private info call in AFortTeamInfo::AddToTeam or RemoveFromTeam (8.50 0x13AA81B, 0x13BA8B8):
+    // "mov rcx, [team + PrivateInfo]; test rcx, rcx; jz short; test byte ptr [state + flags], imm8; jnz short;
+    // mov rdx, state; call". 0 where the function has no such call.
+    uintptr_t BotGatedPrivateInfoCall(uintptr_t Function, ptrdiff_t PrivateInfoOffset)
+    {
+        const uintptr_t End = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Site = Function; End && Site + 30 <= End; ++Site)
+        {
+            if ((Byte(Site) != 0x48 && Byte(Site) != 0x49) || Byte(Site + 1) != 0x8B || (Byte(Site + 2) & 0xF8) != 0x88 || (Byte(Site + 2) & 7) == 4
+                || *reinterpret_cast<const int32_t*>(Site + 3) != static_cast<int32_t>(PrivateInfoOffset) || Byte(Site + 7) != 0x48 || Byte(Site + 8) != 0x85
+                || Byte(Site + 9) != 0xC9 || Byte(Site + 10) != 0x74)
+            {
+                continue;
+            }
+            uintptr_t Test = Site + 12;
+            const bool bRexB = Byte(Test) == 0x41;
+            Test += bRexB ? 1 : 0;
+            const uint8_t StateRegister = static_cast<uint8_t>((Byte(Test + 1) & 7) | (bRexB ? 8 : 0));
+            if (Byte(Test) != 0xF6 || (Byte(Test + 1) & 0xF8) != 0x80 || (Byte(Test + 1) & 7) == 4 || Byte(Test + 7) != 0x75)
+            {
+                continue;
+            }
+            const uintptr_t Move = Test + 9;
+            if (Byte(Move) != ((StateRegister & 8) ? 0x49 : 0x48) || Byte(Move + 1) != 0x8B || Byte(Move + 2) != (0xD0 | (StateRegister & 7)) || Byte(Move + 3) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Move + 3, 1, 5);
+            return IsInText(Target) ? Target : 0;
+        }
+        return 0;
+    }
+}
+
+bool Finder::ResolveTeamPrivatePlayerStateLive(ptrdiff_t PrivateInfoOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortTeamPrivateInfo_AddPlayerState != nullptr && Natives::AFortTeamPrivateInfo_RemovePlayerState != nullptr;
+    }
+    bSearched = true;
+
+    // AFortTeamInfo::AddToTeam logs "Adding %s to team %s" (8.50 0x13AA690, its only reference) and opens with its
+    // controller check ("test rdx, rdx"), as RemoveFromTeam does. 8.30 (0x12F8C60), 8.40 (0x1314FC0), 8.50 and 8.51
+    // (0x13A8E50) give the team's PrivateInfo the player state only without bIsABot; RemoveFromTeam takes it off the
+    // same way.
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"Adding %s to team %s");
+    uintptr_t Add = Refs.size() == 1 ? Finder::FunctionStart(Refs.front()) : 0;
+    bool bChecksController = false;
+    for (uintptr_t Check = Add; Add && Check < Add + 0x30 && !bChecksController; ++Check)
+    {
+        bChecksController = Byte(Check) == 0x48 && Byte(Check + 1) == 0x85 && Byte(Check + 2) == 0xD2;
+    }
+    const uintptr_t AddCall = bChecksController && PrivateInfoOffset > 0 ? BotGatedPrivateInfoCall(Add, PrivateInfoOffset) : 0;
+    const uintptr_t RemoveCall = AddCall && Finder::ResolveTeamRemoveLive()
+        ? BotGatedPrivateInfoCall(reinterpret_cast<uintptr_t>(Natives::AFortTeamInfo_RemoveFromTeam), PrivateInfoOffset) : 0;
+    if (!AddCall || !RemoveCall || AddCall == RemoveCall)
+    {
+        Log::Info(L"Finder: AFortTeamInfo::AddToTeam gives a bot its private info entries (AddToTeam 0x{:X}, no bIsABot-gated PrivateInfo call)",
+            bChecksController ? Add - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AFortTeamPrivateInfo_AddPlayerState = reinterpret_cast<decltype(Natives::AFortTeamPrivateInfo_AddPlayerState)>(AddCall);
+    Natives::AFortTeamPrivateInfo_RemovePlayerState = reinterpret_cast<decltype(Natives::AFortTeamPrivateInfo_RemovePlayerState)>(RemoveCall);
+    Log::Info(L"Finder: AFortTeamInfo::AddToTeam 0x{:X} and RemoveFromTeam skip a bot's private info entries: AFortTeamPrivateInfo's add 0x{:X}, remove 0x{:X}",
+        Add - Finder::ImageBase(), AddCall - Finder::ImageBase(), RemoveCall - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveAutoPickupLive()
 {
     static bool bSearched = false;

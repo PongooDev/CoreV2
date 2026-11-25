@@ -994,6 +994,13 @@ namespace Natives
     // squad bars read. The game mode's ReplicateHealthAndShield calls it for every player state each tick; Battle
     // Royale's player bots call it after correcting their values: Finder::ResolveTeamPrivateHealthAndShieldLive.
     inline void (*AFortTeamPrivateInfo_SetHealthAndShield)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
+    // The team private info's add and remove of a player state's RepData entries (8.50 CL-6058028 0x177D900 and
+    // 0x177D990; not in the 21.40 exports), which AFortTeamInfo::AddToTeam and RemoveFromTeam call. From 8.30 (CL-5793395
+    // to 8.51 CL-6165369 checked) both calls skip a player state with bIsABot ("test byte ptr [rbx+26Eh], 8; jnz"), so a
+    // bot has no entry and SetHealthAndShield finds nothing to set: Finder::ResolveTeamPrivatePlayerStateLive, only where
+    // that gate is.
+    inline void (*AFortTeamPrivateInfo_AddPlayerState)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
+    inline void (*AFortTeamPrivateInfo_RemovePlayerState)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
     // The game state's step at the end of AFortGameModeAthena::RestartPlayer (7.30 CL-4834550 0xD5A9F0, 7.40 0xD85AF0,
     // 8.00 0xDA5070, 8.20 0xE9E060; no 21.40 name): the controller's pawn's MaxHealth, health, MaxShield and shield as
     // the mutators answer FortGameStateAthena_EvaluateMaxHealth to _EvaluateStartingShield (an island's

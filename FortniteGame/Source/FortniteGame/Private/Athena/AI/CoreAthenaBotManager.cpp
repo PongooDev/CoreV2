@@ -553,8 +553,10 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
         const bool bSkydive = AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
         const bool bTeams = Finder::ResolveTeamChangeLive() && Finder::ResolveTeamRemoveLive();
         const bool bSquadBar = AFortTeamPrivateInfo::ResolveSetHealthAndShield();
-        Log::Info(L"Battle Royale bots: the bots' finders resolved as the world starts ({:.0f} ms; movement style {}, skydiving {}, teams {}, squad bar health {})",
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count(), bMovementStyle, bSkydive, bTeams, bSquadBar);
+        // False before 8.30, where AddToTeam gives a bot its entries itself.
+        const bool bSquadBarEntries = AFortTeamPrivateInfo::ResolvePlayerStateEntries();
+        Log::Info(L"Battle Royale bots: the bots' finders resolved as the world starts ({:.0f} ms; movement style {}, skydiving {}, teams {}, squad bar health {}, bots' squad bar entries by Core {})",
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count(), bMovementStyle, bSkydive, bTeams, bSquadBar, bSquadBarEntries);
     }
     Log::Info(L"Battle Royale bots: the bots' update is {}", Instance->PrimaryManagerTick.GetTickFunction()
         ? L"the manager's tick function, registered with the match's level while it has bots" : L"a world timer (this build's FTickFunction registration wasn't found)");
@@ -2107,6 +2109,18 @@ void FCoreAthenaBotManager::PlaceBotOnTeam(FCoreAthenaBotController* Bot)
         AFortTeamInfo* TeamInfo = static_cast<AFortTeamInfo*>(State->PlayerTeam);
         Log::Info(L"Battle Royale bots: {} joins {} as a player does ({})", Bot->GetBotName(), EFortTeam{ Team }.ToString(),
             TeamInfo ? TeamInfo->GetName().ToStdString() : std::wstring(L"no AFortTeamInfo"));
+    }
+    // 8.30+: AddToTeam left the bot (bIsABot) out of its team's AFortTeamPrivateInfo, so ReplicateHealthAndShield's
+    // SetHealthAndShield had no entry to set and a bot squadmate's squad bar health stayed blank (CoreV2 #641).
+    AFortTeamPrivateInfo* TeamPrivate = AFortPlayerState::HasPlayerTeamPrivate() ? static_cast<AFortTeamPrivateInfo*>(State->PlayerTeamPrivate) : nullptr;
+    if (TeamPrivate && TeamPrivate->AddPlayerState(State))
+    {
+        static bool bLoggedTeamPrivate = false;
+        if (!bLoggedTeamPrivate)
+        {
+            bLoggedTeamPrivate = true;
+            Log::Info(L"Battle Royale bots: {} gets its entries in {}, which the team's AddToTeam gives players only", Bot->GetBotName(), TeamPrivate->GetName().ToStdString());
+        }
     }
     if (Bot->GetSquad() != 0 && AFortPlayerStateAthena::HasSquadId())
     {

@@ -5,8 +5,10 @@
 #include "GameplayTagContainer.h"
 #include "UObject/ScriptDelegates.h"
 
+class AController;
 class AFortPlayerState;
 class UAbilitySystemComponent;
+struct FGameplayEffectContextHandle;
 class UFortBuildingActorSet;
 
 class EFortBuildingPersistentState
@@ -98,6 +100,12 @@ public:
     // Epic's virtual SetTeam (slot 0x126, 0xE4C820) writes both on the authority, and 7.40 reflects it (execSetTeam,
     // 0x16027B0), so it is called there. Before 7.40 Team is the replicated one and is written as it was.
     void SetTeam(uint8_t InTeam);
+    // The virtual Die (Natives::ABuildingActor_DieIndex, found from SilentDie's call). 9.00 (CL-6337466) adds Epic's fifth
+    // parameter, const FGameplayEffectContextHandle* (21.40 slot 297): 9.00's Die (0x1133040) copies the handle's shared
+    // data from it when it isn't null (0x113310E), and SilentDie (0x115A890) passes null. 8.51's Die takes four
+    // (SilentDie 0x10D5650 calls slot 0x820 with r9 last), so the fifth slot is never read there. Passing it only
+    // through the four-argument call left the slot to the stack, and placing a piece over a prop crashed 9.00 (#663).
+    void Die(FGameplayTag DeathReason, AController* EventInstigator, AActor* DamageCauser, const FGameplayEffectContextHandle* EffectContext = nullptr);
 
     void PostInitializeComponents();
     static void HookVTables();

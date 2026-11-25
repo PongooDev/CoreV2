@@ -61,16 +61,6 @@ namespace
         return Actor && Actor->GetRootComponent() ? Actor->GetTransform().GetLocation() : FVector();
     }
 
-    // A gameplay tag is its name; Die takes it by value in a register.
-    uint64_t TagBits(const wchar_t* TagName)
-    {
-        const FGameplayTag Tag{ FName(TagName) };
-        uint64_t Bits = 0;
-        static_assert(sizeof(Tag) == sizeof(Bits));
-        std::memcpy(&Bits, &Tag, sizeof(Bits));
-        return Bits;
-    }
-
     UFortWorldItem* FindItemForDefinition(AFortInventory* Inventory, const UFortItemDefinition* ItemDefinition)
     {
         if (!Inventory || !ItemDefinition)
@@ -378,13 +368,13 @@ ABuildingSMActor* AFortPlayerController::CreateBuildingActor(const FBuildingClas
     const auto Place = [&](const FVector& Location, const FRotator& Rotation, TArray<ABuildingActor*>& InTheWay) -> ABuildingSMActor*
     {
         // Props and trees in the way die as if they lost their support.
-        const uint64_t StructuralDeath = TagBits(L"Gameplay.Effect.InstantDeath.StructuralSupport");
+        const FGameplayTag StructuralDeath{ FName(L"Gameplay.Effect.InstantDeath.StructuralSupport") };
         for (int32_t Index = 0; Index < InTheWay.Num(); ++Index)
         {
             ABuildingActor* Existing = InTheWay[Index];
             if (Existing && Existing->bDestroyOnPlayerBuildingPlacement)
             {
-                CallVirtual<void>(Existing, Natives::ABuildingActor_DieIndex, StructuralDeath, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+                Existing->Die(StructuralDeath, nullptr, nullptr);
             }
         }
 

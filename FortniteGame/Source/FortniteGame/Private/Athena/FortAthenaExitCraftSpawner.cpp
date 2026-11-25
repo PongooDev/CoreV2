@@ -53,11 +53,7 @@ namespace
             Piece->K2_DestroyActor();
             return;
         }
-        const FGameplayTag StructuralDeath{ FName(L"Gameplay.Effect.InstantDeath.StructuralSupport") };
-        uint64_t TagBits = 0;
-        static_assert(sizeof(StructuralDeath) == sizeof(TagBits));
-        std::memcpy(&TagBits, &StructuralDeath, sizeof(TagBits));
-        CallVirtual<void>(Piece, Natives::ABuildingActor_DieIndex, TagBits, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+        Piece->Die(FGameplayTag{ FName(L"Gameplay.Effect.InstantDeath.StructuralSupport") }, nullptr, nullptr);
     }
 }
 

@@ -78,16 +78,6 @@ namespace
         return Variable ? Variable->GetFloat() : Default;
     }
 
-    // A gameplay tag is its name; ABuildingActor::Die takes it by value in a register.
-    uint64_t TagBits(const wchar_t* TagName)
-    {
-        const FGameplayTag Tag{ FName(TagName) };
-        uint64_t Bits = 0;
-        static_assert(sizeof(Tag) == sizeof(Bits));
-        std::memcpy(&Bits, &Tag, sizeof(Bits));
-        return Bits;
-    }
-
     // A TArray parameter of a reflected call, filled with Count elements copied from Source (plain data only); the
     // parameters' own destruction frees it.
     bool SetArrayParameter(Reflection::FParams& Params, const wchar_t* Name, const void* Source, int32_t Count, int32_t ElementSize)
@@ -704,12 +694,12 @@ AActor* AFortCreativeMoveTool::SpawnActorWithTransform(AActor* ActorToSpawn, FTr
     {
         if (bShouldDestroyPropsWhenPlacing)
         {
-            const uint64_t StructuralDeath = TagBits(L"Gameplay.Effect.InstantDeath.StructuralSupport");
+            const FGameplayTag StructuralDeath{ FName(L"Gameplay.Effect.InstantDeath.StructuralSupport") };
             for (ABuildingActor* Existing : ExistingBuildings)
             {
                 if (Existing && Existing->bDestroyOnPlayerBuildingPlacement)
                 {
-                    CallVirtual<void>(Existing, Natives::ABuildingActor_DieIndex, StructuralDeath, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+                    Existing->Die(StructuralDeath, nullptr, nullptr);
                 }
             }
         }

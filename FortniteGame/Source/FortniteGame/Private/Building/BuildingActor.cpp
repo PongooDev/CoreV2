@@ -174,6 +174,19 @@ void ABuildingActor::SetTeam(uint8_t InTeam)
     }
 }
 
+void ABuildingActor::Die(FGameplayTag DeathReason, AController* EventInstigator, AActor* DamageCauser, const FGameplayEffectContextHandle* EffectContext)
+{
+    if (Natives::ABuildingActor_DieIndex < 0)
+    {
+        return;
+    }
+    // The tag goes by value in a register, as the game's callers pass it.
+    uint64_t DeathReasonBits = 0;
+    static_assert(sizeof(DeathReason) == sizeof(DeathReasonBits));
+    std::memcpy(&DeathReasonBits, &DeathReason, sizeof(DeathReasonBits));
+    CallVirtual<void>(this, Natives::ABuildingActor_DieIndex, DeathReasonBits, EventInstigator, DamageCauser, EffectContext);
+}
+
 bool ABuildingActor::CountsTowardStructureLimit() const
 {
     if (!Member_bFireBuiltAndDestroyedEvents.IsAvailable() || !Member_bPlayerPlaced.IsAvailable() || !Member_bDestroyed.IsAvailable())

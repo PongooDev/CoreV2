@@ -14130,7 +14130,9 @@ namespace
         {
             return -1;
         }
-        for (uintptr_t Move = Site - 3; Move + 0x10 >= Site; --Move)
+        // 9.00 (CL-6337466 0x177149D) loads this 0x1D bytes before the call, ahead of a branch: mov rcx, rsi; mov r12,
+        // [rsp+108h]; jnz; ...; mov dl, 1; call 0x176D8F0.
+        for (uintptr_t Move = Site - 3; Move + 0x20 >= Site; --Move)
         {
             if (Byte(Move) == 0x48 && Byte(Move + 1) == 0x8B && (Byte(Move + 2) & 0xF8) == 0xC8)
             {

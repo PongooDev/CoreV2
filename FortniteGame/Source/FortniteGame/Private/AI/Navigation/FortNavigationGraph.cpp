@@ -311,7 +311,11 @@ bool AFortNavigationGraph::ResolveNatives()
         // 3.5.1's (0x920050) opens with SCOPE_CYCLE_COUNTER(STAT_NavGraphFlowField), as the function after it does: the
         // flood fill keeps this in rdi and loads the path search into rcx, mov rdi, rcx; mov rcx, [rcx+618h].
         const uintptr_t Function = Finder::FunctionStart(Ref);
-        const uintptr_t Load = Function ? FindPattern(Function, Function + 0x40, { 0x48, 0x8B, 0xF9, 0x48, 0x8B, 0x89, -1, -1, 0x00, 0x00 }) : 0;
+        uintptr_t Load = Function ? FindPattern(Function, Function + 0x40, { 0x48, 0x8B, 0xF9, 0x48, 0x8B, 0x89, -1, -1, 0x00, 0x00 }) : 0;
+        // 9.00 (CL-6337466 0xEC5772) keeps this in rsi and the path search in rdi: mov rsi, rcx; mov rdi, [rcx+4F8h]. The
+        // function after it (0xEC5A82, 8.51 0xE398C2) opens the same way, with the same path search.
+        const uintptr_t RsiLoad = Function && !Load ? FindPattern(Function, Function + 0x40, { 0x48, 0x8B, 0xF1, 0x48, 0x8B, 0xB9, -1, -1, 0x00, 0x00 }) : 0;
+        Load = Load ? Load : RsiLoad;
         if (Load && !FloodFill)
         {
             FloodFill = Function;

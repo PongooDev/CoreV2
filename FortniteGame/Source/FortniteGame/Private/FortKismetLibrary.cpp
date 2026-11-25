@@ -480,6 +480,11 @@ void UFortKismetLibrary::K2_GiveBuildingResource(AFortPlayerController* Controll
 
 AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup)
 {
+    return K2_SpawnPickupInWorldWithClass(WorldContextObject, ItemDefinition, nullptr, NumberToSpawn, Position, Direction, OverrideMaxStackCount, bToss, bRandomRotation, bBlockedFromAutoPickup);
+}
+
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldWithClass(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup)
+{
     // bBlockedFromAutoPickup (5.30): 5.30's native is cut (the exec calls a return-0 stub) and its AFortPickup has no
     // member the flag lands on, so it's taken for the call's sake and left unused.
     (void)bBlockedFromAutoPickup;
@@ -491,8 +496,9 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     }
 
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
-    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
-    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    TArray<uint8_t> EntryStorage;
+    EntryStorage.AddZeroed(EntryStruct->GetStructureSize());
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.GetData());
     FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToSpawn, 0);
     // Battle Royale's supply drop (AthenaSupplyDrop_02) spawns its loot through here: its weapons come loaded (#85).
     if (AFortGameModeAthena::GetCurrent(World))
@@ -501,7 +507,7 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     }
 
     const FRotator SpawnRotation = Direction.Rotation();
-    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);
+    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation, nullptr, PickupClass);
     EntryStruct->DestroyStruct(ItemEntry);
 
     // 3.0 replicates the choice on the pickup (AFortPickup::bRandomRotation).
@@ -524,7 +530,7 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     }
 
     // 7.00+ Creative (#485): an Item Spawner's Minigame_Spawner_Component spawns its items here (its Spawn event, from
-    // the spawner's MinigameStartedDelegate and its SpawnTimer). Said in the log, so a report of a spawner that drops
+    // the spawner's MinigameStartedDelegate and its SpawnTimer; 9.00's through K2_SpawnPickupInWorldWithClass). Said in the log, so a report of a spawner that drops
     // nothing shows whether the server spawned the item.
     static UClass* const SpawnerComponentClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMinigameSpawnerComponent");
     if (SpawnerComponentClass && WorldContextObject->IsA(SpawnerComponentClass))
@@ -848,6 +854,27 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorldWithClass)
+{
+    // Every build with it (6.00 to 9.00) has these ten parameters; 9.00's exec (0x1B0FCD0) reads them and returns the
+    // shared return-0 stub's result.
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
+    P_GET_OBJECT(UClass, Z_Param_PickupClass);
+    P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
+    P_GET_STRUCT(FVector, Z_Param_Position);
+    P_GET_STRUCT(FVector, Z_Param_Direction);
+    P_GET_PROPERTY(UIntProperty, Z_Param_OverrideMaxStackCount);
+    P_GET_UBOOL(Z_Param_bToss);
+    P_GET_UBOOL(Z_Param_bRandomRotation);
+    P_GET_UBOOL(Z_Param_bBlockedFromAutoPickup);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorldWithClass(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_PickupClass, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction,
+        Z_Param_OverrideMaxStackCount, Z_Param_bToss, Z_Param_bRandomRotation, Z_Param_bBlockedFromAutoPickup);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_GiveBuildingResource)
 {
     // 6.21's exec (0x1553060): the controller, the EFortResourceType byte and the amount.
@@ -995,6 +1022,22 @@ void UFortKismetLibrary::HookNatives()
         else
         {
             Log::Info(L"Finder: UFortKismetLibrary::K2_GiveBuildingResource is native in this build");
+        }
+    }
+
+    // Only where the build's exec calls a stub: 8.51's (0x1A3B000) and 9.00's (0x1B0FCD0) return the shared return-0
+    // stub's result, so 9.00's Creative Item Spawner, which spawns through it, got no pickup.
+    if (UFunction* SpawnPickupWithClass = FindStaticFunction_K2_SpawnPickupInWorldWithClass())
+    {
+        uint8_t* NativeCall = Finder::ImplementationCall(SpawnPickupWithClass);
+        if (NativeCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)))
+        {
+            SpawnPickupWithClass->SetNativeFunc(&execK2_SpawnPickupInWorldWithClass);
+            Log::Info(L"Hook UFortKismetLibrary::K2_SpawnPickupInWorldWithClass: native");
+        }
+        else
+        {
+            Log::Info(L"Finder: UFortKismetLibrary::K2_SpawnPickupInWorldWithClass is native in this build");
         }
     }
 #endif

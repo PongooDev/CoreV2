@@ -5682,6 +5682,45 @@ namespace
                 }
             }
         }
+        if (!bService)
+        {
+            // 9.00 (CL-6337466 0xA8C4E5) asks the FMcpProfileOSSAccess for the service: mov rdi, [rdi+110h]; ...; mov rcx,
+            // rdi; call 0xA7E300, which returns the access's own service (+0x8) when it has one, else mov rcx, [rcx]
+            // (OnlineSubMcp); call 0x6F7760 (mov rax, [rcx+2A8h] ... mov rcx, [rcx+2B0h]), the getter 8.40 calls.
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = SendRequestNowEnd ? Finder::DecodedDirectCalls(SendRequestNow) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+            for (const auto& [Call, AccessGetter] : Calls)
+            {
+                if (bService || Call < SendRequestNow + 0x20 || Byte(Call - 3) != 0x48 || Byte(Call - 2) != 0x8B || (Byte(Call - 1) & 0xF8) != 0xC8)
+                {
+                    continue;
+                }
+                const uint8_t AccessRegister = Byte(Call - 1) & 0x07;
+                if (AccessRegister == 0x04 || AccessRegister == 0x05)
+                {
+                    continue;
+                }
+                const int32_t AccessModRm = 0x80 | (AccessRegister << 3) | AccessRegister;
+                uintptr_t AccessLoad = 0;
+                for (uintptr_t Load = FindInstruction(Call - 0x20, Call, { 0x48, 0x8B, AccessModRm }); Load; Load = FindInstruction(Load + 1, Call, { 0x48, 0x8B, AccessModRm }))
+                {
+                    AccessLoad = Load;
+                }
+                const uintptr_t SubsystemLoad = AccessLoad ? FindInstruction(AccessGetter, AccessGetter + 0x60, { 0x48, 0x8B, 0x09 }) : 0;
+                const uintptr_t GetterCall = SubsystemLoad ? FindRawCall(SubsystemLoad + 3, SubsystemLoad + 0x10) : 0;
+                const uintptr_t Getter = GetterCall ? Finder::RelativeTarget(GetterCall, 1, 5) : 0;
+                const uintptr_t Read = Getter ? FindInstruction(Getter, Getter + 0x10, { 0x48, 0x8B, 0x81 }) : 0;
+                const int32_t Object = Read ? *reinterpret_cast<const int32_t*>(Read + 3) : 0;
+                for (uintptr_t Candidate = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B }) : 0; Candidate && !bService; Candidate = FindInstruction(Candidate + 1, Read + 0x40, { 0x48, 0x8B }))
+                {
+                    if ((Byte(Candidate + 2) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Candidate + 3) == Object + 8)
+                    {
+                        ServiceObject = Object;
+                        McpAccess = *reinterpret_cast<const int32_t*>(AccessLoad + 3);
+                        bService = true;
+                    }
+                }
+            }
+        }
         Natives::UMcpProfileGroup_Mcp = McpAccess > 0 ? McpAccess : -1;
         if (McpAccess > 0)
         {

@@ -556,6 +556,24 @@ void AFortCreativePortalManager::ReleasePlayerPortal(AFortPlayerState* PlayerSta
         {
             continue;
         }
+        // The island's other players go back to the hub before it unloads (#664). The server half that did it is
+        // compiled out: 8.20 (CL-5625478) has ServerReleasePortal / ServerTeleportToPlaygroundLobbyIsland as nullsubs
+        // (slots 0x427 / 0x455), and nothing in the reset (ResetVolumeAndLevelRecord 0x102DB00) or the portal's
+        // OnUnloadPlotComplete (0xE1F790) moves a pawn, so they were left standing in the emptied island.
+        AFortVolume* Island = Portal->LinkedVolume;
+        AFortVolumeManager* VolumeManager = Island ? AFortVolumeManager::Get(Portal) : nullptr;
+        const TArray<AController*> Players = VolumeManager ? VolumeManager->GetAllPlayersInVolume(Island) : TArray<AController*>();
+        for (AController* Controller : Players)
+        {
+            AFortPlayerControllerAthena* Player = Controller && !Controller->IsPendingKill() ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)) : nullptr;
+            APlayerState* State = Player ? static_cast<APlayerState*>(Controller->PlayerState) : nullptr;
+            if (!State || State == reinterpret_cast<APlayerState*>(PlayerState) || State->IsPendingKill())
+            {
+                continue;
+            }
+            Log::Info(L"Creative: {} leaves the island {} for the hub: its owner gave up the rift (left the game or released it)", State->GetPlayerName().ToStdString(), Island->GetName().ToStdString());
+            Player->ServerTeleportToPlaygroundLobbyIsland_Implementation();
+        }
         if (UFortLevelSaveComponent* SaveComponent = Portal->GetLevelSaveComponent())
         {
             SaveComponent->UnloadPlotForUser();

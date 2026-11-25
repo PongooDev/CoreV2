@@ -123,9 +123,9 @@ void AFortVolumeManager::ResaveActor(AActor* Actor)
     }
 }
 
-std::vector<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume* Volume)
+TArray<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume* Volume)
 {
-    std::vector<AController*> Players;
+    TArray<AController*> Players;
     UFunction* Function = FindStaticFunction_GetAllPlayersInVolume();
     Reflection::FParams Params(Function, true);
     if (!Function || !Volume || !Params.Set(L"Volume", Volume) || !Params.Call(this))
@@ -136,7 +136,7 @@ std::vector<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume*
     {
         for (int32_t Index = 0; Index < Result->Num(); ++Index)
         {
-            Players.push_back((*Result)[Index]);
+            Players.Add((*Result)[Index]);
         }
     }
     return Players;

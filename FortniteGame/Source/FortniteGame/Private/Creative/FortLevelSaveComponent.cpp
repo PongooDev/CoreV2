@@ -308,7 +308,7 @@ void UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete(const FMcp
     // too, as 7.20's did: they are re-checked against the permissions the island has.
     AFortVolume* Island = GetVolume();
     AFortVolumeManager* Manager = Island ? AFortVolumeManager::Get(this) : nullptr;
-    const std::vector<AController*> Players = Manager ? Manager->GetAllPlayersInVolume(Island) : std::vector<AController*>();
+    const TArray<AController*> Players = Manager ? Manager->GetAllPlayersInVolume(Island) : TArray<AController*>();
     std::wstring Told;
     int32_t Count = 0;
     for (AController* Controller : Players)

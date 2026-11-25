@@ -1692,6 +1692,7 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         // 0xF88760) reads the plot and its owner from the component and takes bCheckin second (movzx r13d, dl). The first
         // movzx of an argument byte in its prologue tells which.
         const auto* Code = reinterpret_cast<const uint8_t*>(CloudSave);
+        bool bArgumentByteFound = false;
         for (int32_t At = 1; At + 3 <= 0x40; ++At)
         {
             if (Code[At] != 0x0F || Code[At + 1] != 0xB6 || (Code[At + 2] & 0xC0) != 0xC0)
@@ -1703,7 +1704,57 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
             if (Source == 2 || Source == 9)
             {
                 Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly = Source == 2;
+                bArgumentByteFound = true;
                 break;
+            }
+        }
+        // Neither: 7.30 keeps its ESaveOperation from edx (mov r13d, edx), 7.40+ from r8d (mov r12d, r8d) with the
+        // buffer in rdx. The 32-bit mov (no REX.W) of an argument register into another tells which.
+        for (int32_t At = 1; !bArgumentByteFound && At + 2 <= 0x40; ++At)
+        {
+            const uint8_t Rex = (Code[At - 1] & 0xF0) == 0x40 ? Code[At - 1] : 0;
+            if (Code[At] != 0x8B || (Code[At + 1] & 0xC0) != 0xC0 || (Rex & 0x08))
+            {
+                continue;
+            }
+            const int32_t Source = (Code[At + 1] & 0x07) | ((Rex & 0x01) << 3);
+            if (Source == 2 || Source == 8)
+            {
+                Natives::UFortLevelSaveComponent_CloudSaveTakesOperation = Source == 2;
+                Natives::UFortLevelSaveComponent_CloudSaveTakesData = Source == 8;
+                break;
+            }
+        }
+        // 7.40+: the record's writer is the call just before the save in its callers (8.20: 0x11EDBAF in the periodic
+        // save, 0x11D5001 in EndPlay, both 0x133EC80).
+        if (Natives::UFortLevelSaveComponent_CloudSaveTakesData)
+        {
+            TMap<uintptr_t, int32_t> Writers;
+            for (const uintptr_t Site : Finder::CallsTo(CloudSave, false))
+            {
+                const uintptr_t Caller = Finder::FunctionStart(Site);
+                uintptr_t Previous = 0;
+                uintptr_t PreviousSite = 0;
+                for (const auto& [CallSite, Target] : Caller ? Finder::DecodedDirectCalls(Caller) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+                {
+                    if (CallSite < Site && CallSite > PreviousSite)
+                    {
+                        PreviousSite = CallSite;
+                        Previous = Target;
+                    }
+                }
+                if (Previous && Site - PreviousSite <= 0x40)
+                {
+                    ++Writers.FindOrAdd(Previous);
+                }
+            }
+            for (const auto& Pair : Writers)
+            {
+                if (Pair.Value >= 2)
+                {
+                    Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer = reinterpret_cast<decltype(Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer)>(Pair.Key);
+                    break;
+                }
             }
         }
         std::set<uintptr_t> KeyFormatters;
@@ -1845,11 +1896,15 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     }
 
     const auto Address = [](const void* Function) { return Function ? reinterpret_cast<uintptr_t>(Function) - Finder::ImageBase() : 0; };
+    const std::wstring CloudSaveShape = Natives::UFortLevelSaveComponent_CloudSaveTakesData
+        ? std::format(L"takes the written record and its ESaveOperation; the record's writer 0x{:X}", Address(reinterpret_cast<const void*>(Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer)))
+        : Natives::UFortLevelSaveComponent_CloudSaveTakesOperation ? L"takes its ESaveOperation"
+        : Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly ? L"takes bCheckin only" : L"takes the plot, its owner and bCheckin";
     Log::Info(L"Finder: Creative's island record: ULevelSaveRecord::ReadFromBuffer 0x{:X}, UFortLevelSaveComponent's cloud save 0x{:X} ({}), USidecarSys's meta setter 0x{:X}",
         Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_ReadFromBuffer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_CloudSave)),
-        Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly ? L"takes bCheckin only" : L"takes the plot, its owner and bCheckin",
-        Address(reinterpret_cast<const void*>(Natives::USidecarSys_SetMeta)));
-    if (!Natives::ULevelSaveRecord_ReadFromBuffer || !Natives::UFortLevelSaveComponent_CloudSave || !Natives::USidecarSys_SetMeta)
+        CloudSaveShape, Address(reinterpret_cast<const void*>(Natives::USidecarSys_SetMeta)));
+    if (!Natives::ULevelSaveRecord_ReadFromBuffer || !Natives::UFortLevelSaveComponent_CloudSave || !Natives::USidecarSys_SetMeta
+        || (Natives::UFortLevelSaveComponent_CloudSaveTakesData && !Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer))
     {
         Log::Error(L"Finder: Creative's island record is missing a native, so islands load or save incompletely (see the line above)");
     }

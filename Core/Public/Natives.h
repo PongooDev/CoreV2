@@ -1327,6 +1327,21 @@ namespace Natives
     // 7.10 (CL-4667333): the cloud save reads the plot and its owner from the component and takes only bCheckin:
     // bool (UObject* This, bool bCheckin).
     inline bool UFortLevelSaveComponent_CloudSaveTakesCheckinOnly = false;
+    // 7.30 (CL-4834550, 0x1096430): bool (UObject* This, ESaveOperation Operation), the plot and its owner the
+    // component's (mov r13d, edx). 7.40 (CL-5046157, 0x10BE800) to 9.00 take the record already written out:
+    // bool (UObject* This, TArray<uint8>* Data, ESaveOperation Operation) (mov r12d, r8d; 8.20 0x11EEC30, 8.50 0x135B850,
+    // 9.00 0x13FD4A0), the buffer from ULevelSaveBaseComponent_SaveLevelRecordToBuffer (8.20 0x133EC80: false without a
+    // valid record), as the periodic save (8.20 0x11EDB60) and EndPlay (0x11D4F40) call them.
+    namespace ESaveOperation
+    {
+        inline constexpr uint32_t Save = 0;
+        inline constexpr uint32_t SaveAndCheckIn = 1;
+        // EndPlay's for a volume in a game (ReadOnly): the file checked in unsaved ("Unlocking level record").
+        inline constexpr uint32_t CheckIn = 2;
+    }
+    inline bool UFortLevelSaveComponent_CloudSaveTakesOperation = false;
+    inline bool UFortLevelSaveComponent_CloudSaveTakesData = false;
+    inline bool (*ULevelSaveBaseComponent_SaveLevelRecordToBuffer)(UObject* This, TArray<uint8_t>& Data) = nullptr;
     inline void (*USidecarSys_SetMeta)(UObject* This, const FString& AppName, const FString& FilePath, const FString& Key, const FString& Value) = nullptr;
     // From 7.00: AFortPlayerControllerAthena::ServerLoadPlotForPortal_Implementation (0xC65E80, slot 0x3E6), the game's
     // own load of a plot into a rift: the call Core redirects to AFortAthenaCreativePortal::LoadPlotForUser is in it.

@@ -735,21 +735,51 @@ void UFortLevelSaveComponent::CheckInLoadedPlot()
     const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
     const std::wstring File = GetCloudSaveFileName().ToStdString();
     StopPeriodicSaveTimer();
-    // The last save, with the checkin: the game's own cloud save as its EndPlay calls it (0xF41600, bCheckin true).
-    if (Natives::UFortLevelSaveComponent_CloudSave && bIsLoaded)
-    {
-        if (Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly)
-        {
-            // 7.10: the plot and its owner are the component's own (LoadedPlot, AccountIdOfOwner).
-            reinterpret_cast<bool (*)(UObject*, bool)>(Natives::UFortLevelSaveComponent_CloudSave)(this, true);
-        }
-        else
-        {
-            Natives::UFortLevelSaveComponent_CloudSave(this, Plot, Owner, true);
-        }
-    }
+    // The last save, with the checkin: the game's own cloud save as its EndPlay calls it (7.00 0xF41600, bCheckin true;
+    // 8.20 0x11D4F40: CheckIn alone while the volume is in a game, else SaveAndCheckIn).
+    AFortVolume* Volume = GetVolume();
+    const uint32_t Operation = Volume && Volume->VolumeState == EVolumeState::ReadOnly ? Natives::ESaveOperation::CheckIn : Natives::ESaveOperation::SaveAndCheckIn;
+    const bool bSaved = bIsLoaded && SaveToCloudStorage(Operation);
     Log::Info(L"Creative: {}'s island {} unloads{}", Owner.ToString().ToStdString(), File,
-        bIsLoaded ? (Natives::UFortLevelSaveComponent_CloudSave ? L": saved and checked in" : L" unsaved: the cloud save wasn't found") : L" before it loaded: nothing to save");
+        !bIsLoaded ? L" before it loaded: nothing to save" : !bSaved ? L" unsaved: the cloud save or the record's writer wasn't found, or the record isn't valid"
+        : Operation == Natives::ESaveOperation::CheckIn ? L": checked in unsaved (its volume is in a game)" : L": saved and checked in");
+#endif
+}
+
+bool UFortLevelSaveComponent::SaveToCloudStorage(uint32_t Operation)
+{
+#if WITH_SERVER_CODE
+    if (!Natives::UFortLevelSaveComponent_CloudSave)
+    {
+        return false;
+    }
+    if (Natives::UFortLevelSaveComponent_CloudSaveTakesData)
+    {
+        TArray<uint8_t> Data;
+        if (!Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer || !Natives::ULevelSaveBaseComponent_SaveLevelRecordToBuffer(this, Data))
+        {
+            return false;
+        }
+        reinterpret_cast<bool (*)(UObject*, TArray<uint8_t>*, uint32_t)>(Natives::UFortLevelSaveComponent_CloudSave)(this, &Data, Operation);
+        return true;
+    }
+    if (Natives::UFortLevelSaveComponent_CloudSaveTakesOperation)
+    {
+        reinterpret_cast<bool (*)(UObject*, uint32_t)>(Natives::UFortLevelSaveComponent_CloudSave)(this, Operation);
+        return true;
+    }
+    const bool bCheckin = Operation != Natives::ESaveOperation::Save;
+    if (Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly)
+    {
+        // 7.10/7.20: the plot and its owner are the component's own (LoadedPlot, AccountIdOfOwner).
+        reinterpret_cast<bool (*)(UObject*, bool)>(Natives::UFortLevelSaveComponent_CloudSave)(this, bCheckin);
+        return true;
+    }
+    const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
+    Natives::UFortLevelSaveComponent_CloudSave(this, LoadedPlot, Owner, bCheckin);
+    return true;
+#else
+    return false;
 #endif
 }
 

@@ -336,17 +336,11 @@ namespace
         Written.AddUniqueDynamic(Key, IslandSavedHandler->GetFName());
         PendingSaves[Key] = std::move(Pending);
         const bool bSaving = Component->IsAutoSaving();
-        if (!bSaving)
+        if (!bSaving && !Component->SaveToCloudStorage(Natives::ESaveOperation::Save))
         {
-            if (Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly)
-            {
-                reinterpret_cast<bool (*)(UObject*, bool)>(Natives::UFortLevelSaveComponent_CloudSave)(Key, false);
-            }
-            else
-            {
-                const FUniqueNetIdRepl& Owner = Component->AccountIdOfOwner;
-                Natives::UFortLevelSaveComponent_CloudSave(Key, Component->LoadedPlot, Owner, false);
-            }
+            PendingSaves.erase(Key);
+            Written.RemoveDynamic(Key, IslandSavedHandler->GetFName());
+            return false;
         }
         return true;
     }

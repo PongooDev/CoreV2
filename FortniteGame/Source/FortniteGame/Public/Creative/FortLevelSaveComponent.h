@@ -235,6 +235,10 @@ public:
     // Core's (PongooDev/CoreV2#488): the checkpoint's date from the DSS into LastCheckpointDateUtc, as the island loads,
     // so the island menu offers Restore for a backup made in an earlier match.
     void RefreshCheckpointDate();
+    // The game's own cloud save (Natives::UFortLevelSaveComponent_CloudSave) in the build's shape: Operation is an
+    // ESaveOperation (Natives.h), which builds before 7.30 take as bCheckin. 7.40+ get the record written out first, as
+    // their own callers do; false when there is no valid record to write (nothing is saved then).
+    bool SaveToCloudStorage(uint32_t Operation);
 
     AFortVolume* GetVolume() const;
     // The volume's own component (one per island space).

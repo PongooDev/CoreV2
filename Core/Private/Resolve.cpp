@@ -15227,6 +15227,73 @@ std::vector<uint8_t*> Finder::BarrierPawnDeathSpawnPickupCalls(UFunction* SpawnP
     return Calls;
 }
 
+namespace
+{
+    // UFortGadgetItemDefinition::ApplyGadgetData / RemoveGadgetData, by their log line. 9.00 (CL-6337466) drops both
+    // lines; the functions are still what the definition's OnItemInstanceAdded and OnItemInstanceRemoved (adjacent
+    // slots, 9.00 0x73 0x1508C00 calls 0x14F62B0, 0x74 0x1508F80 jumps to 0x150B8D0) reach: the only two functions those
+    // slots call or jump to that load GadgetPriority into edx (mov edx, [reg+GadgetPriority]).
+    uintptr_t GadgetDataFunction(const wchar_t* Text, bool bRemove)
+    {
+        if (const uintptr_t Function = FunctionOf(Text))
+        {
+            return Function;
+        }
+        static bool bSearched = false;
+        static uintptr_t Found[2] = {};
+        if (bSearched)
+        {
+            return Found[bRemove ? 1 : 0];
+        }
+        bSearched = true;
+        UClass* Class = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortGadgetItemDefinition");
+        const UProperty* PriorityProperty = Class ? Class->FindPropertyByName(FName(L"GadgetPriority", FNAME_Find)) : nullptr;
+        const int32_t PriorityOffset = PriorityProperty ? PriorityProperty->GetOffset_ForInternal() : -1;
+        void** VTable = CdoVTable(L"/Script/FortniteGame.FortGadgetItemDefinition");
+        if (PriorityOffset <= 0 || !VTable)
+        {
+            return 0;
+        }
+        const auto LoadsPriority = [PriorityOffset](uintptr_t Function)
+        {
+            const uintptr_t End = Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+            for (uintptr_t At = Function; End && End - Function < 0x1000 && At + 6 <= End; ++At)
+            {
+                const uint8_t ModRm = Byte(At + 1);
+                if (Byte(At) == 0x8B && (ModRm & 0xF8) == 0x90 && (ModRm & 7) != 4 && *reinterpret_cast<const int32_t*>(At + 2) == PriorityOffset)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::vector<std::pair<int32_t, uintptr_t>> Reached;
+        for (int32_t Index = 0x40; Index < 0x100; ++Index)
+        {
+            const uintptr_t Entry = VTableEntry(VTable, Index);
+            const uintptr_t EntryEnd = Entry && !Finder::IsStubFunction(Entry) ? Finder::FunctionEnd(Entry) : 0;
+            uintptr_t Target = 0;
+            for (uintptr_t At = Entry; EntryEnd && EntryEnd - Entry < 0x400 && At + 5 <= EntryEnd && !Target; ++At)
+            {
+                const uintptr_t Candidate = Byte(At) == 0xE8 || Byte(At) == 0xE9 ? Finder::RelativeTarget(At, 1, 5) : 0;
+                Target = IsInText(Candidate) && LoadsPriority(Candidate) ? Candidate : 0;
+            }
+            if (Target)
+            {
+                Reached.emplace_back(Index, Target);
+            }
+        }
+        if (Reached.size() == 2 && Reached[1].first == Reached[0].first + 1 && Reached[0].second != Reached[1].second)
+        {
+            Found[0] = Reached[0].second;
+            Found[1] = Reached[1].second;
+            Log::Info(L"Finder: UFortGadgetItemDefinition::ApplyGadgetData 0x{:X} (slot 0x{:X}'s), RemoveGadgetData 0x{:X} (slot 0x{:X}'s)",
+                Found[0] - Finder::ImageBase(), Reached[0].first, Found[1] - Finder::ImageBase(), Reached[1].first);
+        }
+        return Found[bRemove ? 1 : 0];
+    }
+}
+
 Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorityOffset, ptrdiff_t AnimBPOverrideOffset, ptrdiff_t FootstepBankOverrideOffset)
 {
     // UFortGadgetItemDefinition::ApplyGadgetData (6.21 0x1021AA0) ends, on the authority and with the controller's pawn,
@@ -15238,7 +15305,7 @@ Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorit
     FGadgetOverrideCalls Calls;
     const auto Find = [&](const wchar_t* Text, uint8_t*& Anim, uint8_t*& Footstep)
     {
-        const uintptr_t Function = FunctionOf(Text);
+        const uintptr_t Function = GadgetDataFunction(Text, &Anim == &Calls.PopAnim);
         if (!Function)
         {
             return;
@@ -15254,6 +15321,26 @@ Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorit
                     && *reinterpret_cast<const int32_t*>(At + 2) == static_cast<int32_t>(GadgetPriorityOffset);
             }
             if (bPriority && Finder::IsStubFunction(Target))
+            {
+                Sites.push_back(Site);
+            }
+        }
+        // 9.00 (CL-6337466) tail-jumps to the footstep pop (0x150BBC2: mov edx, [rdi+870h]; ...; pop rbx; jmp), its
+        // priority load 0x17 bytes before the jump.
+        const uintptr_t FunctionEnd = Sites.size() == 1 ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Site = Function; FunctionEnd && Site + 5 <= FunctionEnd; ++Site)
+        {
+            if (Byte(Site) != 0xE9 || Site < Function + 0x20 || !Finder::IsStubFunction(Finder::RelativeTarget(Site, 1, 5)))
+            {
+                continue;
+            }
+            bool bPriority = false;
+            for (uintptr_t At = Site - 0x20; At + 6 <= Site && !bPriority; ++At)
+            {
+                bPriority = Byte(At) == 0x8B && (Byte(At + 1) & 0xF8) == 0x90 && (Byte(At + 1) & 7) != 4
+                    && *reinterpret_cast<const int32_t*>(At + 2) == static_cast<int32_t>(GadgetPriorityOffset);
+            }
+            if (bPriority && Site > Sites.front())
             {
                 Sites.push_back(Site);
             }
@@ -15301,7 +15388,7 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
     // server code: lea rax, <the shared empty function> (0x13F3CC2), the only one in the function.
     FGadgetTrackedAttributeBind Bind;
     const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
-    const uintptr_t ApplyGadgetData = FunctionOf(L"UFortGadgetItemDefinition::ApplyGadgetData - Applying Gadget Data for Gadget Item [%s]!");
+    const uintptr_t ApplyGadgetData = GadgetDataFunction(L"UFortGadgetItemDefinition::ApplyGadgetData - Applying Gadget Data for Gadget Item [%s]!", false);
     if (!SharedEmpty || !ApplyGadgetData || TrackedAttributesOffset <= 0)
     {
         Log::Error(L"Finder: UFortGadgetItemDefinition::ApplyGadgetData not found, so a gadget's tracked attributes aren't kept");

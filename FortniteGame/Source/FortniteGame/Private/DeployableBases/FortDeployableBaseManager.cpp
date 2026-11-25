@@ -70,8 +70,9 @@ namespace
         DefineUnrealClass(AFortMissionStormShield, FortniteGame)
 
     public:
-        DefineUProperty(float, Radius)
-        DefineUProperty(float, InitialRadius)
+        // 9.00 drops both (ReplicatedRadius and RadiusGrowthData instead): the log reads them as 0 there.
+        DefineOptionalUProperty(float, Radius)
+        DefineOptionalUProperty(float, InitialRadius)
     };
 
     const UProperty* FindProperty(const UObject* Object, const wchar_t* Name, EClassCastFlags Kind)

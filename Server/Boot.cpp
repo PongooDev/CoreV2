@@ -33,6 +33,8 @@
 #include "Athena/Mutators/FortAthenaMutator_Goose.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "FortMissionTimerComponent.h"
+#include "Missions/FortMissionStormSafeZone.h"
+#include "Missions/FortMissionStormShield.h"
 #include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortOctopusVehicle.h"
 #include "Athena/FortGameModeAthena.h"
@@ -444,8 +446,10 @@ static void InstallHooks()
         // The supply drop's stripped pickup natives: Battle Royale's crates and Supply Llamas, and Save the World's Frostnite
         // supply drops (EndlessModeSupplyDrop_C is an AthenaSupplyDrop_C).
         AFortAthenaSupplyDrop::HookNatives();
-        // 9.00's Wargames: the Time Cheats' wave timer (#655).
+        // 9.00's Wargames: the Time Cheats' wave timer and the Safety Zone's generator bubbles (#655).
         UFortMissionTimerComponent::HookNatives();
+        AFortMissionStormShield::HookNatives();
+        AFortMissionStormSafeZone::HookNatives();
         if (Configuration::Get().IsBattleRoyale())
         {
             // The Athena AI controllers' sight (#605), before the first one is made.

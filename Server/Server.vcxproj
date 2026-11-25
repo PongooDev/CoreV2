@@ -459,6 +459,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMission.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionForceSuccessParams.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInfo.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionStormSafeZone.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionStormShield.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionManager.h" />
@@ -735,6 +737,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMission.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionForceSuccessParams.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionInfo.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionStormSafeZone.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionStormShield.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortNewPlayerHasBegunPlayParams.cpp" />

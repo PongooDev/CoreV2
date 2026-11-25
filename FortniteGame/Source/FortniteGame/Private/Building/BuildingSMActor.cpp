@@ -18,6 +18,7 @@
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "UObject/UnrealType.h"
 #include "Engine/World.h"
@@ -233,6 +234,23 @@ void ABuildingSMActor::OnQuotaNotChosen()
     }
 }
 
+#if WITH_SERVER_CODE
+namespace
+{
+    // The harvest's Collect event for the materials the hit gained ("Harvest Stone building resources with a pickaxe",
+    // collect_building_resources_*: Collect with the material's Building.Resource.* tag). The item gain itself sends no
+    // Collect for building materials (UFortItemCollectedParams::SendItemCollected), so a pickup or a give doesn't count
+    // (#652).
+    void SendHarvestStatEvent(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ResourceItem, int32_t ResourceCount)
+    {
+        if (UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager(ESubGame::GetInvalid()) : nullptr)
+        {
+            QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCollect(), ResourceItem, ResourceCount);
+        }
+    }
+}
+#endif
+
 void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot)
 {
 #if WITH_SERVER_CODE
@@ -381,6 +399,7 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
             PlayerState->ModifyStat(EFortReplicatedStat{ StatType }, ResourceCount, ResourceCount, GetCentroid());
         }
         PlayerController->ClientReportDamagedResourceBuilding(this, Resource, ResourceCount, bDestroyed, bJustHitWeakspot);
+        SendHarvestStatEvent(PlayerController, ResourceItem, ResourceCount);
     }
     else if (ResourceCount > 0)
     {
@@ -403,6 +422,7 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
             const FVector Direction = UKismetMathLibrary::RandomUnitVector();
             Pickup->SetPickupTarget(InstigatorPawn, AFortPickup::GetRandomFlyTime(), Direction, true);
             PlayerController->ClientReportDamagedResourceBuilding(this, Resource, ResourceCount, bDestroyed, bJustHitWeakspot);
+            SendHarvestStatEvent(PlayerController, ResourceItem, ResourceCount);
         }
         EntryStruct->DestroyStruct(Entry);
     }

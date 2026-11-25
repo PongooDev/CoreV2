@@ -5,6 +5,7 @@
 #include "Player/FortPlayerController.h"
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -36,6 +37,14 @@ void UFortItemCollectedParams::SendItemCollected(AFortPlayerController* Collecte
     // Royale's challenges count it there (6.00's "Pickup a Legendary Item in different matches", collect_legendary_rarity_item:
     // Collect with the item's Rarity.SuperRare; Season 3's collect_building_resources_*). It went to Save the World's
     // quest manager in every mode, so no Battle Royale Collect objective ever moved (#407).
+    // A building material's Collect is the harvest's: ABuildingSMActor::AttemptSpawnResources sends it as the pickaxe
+    // hit gains the materials. Materials picked up or given ("Harvest Stone building resources with a pickaxe",
+    // collect_building_resources_stone: Collect, target Building.Resource.Stone, which StoneItemData's own tags carry)
+    // don't count (#652).
+    if (Cast<UFortResourceItemDefinition>(CollectedItemDefinition))
+    {
+        return;
+    }
     if (UFortQuestManager* QuestManager = CollectedBy->GetQuestManager(ESubGame::GetInvalid()))
     {
         QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCollect(), CollectedItemDefinition, AmountCollected);

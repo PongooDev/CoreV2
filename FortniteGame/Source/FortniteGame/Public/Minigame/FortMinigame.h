@@ -126,6 +126,17 @@ public:
     FFortMinigamePlayerBucketStats& FindOrAddPlayerBucketStats(int32_t BucketIndex);
 };
 
+// 8.30+: the players a game's stats and end conditions group (a team, or one player each): AFortMinigame::PlayerBuckets,
+// whose index the per-bucket stats and a Team-scope end condition count by.
+struct FMinigamePlayerBucket
+{
+    DefineUnrealStruct(FMinigamePlayerBucket, FortniteGame)
+
+public:
+    DefineUProperty(uint8_t, InitialTeamId)
+    DefineUStructArrayProperty(FUniqueNetIdRepl, PlayerIds)
+};
+
 // What a game's warmup does with its players (7.10: Stasis, Respawn; the island games' Minigame_PlayerCreated has
 // Respawn and a 6 s WarmupDuration).
 class EFortMinigameWarmupType
@@ -306,6 +317,21 @@ public:
     void NotifyStatEvent(uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
         const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count);
     int32_t GetBucketForPlayerState(const AFortPlayerState* PlayerState) const;
+    // 8.30+ AssignPlayersToBuckets (8.51 CL-6165369 0x147F140, from SetMinigameState's Setup at 0x14A62C3; 8.30 0x13D8FE0)
+    // walks the players (in random order for a team game: GetRandomlyOrderedPlayers 0x1490490) and puts none of them in
+    // a bucket: the stripped add left only the team read and the "No PlayerState" warnings. Every bucket kept no
+    // PlayerIds, GetBucketForPlayerState gave -1 for every player, AssignTeamsFromBuckets (0x147F380) moved nobody, and a
+    // Team-scope end condition ("Creature Eliminations To Win", the settings machine's UpdateEndConditions) never
+    // counted. AddMinigamePlayer (0x147C330) lost the same add for a player joining a game under way: it picks the
+    // bucket (Core's name FindOrAddBucket, 0x147EFE0: by team when NumTeams is -1, the smallest for a team game, else the first
+    // empty one, else a new one) and drops it. Core's restore runs the build's bodies, then adds each player's id to
+    // the bucket FindOrAddBucket picks.
+    DefineUProperty(int32_t, NumTeams)
+    DefineUProperty(bool, bTeamMinigame)
+    DefineUStructArrayProperty(FMinigamePlayerBucket, PlayerBuckets)
+    void AssignPlayersToBuckets();
+    int32_t FindOrAddBucket(AFortPlayerState* PlayerState);
+    void AddPlayerToBucket(const AFortPlayerState* PlayerState, int32_t BucketIndex);
     DECLARE_FUNCTION(execHandleStateChangedForTransition);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
@@ -331,6 +357,12 @@ private:
     // NotifyStatEventCall instead.
     static inline void (*NotifyStatEventOG)(AFortMinigame* This, uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
         const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count) = nullptr;
+    // The build's AssignPlayersToBuckets and FindOrAddBucket bodies, and the calls of SetMinigameState and
+    // AddMinigamePlayer that come to Core's.
+    static inline void (*AssignPlayersToBucketsOG)(AFortMinigame* This) = nullptr;
+    static inline int32_t (*FindOrAddBucketOG)(AFortMinigame* This, AFortPlayerState* PlayerState) = nullptr;
+    static void AssignPlayersToBucketsCall(AFortMinigame* This);
+    static int32_t FindOrAddBucketCall(AFortMinigame* This, AFortPlayerState* PlayerState);
     static void NotifyStatEventCall(AFortMinigame* This, uint8_t Type, UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& TargetTags,
         const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count);
     // AdvanceState once Transitioning has no player still teleporting (or bForce, the failsafe's).

@@ -34,6 +34,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <unordered_map>
 #include <utility>
@@ -447,6 +448,80 @@ DEFINE_FUNCTION(AFortMinigame::execAddStatToPlayerBucket)
     P_NATIVE_BEGIN;
     static_cast<AFortMinigame*>(Context)->AddStatToPlayerBucket(Z_Param_BucketIndex, Z_Param_InFilter, Z_Param_InValue);
     P_NATIVE_END;
+}
+
+void AFortMinigame::AddPlayerToBucket(const AFortPlayerState* PlayerState, int32_t BucketIndex)
+{
+    TStructArray<FMinigamePlayerBucket>& Buckets = PlayerBuckets;
+    if (!PlayerState || BucketIndex < 0 || BucketIndex >= Buckets.Num() || !FUniqueNetIdRepl::StaticStruct())
+    {
+        return;
+    }
+    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+    if (!PlayerId.IsValid())
+    {
+        return;
+    }
+    const FString Id = PlayerId.ToString();
+    TStructArray<FUniqueNetIdRepl>& PlayerIds = Buckets[BucketIndex].PlayerIds;
+    for (int32_t Index = 0; Index < PlayerIds.Num(); ++Index)
+    {
+        if (PlayerIds[Index].IsValid() && std::wcscmp(*PlayerIds[Index].ToString(), *Id) == 0)
+        {
+            return;
+        }
+    }
+    FUniqueNetIdRepl::StaticStruct()->CopyScriptStruct(&PlayerIds.AddDefaulted(), &PlayerId);
+}
+
+int32_t AFortMinigame::FindOrAddBucket(AFortPlayerState* PlayerState)
+{
+    return FindOrAddBucketOG(this, PlayerState);
+}
+
+void AFortMinigame::AssignPlayersToBuckets()
+{
+    AssignPlayersToBucketsOG(this);
+#if WITH_SERVER_CODE
+    TArray<AFortPlayerState*> Players;
+    FMinigamePlayers& Array = PlayerArray;
+    TStructArray<FMinigamePlayer>& Entries = Array.Players;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        if (AFortPlayerState* PlayerState = PlayerStateOf(Entries[Index]))
+        {
+            Players.Add(PlayerState);
+        }
+    }
+    // A team game (NumTeams set, bTeamMinigame) deals its players to the teams in random order, as the body's
+    // GetRandomlyOrderedPlayers does.
+    if (NumTeams != -1 && bTeamMinigame)
+    {
+        for (int32_t Index = Players.Num() - 1; Index > 0; --Index)
+        {
+            const int32_t Other = std::rand() % (Index + 1);
+            AFortPlayerState* const Moved = Players[Index];
+            Players[Index] = Players[Other];
+            Players[Other] = Moved;
+        }
+    }
+    for (AFortPlayerState* PlayerState : Players)
+    {
+        AddPlayerToBucket(PlayerState, FindOrAddBucket(PlayerState));
+    }
+#endif
+}
+
+void AFortMinigame::AssignPlayersToBucketsCall(AFortMinigame* This)
+{
+    This->AssignPlayersToBuckets();
+}
+
+int32_t AFortMinigame::FindOrAddBucketCall(AFortMinigame* This, AFortPlayerState* PlayerState)
+{
+    const int32_t BucketIndex = This->FindOrAddBucket(PlayerState);
+    This->AddPlayerToBucket(PlayerState, BucketIndex);
+    return BucketIndex;
 }
 
 int32_t AFortMinigame::GetBucketForPlayerState(const AFortPlayerState* PlayerState) const
@@ -1749,6 +1824,45 @@ void AFortMinigame::HookNatives()
         {
             Log::Error(L"Finder: AFortMinigame::NotifyStatEvent's adds not restored (body {}, {} calls), so Creative stat events (creature eliminations, score) count nothing",
                 Body ? L"found" : L"not found", Callers.size());
+        }
+
+        // The players' buckets went with the same stripping (8.30+): AssignPlayersToBuckets' body (found by its own
+        // warning) reads no PlayerBuckets, and its one caller is SetMinigameState's Setup. FindOrAddBucket is
+        // AddMinigamePlayer's call that reads NumTeams and PlayerBuckets' Num.
+        const auto AssignRefs = NotifyStatEventOG && Member_NumTeams.IsAvailable() && Member_bTeamMinigame.IsAvailable() && Member_PlayerBuckets.IsAvailable()
+            && FMinigamePlayerBucket::StaticStruct() && Member_PlayerArray.IsAvailable() ? Finder::StringRefs(L"AFortMinigame::AssignPlayersToBuckets - No World!") : decltype(Finder::StringRefs(L""))();
+        const uintptr_t Assign = AssignRefs.size() == 1 ? Finder::FunctionStart(AssignRefs[0]) : 0;
+        const int32_t BucketsOffset = Member_PlayerBuckets.IsAvailable() ? static_cast<int32_t>(Member_PlayerBuckets.GetOffsetChecked()) : -1;
+        const int32_t NumTeamsOffset = Member_NumTeams.IsAvailable() ? static_cast<int32_t>(Member_NumTeams.GetOffsetChecked()) : -1;
+        const bool bAssignStripped = Assign && !Finder::ReadsMemberAt(Assign, BucketsOffset) && !Finder::ReadsMemberAt(Assign, BucketsOffset + 8);
+        const auto AssignCalls = bAssignStripped ? Finder::CallsTo(Assign, false) : decltype(Finder::CallsTo(0, false))();
+        uint8_t* const AddCall = bAssignStripped && FindStaticFunction_AddMinigamePlayer() ? Finder::ImplementationCall(FindStaticFunction_AddMinigamePlayer()) : nullptr;
+        const uintptr_t AddBody = AddCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(AddCall), 1, 5) : 0;
+        uintptr_t FindOrAdd = 0;
+        uintptr_t FindOrAddCall = 0;
+        int32_t FindOrAddMatches = 0;
+        for (const auto& [Call, Target] : AddBody ? Finder::DecodedDirectCalls(AddBody) : decltype(Finder::DecodedDirectCalls(0))())
+        {
+            if (Target != FindOrAdd && Finder::ReadsMemberAt(Target, NumTeamsOffset) && Finder::ReadsMemberAt(Target, BucketsOffset + 8))
+            {
+                FindOrAdd = Target;
+                FindOrAddCall = Call;
+                ++FindOrAddMatches;
+            }
+        }
+        if (AssignCalls.size() == 1 && FindOrAddMatches == 1)
+        {
+            AssignPlayersToBucketsOG = reinterpret_cast<decltype(AssignPlayersToBucketsOG)>(Assign);
+            FindOrAddBucketOG = reinterpret_cast<decltype(FindOrAddBucketOG)>(FindOrAdd);
+            const bool bAssign = Hooks::RedirectCall(L"AFortMinigame::AssignPlayersToBuckets (stripped bucket adds)", reinterpret_cast<uint8_t*>(AssignCalls[0]), reinterpret_cast<void*>(&AssignPlayersToBucketsCall));
+            const bool bJoin = Hooks::RedirectCall(L"AFortMinigame::AddMinigamePlayer's FindOrAddBucket (stripped bucket add)", reinterpret_cast<uint8_t*>(FindOrAddCall), reinterpret_cast<void*>(&FindOrAddBucketCall));
+            Log::Info(L"Finder: AFortMinigame's player buckets restored (AssignPlayersToBuckets 0x{:X} {}, FindOrAddBucket 0x{:X} {})", Assign - Finder::ImageBase(),
+                bAssign ? L"redirected" : L"not redirected", FindOrAdd - Finder::ImageBase(), bJoin ? L"redirected" : L"not redirected");
+        }
+        else if (NotifyStatEventOG && Member_PlayerBuckets.IsAvailable())
+        {
+            Log::Error(L"Finder: AFortMinigame's player buckets not restored (AssignPlayersToBuckets {}, {} calls; FindOrAddBucket {} matches), so per-team stats and Team end conditions count nothing",
+                Assign ? (bAssignStripped ? L"stripped" : L"has a body") : L"not found", AssignCalls.size(), FindOrAddMatches);
         }
     }
 

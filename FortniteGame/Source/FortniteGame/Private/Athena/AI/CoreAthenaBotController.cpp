@@ -4826,7 +4826,9 @@ bool FCoreAthenaBotController::GoForObjectivePickup(float Now)
     }
     const FVector Location = LocationOf(Pawn);
     AFortPickup* Target = ObjectiveTarget.Get();
-    if (Target && (Target->bPickedUp || Target->IsPendingKill() || IsUnreachable(Target)))
+    // Still one of the match's objectives (RefreshLoot drops the stones while they are left to the players).
+    const bool bStillObjective = Target && std::any_of(Manager->GetLoot().begin(), Manager->GetLoot().end(), [Target](const FCoreAthenaBotLoot& Entry) { return Entry.bObjective && Entry.Pickup.Get() == Target; });
+    if (Target && (!bStillObjective || Target->bPickedUp || Target->IsPendingKill() || IsUnreachable(Target)))
     {
         Target = nullptr;
     }

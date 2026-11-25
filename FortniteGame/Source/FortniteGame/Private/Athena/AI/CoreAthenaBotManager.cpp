@@ -3812,8 +3812,24 @@ void FCoreAthenaBotManager::RefreshLoot(float Now)
     Loot.clear();
     AFortGameModeAthena* Athena = GetGameMode();
     UClass* RangedClass = RangedWeaponClass();
-    // 8.50's Endgame: its stones, found by the mutator's own stone lookup on the pickup's item.
+    // 8.50's Endgame: its stones, found by the mutator's own stone lookup on the pickup's item. While the mutator has
+    // no Thanos yet (VillainLeaderPC) and a human is on the villains' side, the bots leave them: the first capture
+    // promotes its captor only when that is a player controller (0x106EC40 -> 0x1070E70), so a bot's first capture left
+    // the match without Thanos (CoreV2 #650).
     const AFortAthenaMutator_Ashton* Ashton = Athena ? AFortAthenaMutator_Ashton::GetCurrent(Athena->GetWorld()) : nullptr;
+    if (Ashton && AFortAthenaMutator_Ashton::HasVillainMembers() && !const_cast<AFortAthenaMutator_Ashton*>(Ashton)->VillainLeaderPC)
+    {
+        AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+        const TArray<APlayerState*>* PlayerArray = GameState ? &static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray) : nullptr;
+        for (int32_t Index = 0; PlayerArray && Ashton && Index < PlayerArray->Num(); ++Index)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>((*PlayerArray)[Index]));
+            if (AthenaState && !FindBot(AthenaState) && Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(AthenaState->GetOwner())) && Ashton->IsVillain(AthenaState))
+            {
+                Ashton = nullptr;
+            }
+        }
+    }
     for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Athena, AFortPickup::StaticClass()))
     {
         AFortPickup* Pickup = Cast<AFortPickup>(Actor);

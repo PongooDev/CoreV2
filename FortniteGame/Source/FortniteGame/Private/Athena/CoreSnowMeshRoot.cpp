@@ -3,13 +3,17 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "BackendRequest.h"
 #include "Containers/Array.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameThread.h"
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
 #include "MeshNetworkSubsystem.h"
+#include "Online/NotForLicensees/FortMcpConfig.h"
+#include "Packed.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -24,6 +28,9 @@ namespace
     const wchar_t* const DirtShellPropClassPath = L"/Game/Athena/Prototype/Blueprints/Dopey/BP_DirtShellProp.BP_DirtShellProp_C";
     const wchar_t* const PillarDamageHandlerName = L"CoreRootPillarDamage";
     const wchar_t* const Next2ShownHandlerName = L"CoreHandleSnowNext2Shown";
+    const wchar_t* const VoteConcludedHandlerName = L"CoreReportUnvaultedItem";
+    // Core-Backend's (src/services/fortnite/unvaulting.js): the winner every 8.51 match takes after the event.
+    const wchar_t* const UnvaultingPath = L"/fortnite/api/game/v2/unvaulting";
 
     // E_SnowStates::Complete (/Game/Athena/Prototype/Blueprints/White/E_SnowStates: Uninitialized, Disabled, WarmingUp,
     // Active, Complete).
@@ -153,7 +160,13 @@ void FCoreSnowMeshRoot::SetUp(AFortGameModeAthena* GameMode)
     {
         Next2->OnLevelShown.AddUnique(FScriptDelegate(reinterpret_cast<UObject*>(GameMode), ShownHandler->GetFName()));
     }
+    const UFunction* ConcludedSignature = DelegateSignature(PillarsClass, L"onPillarsConcludedParent");
+    if (PillarsClass && ConcludedSignature)
+    {
+        PillarsClass->AddNativeFunction(VoteConcludedHandlerName, &execHandleVoteConcluded, ConcludedSignature);
+    }
     BindPillars(GameMode->GetWorld());
+    AskUnvaultedItem();
     Log::Info(L"Unvaulting: Core stands in for the mesh root: the server is an Edge node connected to it, the challenges complete{}, the pillars {} (ResetUTCTime), "
         L"the vote {}", AllChallengesCompleted ? L"" : L" (no AllChallengesCompleted)", bReset ? L"not voted yet" : L"UNSET",
         DamageHandler && Next2 && ShownHandler ? L"counted as the root counts it once Next2 is in" : L"only by the Blueprint's 150 s AutoCompleteVote (no Next2 or no pillar classes)");
@@ -201,6 +214,11 @@ void FCoreSnowMeshRoot::BindPillars(UWorld* World)
         {
             Concluded->AddUnique(FScriptDelegate(Snow, RootConcluded->GetFName()));
         }
+        const FName ReportHandler(VoteConcludedHandlerName, FNAME_Find);
+        if (Concluded && !ReportHandler.IsNone() && Pillars->FindFunction(ReportHandler))
+        {
+            Concluded->AddUnique(FScriptDelegate(Pillars, ReportHandler));
+        }
         Log::Info(L"Unvaulting: {}: the root counts the hits on {} of its {} pillars, and {}", Pillars->GetName().ToStdString(), Bound, Props ? Props->Num() : 0,
             Concluded && RootConcluded ? L"its vote sets the unvaulted item (RootPillarsConcluded)" : L"its vote sets no unvaulted item (no RootPillarsConcluded)");
     }
@@ -230,6 +248,64 @@ void FCoreSnowMeshRoot::HandlePillarDamage(UObject* Pillars, int32_t Damage, UOb
         Params.Call(Pillars);
     }
 #endif
+}
+
+void FCoreSnowMeshRoot::AskUnvaultedItem()
+{
+#if WITH_SERVER_CODE
+    // The root kept the vote's winner in the mesh's metadata (key SnowScripting, UnvaultName) for the rest of the season:
+    // a match after the event had it from the start. Core-Backend keeps the first Core server's (ReportUnvaultedItem)
+    // and answers it, or Epic's Drum Gun until one reports, only after the event; during it each match votes itself.
+    // Core's own requests carry no build in their user agent: the backend is told it.
+    BackendRequest::GetJson(L"Unvaulting item", std::wstring(UnvaultingPath) + L"?build=" + std::to_wstring(Packed::Changelist()), FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret,
+        [](uint32_t Status, const std::string& Body)
+    {
+        const std::string Item = Status == 200 ? BackendRequest::JsonField(Body, "item") : std::string();
+        const std::string Source = Status == 200 ? BackendRequest::JsonField(Body, "source") : std::string();
+        GameThread::Enqueue([Status, Item, Source]()
+        {
+            UObject* Snow = SnowScripting.Get();
+            if (!Snow || Item.empty() || Item == "null")
+            {
+                Log::Info(L"Unvaulting: {}", Status == 200 ? L"nothing unvaulted yet (before or during the event)" : L"the backend has no unvaulted item for this match");
+                return;
+            }
+            // The Blueprint's own (SetUnvaultItemName): UnvaultedItemName, whose OnRep on an edge (SetLootWeights) puts the
+            // item's GW.* weight on the event mutator for the match's loot rolls.
+            Reflection::FParams Params(Snow->FindFunction(FName(L"SetUnvaultItemName", FNAME_Find)), true);
+            const std::wstring Name(Item.begin(), Item.end());
+            if (Params.Set(L"Name", FName(Name.c_str())) && Params.Call(Snow))
+            {
+                Log::Info(L"Unvaulting: the island has unvaulted {} ({})", Name, std::wstring(Source.begin(), Source.end()));
+            }
+        });
+    }, true);
+#endif
+}
+
+void FCoreSnowMeshRoot::ReportUnvaultedItem(FName UnvaultedItem)
+{
+#if WITH_SERVER_CODE
+    static bool bReported = false;
+    if (bReported || UnvaultedItem.IsNone())
+    {
+        return;
+    }
+    bReported = true;
+    const std::wstring Name = UnvaultedItem.ToString().ToStdString();
+    Log::Info(L"Unvaulting: the vote unvaulted {}, reported for the matches after the event", Name);
+    BackendRequest::PostJson(L"Unvaulting vote", UnvaultingPath, "{\"item\":\"" + std::string(Name.begin(), Name.end()) + "\",\"build\":" + std::to_string(Packed::Changelist()) + "}",
+        FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
+#endif
+}
+
+DEFINE_FUNCTION(FCoreSnowMeshRoot::execHandleVoteConcluded)
+{
+    P_GET_PROPERTY(UNameProperty, UnvaultedItem);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    ReportUnvaultedItem(UnvaultedItem);
+    P_NATIVE_END;
 }
 
 DEFINE_FUNCTION(FCoreSnowMeshRoot::execHandleNext2Shown)

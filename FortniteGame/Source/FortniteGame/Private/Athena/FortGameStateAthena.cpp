@@ -5,6 +5,7 @@
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/Mutators/FortAthenaMutator.h"
 #include "Athena/Mutators/FortAthenaMutator_AI.h"
+#include "Athena/Mutators/FortAthenaMutator_SpecialEvent.h"
 #include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -220,6 +221,41 @@ TArray<UObject*>* AFortGameStateAthena::GetGameplayMutatorList() const
     }
     UFortMutatorListComponent* List = Member_MutatorListComponent.IsAvailable() && UFortMutatorListComponent::HasMutators() ? MutatorListComponent : nullptr;
     return List ? &List->GetMember_Mutators() : nullptr;
+}
+
+void AFortGameStateAthena::ModifyNamedWeights(TMap<FName, float>& NamedWeights) const
+{
+#if WITH_SERVER_CODE
+    if (!AFortAthenaMutator_SpecialEvent::HasContainerLootRollWeight())
+    {
+        return;
+    }
+    // Athena_GameMode's SpecialEventModifier puts its mutator in the game mode's list; the game state's too where it
+    // has it.
+    UClass* SpecialEventClass = AFortAthenaMutator_SpecialEvent::StaticClass();
+    const AFortGameModeAthena* GameMode = AthenaGameModeOf(const_cast<AFortGameStateAthena*>(this));
+    for (const TArray<UObject*>* List : { GetGameplayMutatorList(), GameMode ? GameMode->GetGameplayMutatorList() : nullptr })
+    {
+        for (int32_t Index = 0; List && Index < List->Num(); ++Index)
+        {
+            const UObject* Mutator = (*List)[Index];
+            if (Mutator && Mutator->IsA(SpecialEventClass))
+            {
+                static_cast<const AFortAthenaMutator_SpecialEvent*>(Mutator)->FortGameStateAthena_ModifyNamedWeights(NamedWeights);
+            }
+        }
+    }
+#endif
+}
+
+void AFortGameStateAthena::ModifyNamedWeights(const UObject* WorldContextObject, TMap<FName, float>& NamedWeights)
+{
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    const AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (GameState)
+    {
+        GameState->ModifyNamedWeights(NamedWeights);
+    }
 }
 
 bool AFortGameStateAthena::ApplyMutatorHealthAndShield(AController* Controller)

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FortKismetLibrary.h"
+#include "Athena/FortGameStateAthena.h"
 #include "AI/FortAIDirector.h"
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIGoalManager.h"
@@ -604,6 +605,14 @@ bool UFortKismetLibrary::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDr
 
 bool UFortKismetLibrary::PickLootDrops(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier)
 {
+    // The match's named weights (8.51's Unvaulting's winner, AFortGameStateAthena::ModifyNamedWeights) go into the
+    // Blueprints' rolls too: AthenaSupplyDrop_C's SpawnLoot picks Loot_AthenaSupplyDrop's packages here.
+    TMap<FName, float> NamedWeights;
+    AFortGameStateAthena::ModifyNamedWeights(WorldContextObject, NamedWeights);
+    if (NamedWeights.Num() > 0)
+    {
+        return PickLootDropsWithNamedWeights(WorldContextObject, OutLootToDrop, TierGroupName, WorldLevel, NamedWeights, ForcedLootTier);
+    }
     return PickLootDrops(OutLootToDrop, TierGroupName, WorldLevel, ForcedLootTier);
 }
 

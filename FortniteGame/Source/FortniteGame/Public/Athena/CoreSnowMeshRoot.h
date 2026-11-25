@@ -1,5 +1,6 @@
 #pragma once
 
+#include "UObject/NameTypes.h"
 #include "UObject/Stack.h"
 
 class AFortGameModeAthena;
@@ -18,7 +19,8 @@ class UWorld;
 //   - the pillar vote: an Edge sends each pickaxe hit (BP_DirtShellDamageComponent's DamagePropN, a NetServer function
 //     UMeshNetworkComponent::ProcessEvent forwards to the parent node, 8.51 0x9384D0) and the Root's UpdateHealth lowers
 //     PropHealth and picks VoteWinner;
-//   - UnvaultedItemName, the winner (RootPillarsConcluded), which sets the matches' loot weights.
+//   - UnvaultedItemName, the winner (RootPillarsConcluded), which sets the matches' loot weights, then and in every
+//     later match of the season (the root's metadata).
 // A Core server has no mesh service and no Root (AFortGameSession::SetMeshNodeType, 8.51 0x153F1B0, joins one through the
 // MCP mesh service and a parent's beacon), so it stands in for both on its one match: it is the Edge node, connected,
 // and it does on its own Blueprints what the Root's replication and Root branches did.
@@ -39,6 +41,13 @@ private:
     // A pillar's pickaxe hit as the Root receives it: BP_DirtShell.UpdateHealth(Damage * DamageMultiplier, its index).
     static void HandlePillarDamage(UObject* Pillars, int32_t Damage, UObject* DirtProp);
 
+    // The winner the matches after the event take (Core-Backend's, the first Core server's report or Epic's Drum Gun),
+    // set as the root's metadata had it: SetUnvaultItemName.
+    static void AskUnvaultedItem();
+    // This match's vote ended (onPillarsConcludedParent): its winner for the matches after it, once.
+    static void ReportUnvaultedItem(FName UnvaultedItem);
+
+    DECLARE_FUNCTION(execHandleVoteConcluded);
     DECLARE_FUNCTION(execHandleNext2Shown);
     DECLARE_FUNCTION(execHandlePillarDamage);
 };

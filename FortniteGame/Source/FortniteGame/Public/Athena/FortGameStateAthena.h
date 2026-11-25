@@ -2,6 +2,7 @@
 
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Containers/Map.h"
 #include "FortGameState.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "UObject/ScriptDelegates.h"
@@ -286,6 +287,10 @@ public:
     DefineUProperty(UFortMutatorListComponent*, MutatorListComponent)
     static bool HasMutatorListComponent() { return Member_MutatorListComponent.IsAvailable(); }
     TArray<UObject*>* GetGameplayMutatorList() const;
+    // The match's named weights for its loot rolls (21.40's game state asks its mutators with
+    // FortGameStateAthena_ModifyNamedWeights): 8.51's live event mutator's (the Unvaulting's winner). Empty without any.
+    void ModifyNamedWeights(TMap<FName, float>& NamedWeights) const;
+    static void ModifyNamedWeights(const UObject* WorldContextObject, TMap<FName, float>& NamedWeights);
     // The gravity a new pawn gets (7.30 CL-4834550 0xD4D100, which AFortGameModeAthena::FinishRestartPlayer, 0xD1A0B0,
     // asks before it gives a restarted player's pawn SetGravityJumpMultipliers): the first of the list's mutators that
     // answers, here its active gravity mutators. False when none does, or the build has none.

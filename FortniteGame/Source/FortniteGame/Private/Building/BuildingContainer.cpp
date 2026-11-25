@@ -110,13 +110,17 @@ namespace
         return Playlist ? std::clamp(static_cast<int32_t>(Playlist->LootDropRounds), 1, 10) : 1;
     }
 
-    // PickLootDrops once for each of the playlist's loot drop rounds: each round adds its drops to LootDrops.
-    void PickLootDropRounds(TStructArray<FFortItemEntry>& LootDrops, int32_t Rounds, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent,
+    // PickLootDrops once for each of the playlist's loot drop rounds: each round adds its drops to LootDrops. A container's
+    // roll takes the match's named weights (8.51's Unvaulting's winner: the live event mutator's
+    // NamedWeightForContainerLootRoll, AFortGameStateAthena::ModifyNamedWeights).
+    void PickLootDropRounds(UWorld* World, TStructArray<FFortItemEntry>& LootDrops, int32_t Rounds, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent,
         const FGameplayTagContainer& ContextTags)
     {
+        TMap<FName, float> NamedWeights;
+        AFortGameStateAthena::ModifyNamedWeights(reinterpret_cast<UObject*>(World), NamedWeights);
         for (int32_t Round = 0; Round < Rounds; ++Round)
         {
-            UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, AbilitySystemComponent, ContextTags, true, false);
+            UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, AbilitySystemComponent, ContextTags, true, false, NamedWeights.Num() > 0 ? &NamedWeights : nullptr);
         }
     }
 }
@@ -257,7 +261,7 @@ namespace
         }
 
         TStructArray<FFortItemEntry> LootDrops{};
-        PickLootDropRounds(LootDrops, GetLootDropRounds(World), WorldLevel, LootTierKey, nullptr, Spot.Tags);
+        PickLootDropRounds(World, LootDrops, GetLootDropRounds(World), WorldLevel, LootTierKey, nullptr, Spot.Tags);
         AFortPickup::CombineItemEntries(LootDrops, nullptr);
         const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
         for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
@@ -674,7 +678,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter, uint8_t InPickupSourceType
                 LogAthenaLootLevel(this, LootLevel);
             }
             // A Battle Royale search picks once for each of the match's playlist's loot drop rounds (5.10's Playground: 3).
-            PickLootDropRounds(LootDrops, bAthena ? GetLootDropRounds(World) : 1, LootLevel, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter),
+            PickLootDropRounds(World, LootDrops, bAthena ? GetLootDropRounds(World) : 1, LootLevel, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter),
                 StaticGameplayTags);
 
             AFortPlayerController* LooterController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Looter->Controller)));

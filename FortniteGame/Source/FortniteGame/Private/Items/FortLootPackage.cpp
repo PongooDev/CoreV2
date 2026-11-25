@@ -473,7 +473,10 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
         return;
     }
 
-    // A row's weight, multiplied by the picker's named weight for its NamedWeightMult when there is one.
+    // A row's weight, or the picker's named weight for its NamedWeightMult when there is one. The named weight is the
+    // row's weight, not a factor on it: 8.51's Unvaulting rows (the Drum Gun's in WorldList.AthenaLoot.Weapon.AssaultAuto,
+    // NamedWeightMult GW.DrumGun) have Weight 0 and get AthenaGameData's GW.DrumGun (0.85) once it is unvaulted, and
+    // Frostnite's supply drops' TrapPatrolWard 0 takes its rows out either way.
     const bool bNamedWeights = NamedWeightsMap && NamedWeightsMap->Num() > 0 && FFortLootPackageData::HasNamedWeightMult();
     const auto RowWeight = [NamedWeightsMap, bNamedWeights](FFortLootPackageData& Row)
     {
@@ -492,7 +495,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
         {
             if (Pair.Key == NamedWeightMult)
             {
-                return Weight * Pair.Value;
+                return Pair.Value;
             }
         }
         return Weight;

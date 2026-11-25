@@ -449,6 +449,9 @@ namespace Finder
     // From 5.30: Score Royale's scoring of a tagged event on the player state (Natives::
     // AFortPlayerStateAthena_HandleScoringEvent), the last call of the coin's and the supply drop's scoring natives.
     bool ResolveScoringEventLive();
+    // APlayerCameraManager::SetCameraCachePOV's slot in its vtable, with SetLastFrameCameraCachePOV, GetCameraCachePOV and
+    // GetLastFrameCameraCachePOV in the next three, else -1.
+    int32_t CameraCachePOVIndex();
     // The slot of AFortPlayerControllerAthena's pawn-death handler when the build strips it (1.9.1), else -1.
     // MarkerComponentOffset: the controller's MarkerComponent (8.00), -1 where the build has none.
     int32_t StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset = -1);

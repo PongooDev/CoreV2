@@ -424,6 +424,15 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Building">
       <UniqueIdentifier>{b3e69fe7-a9cb-44c7-a63b-471a242a008a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Camera">
+      <UniqueIdentifier>{22e91e3b-7fe7-4c38-937d-359fac93f659}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Camera">
+      <UniqueIdentifier>{38d26f8a-fe19-4933-8116-f96bbab22d89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\Camera">
+      <UniqueIdentifier>{30049c77-2faa-4f4e-bc15-a205959d6bfb}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Creative">
       <UniqueIdentifier>{621a8554-ff34-415a-8456-592174bbd1e7}</UniqueIdentifier>
     </Filter>
@@ -1312,6 +1321,15 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTheaterInfo.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Camera\PlayerCameraManager.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Camera</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Camera\FortPlayerCameraBase.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Camera</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Camera\FortPlayerCameraZone.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Camera</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortVisibilityComponent.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
@@ -2170,6 +2188,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Camera\FortPlayerCameraZone.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Camera</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>

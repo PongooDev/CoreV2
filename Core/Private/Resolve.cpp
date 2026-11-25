@@ -19005,6 +19005,57 @@ bool Finder::ResolveScoringEventLive()
     return true;
 }
 
+int32_t Finder::CameraCachePOVIndex()
+{
+    static bool bSearched = false;
+    static int32_t CacheIndex = -1;
+    if (bSearched)
+    {
+        return CacheIndex;
+    }
+    bSearched = true;
+
+    // APlayerCameraManager's own accessors of CameraCachePrivate / LastFrameCameraCachePrivate: the setters are
+    // "add rcx, POV; jmp FMinimalViewInfo::operator=", the getters copy the POV into the result. 8.20 (CL-5625478) slots
+    // 0xC5-0xC8 (0x628-0x640: 0x2C1F3B0, 0x2C1FF40, 0x2C11000, 0x2C129A0, POVs +0x1800 / +0x1D40); 8.51 the same slots
+    // and offsets; 9.00 the same slots, POVs +0x1940 / +0x1ED0; 3.2 slot 0xC2.
+    void** const ManagerVTable = CdoVTable(L"/Script/Engine.PlayerCameraManager");
+    const auto SetterPOV = [](uintptr_t Function) -> int32_t
+    {
+        return IsInText(Function) && FindInstruction(Function, Function + 8, { 0x48, 0x81, 0xC1, -1, -1, 0x00, 0x00, 0xE9 }) == Function ? *reinterpret_cast<const int32_t*>(Function + 3) : -1;
+    };
+    const auto GetterPOV = [](uintptr_t Function) -> int32_t
+    {
+        return IsInText(Function) && FindInstruction(Function, Function + 20, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0x48, 0x8D, 0x91, -1, -1, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8 }) == Function
+            ? *reinterpret_cast<const int32_t*>(Function + 12) : -1;
+    };
+    int32_t Matches = 0;
+    for (int32_t Index = 0; ManagerVTable && Index + 3 < 0x200; ++Index)
+    {
+        const uintptr_t Entries[] = { reinterpret_cast<uintptr_t>(ManagerVTable[Index]), reinterpret_cast<uintptr_t>(ManagerVTable[Index + 1]),
+            reinterpret_cast<uintptr_t>(ManagerVTable[Index + 2]), reinterpret_cast<uintptr_t>(ManagerVTable[Index + 3]) };
+        if (!IsInText(Entries[0]) && !IsInMovedCode(Entries[0]))
+        {
+            break;
+        }
+        const int32_t CachePOV = SetterPOV(Entries[0]);
+        const int32_t LastFramePOV = SetterPOV(Entries[1]);
+        if (CachePOV > 0 && LastFramePOV > 0 && CachePOV != LastFramePOV && GetterPOV(Entries[2]) == CachePOV && GetterPOV(Entries[3]) == LastFramePOV)
+        {
+            CacheIndex = Index;
+            ++Matches;
+        }
+    }
+    if (Matches != 1)
+    {
+        CacheIndex = -1;
+        Log::Info(L"Finder: APlayerCameraManager's camera cache accessors not found ({} candidates)", Matches);
+        return -1;
+    }
+    Log::Info(L"Finder: APlayerCameraManager::SetCameraCachePOV is slot 0x{:X}", CacheIndex);
+    return CacheIndex;
+}
+
 int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
 {
     static bool bSearched = false;

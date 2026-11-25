@@ -48,6 +48,7 @@
 #include "GameThread.h"
 #include "McpProfileGroup.h"
 #include "Athena/AI/AthenaAIPerceptionComponent.h"
+#include "Camera/FortPlayerCameraZone.h"
 #include "Building/BuildingProp_DeimosSpawner.h"
 #include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
@@ -392,6 +393,8 @@ static void InstallHooks()
         UFortGameplayAbilityAthena_PeriodicItemGrant::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();
+        // Each player's own camera cache (#567), before ServerUpdateCamera and the replication graph read it.
+        AFortPlayerCameraZone::HookVTables();
         AFortPlayerControllerPvE::HookVTables();
         AFortPlayerControllerOutpost::HookVTables();
         AFortPlayerControllerDeployableBase::HookVTables();

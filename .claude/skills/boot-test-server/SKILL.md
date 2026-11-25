@@ -10,6 +10,9 @@ Depth: `docs/agents/headless-server-testing.md`.
 Never: a client launch, a full match (`-CoreBotMatch` without the owner's OK), port 5595, two servers at once,
 copying or changing anything in `F:\Builds` or `D:\Fortnite Builds`, killing a process you didn't start.
 
+Never wait on the owner's game: boot while it runs (his client, his launcher and its 5595 servers don't block). Only
+another agent's test server (`-nullrhi`, not 5595) blocks a boot; keep doing static work while it finishes.
+
 1. Preferred: the core MCP's `boot_test_server` with `build_path` (installed build folder), `mode` (`BattleRoyale` or
    Save the World), `backend_port` (a test port with a test backend on it, never 5595) and `dll_dir`
    (`<worktree>\x64\Release`). It returns a `job_id` if the boot outlasts the call (about 100 s): call it again with

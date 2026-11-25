@@ -18459,7 +18459,12 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
     };
     // 5.30 (CL-4305896) puts the instance's destructor in slot 6 (0x2DAD90, which stores the base vtable), so CreateCopy
     // is slot 7 (0xCAC440), Execute 8 (0xCAE910) and ExecuteIfSafe 9.
-    const auto IsDelegateVTable = [&LeaTargets](uintptr_t Candidate, int32_t CreateCopyIndex)
+    // 9.00 (CL-6337466) binds a weak lambda instead (vtable 0x4291498, CreateCopy slot 8 0x1173B00, Execute slot 9
+    // 0x11750A0): the collector is its context (a weak pointer at +0x8, the raw this at +0x10), and Execute reads only the
+    // controller (+0x18) and item (+0x20) weak pointers, two calls to FWeakObjectPtr::Get, then tail-jumps to the
+    // controller's virtual (jmp qword ptr [rdx+1478h]).
+    bool bWeakLambda = false;
+    const auto IsDelegateVTable = [&LeaTargets, &bWeakLambda](uintptr_t Candidate, int32_t CreateCopyIndex)
     {
         void** VTable = reinterpret_cast<void**>(Candidate);
         if (!Candidate || IsInText(Candidate) || !Finder::IsReadable(VTable, (CreateCopyIndex + 3) * sizeof(void*)))
@@ -18497,7 +18502,14 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
             const int32_t Calls = static_cast<int32_t>(std::count_if(ExecuteCalls.begin(), ExecuteCalls.end(), [Target](const auto& Call) { return Call.second == Target; }));
             MostCallsToOne = std::max(MostCallsToOne, Calls == 2 ? Calls + TailJumpsTo(Target) : Calls);
         }
-        return MostCallsToOne == 3;
+        const bool bVirtualTailJump = MostCallsToOne == 2 && ExecuteCalls.size() == 2 && ExecuteEnd - Execute < 0x60
+            && FindInstruction(ExecuteCalls.back().first, ExecuteEnd, { 0x48, 0xFF, -1 }) != 0;
+        if (MostCallsToOne == 3 || bVirtualTailJump)
+        {
+            bWeakLambda = MostCallsToOne != 3;
+            return true;
+        }
+        return false;
     };
 
     uintptr_t CheckGoal = 0;
@@ -18534,6 +18546,7 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
     }
     Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable = reinterpret_cast<void**>(DelegateVTable);
     Natives::ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = ExecuteIndex;
+    Natives::ABuildingItemCollectorActor_bGrantOutputDelegateIsWeakLambda = bWeakLambda;
     Log::Info(L"Finder: ABuildingItemCollectorActor: interact 0x{:X}, deposit 0x{:X}, CheckDepositGoalReached 0x{:X}, output timer delegate vtable 0x{:X} (Execute slot {} 0x{:X})",
         Rva(Interact), Rva(Deposit), Rva(CheckGoal), Rva(DelegateVTable), ExecuteIndex, Rva(VTableEntry(reinterpret_cast<void**>(DelegateVTable), ExecuteIndex)));
     return true;

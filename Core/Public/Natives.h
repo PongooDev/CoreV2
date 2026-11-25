@@ -480,6 +480,8 @@ namespace Natives
     // (0x32CDEB8), and its Execute and ExecuteIfSafe slots (7 and 8).
     inline void** ABuildingItemCollectorActor_GrantOutputDelegateVTable = nullptr;
     inline int32_t ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = -1;
+    // 9.00+: the output timer's delegate is a weak lambda (the collector its context), not a plain lambda.
+    inline bool ABuildingItemCollectorActor_bGrantOutputDelegateIsWeakLambda = false;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     // AFortGameModeZone::CreateAIGoalManager's slot (intact; 6.20 CL-4497486 0xECF550, slot 0x181), the call
     // AFortGameModeZone::PostInitializeComponents makes right after CreateAIDirector's (Finder::ResolveAIDirectorLive).

@@ -311,12 +311,36 @@ namespace
         FWeakObjectPtr Item;
     };
 
+    // 9.00+ (CL-6337466 0x1172917): CreateWeakLambda(this, ...), a TWeakBaseFunctorDelegateInstance whose context is
+    // the collector, then the lambda's captures (this, WeakPC, WeakItem).
+    struct FGrantOutputWeakLambdaInstance
+    {
+        void* VTable;
+        FWeakObjectPtr Context;
+        void* This;
+        FWeakObjectPtr PlayerController;
+        FWeakObjectPtr Item;
+    };
+
     void ExecuteGrantOutput(void* DelegateInstance)
     {
-        FGrantOutputDelegateInstance* Instance = static_cast<FGrantOutputDelegateInstance*>(DelegateInstance);
-        ABuildingItemCollectorActor* Collector = Cast<ABuildingItemCollectorActor>(Instance->Collector.Get());
-        AFortPlayerController* PlayerController = Cast<AFortPlayerController>(Instance->PlayerController.Get());
-        UFortWorldItemDefinition* Item = Cast<UFortWorldItemDefinition>(Instance->Item.Get());
+        ABuildingItemCollectorActor* Collector = nullptr;
+        AFortPlayerController* PlayerController = nullptr;
+        UFortWorldItemDefinition* Item = nullptr;
+        if (Natives::ABuildingItemCollectorActor_bGrantOutputDelegateIsWeakLambda)
+        {
+            FGrantOutputWeakLambdaInstance* Instance = static_cast<FGrantOutputWeakLambdaInstance*>(DelegateInstance);
+            Collector = Cast<ABuildingItemCollectorActor>(Instance->Context.Get());
+            PlayerController = Cast<AFortPlayerController>(Instance->PlayerController.Get());
+            Item = Cast<UFortWorldItemDefinition>(Instance->Item.Get());
+        }
+        else
+        {
+            FGrantOutputDelegateInstance* Instance = static_cast<FGrantOutputDelegateInstance*>(DelegateInstance);
+            Collector = Cast<ABuildingItemCollectorActor>(Instance->Collector.Get());
+            PlayerController = Cast<AFortPlayerController>(Instance->PlayerController.Get());
+            Item = Cast<UFortWorldItemDefinition>(Instance->Item.Get());
+        }
         if (Collector && PlayerController)
         {
             Collector->GrantOutput(PlayerController, Item);

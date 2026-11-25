@@ -197,7 +197,45 @@ namespace
         int32_t Opened = 0;
         int32_t Closed = 0;
         int32_t Reopened = 0;
+        // The server view point the replication graph uses (FNetViewer: GetPlayerViewPoint, the camera manager's cache
+        // that ServerUpdateCamera fills): frames it was over ViewPointOffDistance from this player's pawn, the
+        // farthest, and of those frames the ones it was within that distance of another player's pawn.
+        int32_t ViewFrames = 0;
+        int32_t ViewOffOwnPawn = 0;
+        float ViewMaxFromOwnPawn = 0.0f;
+        int32_t ViewAtOtherPawn = 0;
+        FString ViewAtOtherExample;
+        // Frames the controller's camera manager had another owner, or was another connection's controller's too.
+        int32_t CameraForeignOwner = 0;
+        int32_t CameraShared = 0;
     };
+
+    // CoreV2 #567: an island player's view point seemed to hold the other player's camera now and then.
+    constexpr float ViewPointOffDistance = 5000.0f;
+
+    class APlayerCameraManagerOwner : public UObject
+    {
+        DefineUnrealClass(APlayerCameraManager, Engine)
+        DefineOptionalUProperty(APlayerController*, PCOwner)
+    };
+
+    struct FViewedPlayer
+    {
+        UNetConnection* Connection = nullptr;
+        APlayerController* Controller = nullptr;
+        APawn* Pawn = nullptr;
+        UObject* CameraManager = nullptr;
+    };
+
+    FVector ActorLocation(AActor* Actor)
+    {
+        return Actor->GetTransform().GetLocation();
+    }
+
+    FString DescribeVector(const FVector& V)
+    {
+        return FString::Printf(TEXT("(%.0f, %.0f, %.0f)"), V.X, V.Y, V.Z);
+    }
     // By pointer: TMap's values are copied in, and the engine's containers here don't copy.
     TMap<UNetConnection*, FConnectionReplicationStats*> ConnectionReplicationStats;
 
@@ -255,14 +293,20 @@ void UNetDriver::LogConnectionReplication()
         return;
     }
     const float Now = Time;
-    TSet<UNetConnection*> Live;
+    TArray<FViewedPlayer> Players;
     for (UNetConnection* Connection : ClientConnections)
     {
         APlayerController* Controller = Connection ? static_cast<APlayerController*>(Connection->PlayerController) : nullptr;
-        if (!Controller || Connection->State != USOCK_Open)
+        if (Controller && Connection->State == USOCK_Open)
         {
-            continue;
+            Players.Add(FViewedPlayer{ Connection, Controller, Controller->GetPawn(), reinterpret_cast<UObject*>(static_cast<APlayerCameraManager*>(Controller->PlayerCameraManager)) });
         }
+    }
+    TSet<UNetConnection*> Live;
+    for (const FViewedPlayer& Player : Players)
+    {
+        UNetConnection* Connection = Player.Connection;
+        APlayerController* Controller = Player.Controller;
         Live.Add(Connection);
         FConnectionReplicationStats*& StatsPtr = ConnectionReplicationStats.FindOrAdd(Connection);
         if (!StatsPtr)
@@ -272,6 +316,51 @@ void UNetDriver::LogConnectionReplication()
         }
         FConnectionReplicationStats& Stats = *StatsPtr;
         const uint32_t Frame = ++Stats.Frame;
+
+        // The graph builds the same viewer for this connection each frame (its ServerReplicateActors, after setting
+        // ViewTarget); the constructor reads the view target's root, so it needs one.
+        if (Natives::FNetViewer_FNetViewer && Connection->ViewTarget && Player.Pawn)
+        {
+            const FNetViewer Viewer(Connection, 0.0f);
+            const float FromOwnPawn = FVector::Dist(Viewer.ViewLocation, ActorLocation(Player.Pawn));
+            ++Stats.ViewFrames;
+            Stats.ViewMaxFromOwnPawn = FMath::Max(Stats.ViewMaxFromOwnPawn, FromOwnPawn);
+            if (FromOwnPawn > ViewPointOffDistance)
+            {
+                ++Stats.ViewOffOwnPawn;
+                for (const FViewedPlayer& Other : Players)
+                {
+                    if (Other.Connection == Connection || !Other.Pawn)
+                    {
+                        continue;
+                    }
+                    const float FromOther = FVector::Dist(Viewer.ViewLocation, ActorLocation(Other.Pawn));
+                    if (FromOther <= ViewPointOffDistance)
+                    {
+                        ++Stats.ViewAtOtherPawn;
+                        if (Stats.ViewAtOtherExample.IsEmpty())
+                        {
+                            Stats.ViewAtOtherExample = FString::Printf(TEXT("at %s %s, %.0f m from %s, %.0f m from its own pawn"), *DescribeVector(Viewer.ViewLocation),
+                                *Other.Controller->GetName(), FromOther / 100.0f, *Other.Pawn->GetName(), FromOwnPawn / 100.0f);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if (Player.CameraManager)
+        {
+            APlayerController* Owner = static_cast<APlayerCameraManagerOwner*>(Player.CameraManager)->PCOwner;
+            Stats.CameraForeignOwner += Owner && Owner != Controller ? 1 : 0;
+            for (const FViewedPlayer& Other : Players)
+            {
+                if (Other.Connection != Connection && Other.CameraManager == Player.CameraManager)
+                {
+                    ++Stats.CameraShared;
+                    break;
+                }
+            }
+        }
 
         for (auto& Pair : Connection->ActorChannels)
         {
@@ -363,9 +452,31 @@ void UNetDriver::LogConnectionReplication()
             Top += FString::Printf(TEXT("%s%s %d [%s] (e.g. %s)"), i ? TEXT("; ") : TEXT(""), *Classes[i].Key->GetName(), ClassStats.Count, *Reasons, *ClassStats.Example);
         }
         AActor* ViewTarget = Connection->ViewTarget;
-        const FString Line = FString::Printf(TEXT("Net (#567): %s over %.0fs: %d frames, %d saturated; %d actor channels open, %d opened, %d closed, %d reopened within %.0fs%s%s; view target %s, net speed %d"),
+        FString ViewPoint = FString::Printf(TEXT("; view point over %.0f m from its pawn in %d of %d frames (farthest %.0f m), at another player's pawn in %d%s%s"),
+            ViewPointOffDistance / 100.0f, Stats.ViewOffOwnPawn, Stats.ViewFrames, Stats.ViewMaxFromOwnPawn / 100.0f, Stats.ViewAtOtherPawn,
+            Stats.ViewAtOtherExample.IsEmpty() ? TEXT("") : TEXT(", e.g. "), *Stats.ViewAtOtherExample);
+        if (Natives::FNetViewer_FNetViewer && ViewTarget)
+        {
+            const FNetViewer Viewer(Connection, 0.0f);
+            ViewPoint += FString::Printf(TEXT("; now %s"), *DescribeVector(Viewer.ViewLocation));
+            for (const FViewedPlayer& Other : Players)
+            {
+                if (Other.Pawn)
+                {
+                    ViewPoint += FString::Printf(TEXT(", %.0f m from %s%s"), FVector::Dist(Viewer.ViewLocation, ActorLocation(Other.Pawn)) / 100.0f, *Other.Pawn->GetName(),
+                        Other.Connection == Connection ? TEXT(" (its own)") : TEXT(""));
+                }
+            }
+        }
+        if (Player.CameraManager)
+        {
+            APlayerController* Owner = static_cast<APlayerCameraManagerOwner*>(Player.CameraManager)->PCOwner;
+            ViewPoint += FString::Printf(TEXT("; camera %s, owner %s (another owner in %d frames, shared with another player in %d)"), *Player.CameraManager->GetName(),
+                Owner == Controller ? TEXT("its own") : Owner ? *Owner->GetName() : TEXT("none"), Stats.CameraForeignOwner, Stats.CameraShared);
+        }
+        const FString Line = FString::Printf(TEXT("Net (#567): %s over %.0fs: %d frames, %d saturated; %d actor channels open, %d opened, %d closed, %d reopened within %.0fs%s%s; view target %s, net speed %d%s"),
             *Controller->GetName(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.Num(), Stats.Opened, Stats.Closed, Stats.Reopened, ReopenWindow,
-            Top.IsEmpty() ? TEXT("") : TEXT(": "), *Top, ViewTarget ? *ViewTarget->GetName() : TEXT("none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1);
+            Top.IsEmpty() ? TEXT("") : TEXT(": "), *Top, ViewTarget ? *ViewTarget->GetName() : TEXT("none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1, *ViewPoint);
         Log::Info(L"{}", Line.ToStdString());
 
         TArray<FReplicatedActorKey> Stale;
@@ -383,6 +494,9 @@ void UNetDriver::LogConnectionReplication()
         Stats.ReopenedByClass.Empty();
         Stats.WindowStart = Now;
         Stats.Frames = Stats.SaturatedFrames = Stats.Opened = Stats.Closed = Stats.Reopened = 0;
+        Stats.ViewFrames = Stats.ViewOffOwnPawn = Stats.ViewAtOtherPawn = Stats.CameraForeignOwner = Stats.CameraShared = 0;
+        Stats.ViewMaxFromOwnPawn = 0.0f;
+        Stats.ViewAtOtherExample.Empty();
     }
     TArray<UNetConnection*> Dead;
     for (const auto& Pair : ConnectionReplicationStats)

@@ -37,6 +37,11 @@ struct FVector
     {
         return FMath::Square(V2.X - V1.X) + FMath::Square(V2.Y - V1.Y) + FMath::Square(V2.Z - V1.Z);
     }
+
+    static float Dist(const FVector& V1, const FVector& V2)
+    {
+        return FMath::Sqrt(DistSquared(V1, V2));
+    }
 };
 
 static_assert(sizeof(FVector) == 0xC);

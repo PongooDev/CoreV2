@@ -554,3 +554,28 @@ void AFortGameStateAthena::HookCallSites()
         reinterpret_cast<void*>(&AFortAthenaMutator_AI::RemoveManagedCharacterMovementComponentHK));
 #endif
 }
+
+bool AFortGameStateAthena::HasOnPickupGivenToPlayer()
+{
+    return Natives::AFortGameStateAthena_OnPickupPreGivenToPlayerIndex > 0 && Natives::AFortGameStateAthena_OnPickupPostGivenToPlayerIndex > 0;
+}
+
+void AFortGameStateAthena::OnPickupPreGivenToPlayer(AController* Controller, AFortPickup* Pickup)
+{
+#if WITH_SERVER_CODE
+    if (HasOnPickupGivenToPlayer() && Pickup)
+    {
+        CallVirtual<void>(this, Natives::AFortGameStateAthena_OnPickupPreGivenToPlayerIndex, Controller, Pickup);
+    }
+#endif
+}
+
+void AFortGameStateAthena::OnPickupPostGivenToPlayer(AController* Controller, AFortPickup* Pickup)
+{
+#if WITH_SERVER_CODE
+    if (HasOnPickupGivenToPlayer() && Pickup)
+    {
+        CallVirtual<void>(this, Natives::AFortGameStateAthena_OnPickupPostGivenToPlayerIndex, Controller, Pickup);
+    }
+#endif
+}

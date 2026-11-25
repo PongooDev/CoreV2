@@ -58,6 +58,9 @@ struct FCoreAthenaBotLoot
     FVector Location;
     bool bWeapon = false;
     bool bConsumable = false;
+    // An objective the mode puts on the map and the compass for every player: an Endgame Infinity Stone not yet
+    // captured (CoreV2 #650). The bots go for it before anything else they would pick up.
+    bool bObjective = false;
 };
 
 // A chest or ammo box the bots can search (21.40's _Loot looks for containers too; 8.30's bots didn't loot).

@@ -67,6 +67,12 @@ public:
     // Whether the player is on the villains' side (the Chitauri and Thanos), as the mutator's own overrides tell it.
     bool IsVillain(const AFortPlayerStateAthena* PlayerState) const;
 
+    // The stone (StoneDataList's index) whose GameplayTag the item's SpecialActorPickupTag is, or is under, as the
+    // mutator's own lookup (0x1067230) matches a stone pickup's item; -1 for any other item.
+    int32_t FindStoneIndex(const UFortWorldItemDefinition* ItemDefinition) const;
+    // Whether that stone's StoneList entry is Captured (EAshtonStoneStateType 2).
+    bool IsStoneCaptured(int32_t StoneIndex) const;
+
     // The stripped calls, where the build has them (Finder::ResolveAshtonMutatorLive), and the pickup's and the game mode's
     // calls the mode needs. Logged once at boot.
     static void HookNatives();

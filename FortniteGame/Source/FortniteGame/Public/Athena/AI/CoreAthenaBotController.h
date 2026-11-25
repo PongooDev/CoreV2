@@ -517,6 +517,9 @@ private:
     void ManageWeapon(float Now);
     // 21.40's _Loot (GatherNearestLoot): the nearest weapon or ammo on the floor, and taking it.
     bool Loot(float Now, float MaxDistance);
+    // The match's objective pickup (FCoreAthenaBotLoot::bObjective: an Endgame stone), nearest first, wherever it is on
+    // the map: the bot heads there and takes it as a player does (TakePickup), ahead of any other pickup (CoreV2 #650).
+    bool GoForObjectivePickup(float Now);
     // 8.30's _Storm: back inside the next safe zone.
     bool Storm(float Now);
     // Whether the safe zone comes before anything but a fight (CoreV2 #233: bots looted, healed or stood fighting until
@@ -946,6 +949,10 @@ private:
     FVector MoveGoal;
     bool bHasMoveGoal = false;
     TWeakObjectPtr<AFortPickup> LootTarget;
+    // GoForObjectivePickup's pickup, and the nearest the bot has got to it and when (no closer in 30 s: given up).
+    TWeakObjectPtr<AFortPickup> ObjectiveTarget;
+    float ObjectiveClosest = 0.0f;
+    float ObjectiveClosestTime = 0.0f;
     TWeakObjectPtr<ABuildingContainer> ContainerTarget;
     // Loot and containers the bot gave up on (out of reach: above or below it, or it got stuck on the way).
     std::vector<const void*> Unreachable;

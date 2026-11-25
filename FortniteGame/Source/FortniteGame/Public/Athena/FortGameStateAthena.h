@@ -8,6 +8,7 @@
 #include "UObject/ScriptDelegates.h"
 
 class AController;
+class AFortPickup;
 class AFortGameStateAthena;
 class AFortAthenaMapInfo;
 class AFortPlayerStateAthena;
@@ -287,6 +288,12 @@ public:
     DefineUProperty(UFortMutatorListComponent*, MutatorListComponent)
     static bool HasMutatorListComponent() { return Member_MutatorListComponent.IsAvailable(); }
     TArray<UObject*>* GetGameplayMutatorList() const;
+    // What the player controller's IFortInventoryOwnerInterface::OnPickupPreGiven / OnPickupPostGiven pass a pickup on to
+    // (8.50 CL-6058028 slots 0x11E, 0xFE9080, and 0x11F): the mutators' FortGameStateAthena_OnPickupPreGivenToPlayer
+    // (Endgame's captures a stone there, 0x10630C0) and its Post. Only where Finder::ResolvePickupGivenLive found them.
+    static bool HasOnPickupGivenToPlayer();
+    void OnPickupPreGivenToPlayer(AController* Controller, AFortPickup* Pickup);
+    void OnPickupPostGivenToPlayer(AController* Controller, AFortPickup* Pickup);
     // The match's named weights for its loot rolls (21.40's game state asks its mutators with
     // FortGameStateAthena_ModifyNamedWeights): 8.51's live event mutator's (the Unvaulting's winner). Empty without any.
     void ModifyNamedWeights(TMap<FName, float>& NamedWeights) const;

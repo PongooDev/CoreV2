@@ -3812,6 +3812,8 @@ void FCoreAthenaBotManager::RefreshLoot(float Now)
     Loot.clear();
     AFortGameModeAthena* Athena = GetGameMode();
     UClass* RangedClass = RangedWeaponClass();
+    // 8.50's Endgame: its stones, found by the mutator's own stone lookup on the pickup's item.
+    const AFortAthenaMutator_Ashton* Ashton = Athena ? AFortAthenaMutator_Ashton::GetCurrent(Athena->GetWorld()) : nullptr;
     for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Athena, AFortPickup::StaticClass()))
     {
         AFortPickup* Pickup = Cast<AFortPickup>(Actor);
@@ -3840,9 +3842,11 @@ void FCoreAthenaBotManager::RefreshLoot(float Now)
         const bool bConsumable = !bWeapon && !bAmmo && Weapon && FCoreAthenaBotController::GetConsumableInfo(Definition) != nullptr;
         // Wood, stone and metal on the floor, which bots take for building (CoreV2 #252).
         const bool bMaterial = !Weapon && FCoreAthenaBotController::MaterialKindOf(Definition) >= 0;
-        if (bWeapon || bAmmo || bConsumable || bMaterial)
+        const int32_t Stone = Ashton && !bWeapon && !bAmmo && !bConsumable && !bMaterial ? Ashton->FindStoneIndex(Cast<UFortWorldItemDefinition>(Definition)) : -1;
+        const bool bObjective = Stone >= 0 && !Ashton->IsStoneCaptured(Stone);
+        if (bWeapon || bAmmo || bConsumable || bMaterial || bObjective)
         {
-            Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon, bConsumable });
+            Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon, bConsumable, bObjective });
         }
     }
 #endif

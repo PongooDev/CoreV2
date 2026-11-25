@@ -1021,6 +1021,9 @@ namespace Natives
     // OnPickupPreGivenToPlayer / OnPickupPostGivenToPlayer (slots 0x11E, 0x11F), which ask its mutators. Finder::ResolvePickupGivenLive.
     inline int32_t IFortInventoryOwnerInterface_OnPickupPreGivenIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_OnPickupPostGivenIndex = -1;
+    // The game state's two slots those call (8.50: 0x11E, 0x11F), found with them.
+    inline int32_t AFortGameStateAthena_OnPickupPreGivenToPlayerIndex = -1;
+    inline int32_t AFortGameStateAthena_OnPickupPostGivenToPlayerIndex = -1;
     // 8.50: AFortGameModeAthena's (0xFA3A20, slot 0x190): StartingItems, then each mutator's
     // FortGameModeAthena_GetInventoryOverride. Finder::ResolveGetStartingItemsLive.
     inline int32_t AFortGameModeZone_GetStartingItemsIndex = -1;

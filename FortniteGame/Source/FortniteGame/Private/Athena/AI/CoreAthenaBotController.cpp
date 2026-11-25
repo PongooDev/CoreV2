@@ -2680,6 +2680,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
             StopMoving();
             Intent = L"bunker";
         }
+        // The mode's objective on the map (an Endgame stone), as players race for it.
+        else if (GoForObjectivePickup(Now))
+        {
+            Intent = L"objective";
+        }
         // A squad's player marked the map: the bot goes there (an unarmed one arms itself first).
         else if (bHasMapMarker && !bArmed && Loot(Now, 4000.0f))
         {
@@ -4811,6 +4816,75 @@ bool FCoreAthenaBotController::IsTargetBoxedIn(AFortPawn* Target) const
     return Building && Building->bPlayerPlaced && !Building->bDestroyed && (Hit - To).Size() < 600.0f;
 }
 
+bool FCoreAthenaBotController::GoForObjectivePickup(float Now)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    AFortPickup* Target = ObjectiveTarget.Get();
+    if (Target && (Target->bPickedUp || Target->IsPendingKill() || IsUnreachable(Target)))
+    {
+        Target = nullptr;
+    }
+    // The nearest one, unless the bot is already on its way to one.
+    if (!Target)
+    {
+        float Best = 0.0f;
+        for (const FCoreAthenaBotLoot& Entry : Manager->GetLoot())
+        {
+            AFortPickup* Pickup = Entry.bObjective ? Entry.Pickup.Get() : nullptr;
+            if (!Pickup || Pickup->bPickedUp || IsUnreachable(Pickup))
+            {
+                continue;
+            }
+            const float Distance = Dist2D(Entry.Location, Location);
+            if (!Target || Distance < Best)
+            {
+                Best = Distance;
+                Target = Pickup;
+            }
+        }
+        if (!Target)
+        {
+            ObjectiveTarget = nullptr;
+            return false;
+        }
+        ObjectiveTarget = Target;
+        ObjectiveClosest = Best;
+        ObjectiveClosestTime = Now;
+        Log::Info(L"Battle Royale bots: {} goes for {} {:.0f} m away", BotName, NameOf(reinterpret_cast<const UObject*>(Target->PrimaryPickupItemEntry.ItemDefinition)), Best / 100.0f);
+    }
+    const FVector PickupLocation = LocationOf(Target);
+    const float Distance = Dist2D(PickupLocation, Location);
+    if (Distance < 200.0f && std::fabs(PickupLocation.Z - Location.Z) < 250.0f)
+    {
+        TakePickup(Target);
+        ObjectiveTarget = nullptr;
+        return true;
+    }
+    // Getting no closer for 30 s (on a roof, across water) 🟡: given up, as Loot gives up a pickup it can't reach.
+    if (Distance < ObjectiveClosest - 300.0f)
+    {
+        ObjectiveClosest = Distance;
+        ObjectiveClosestTime = Now;
+    }
+    else if (Now - ObjectiveClosestTime > 30.0f)
+    {
+        MarkUnreachable(Target);
+        ObjectiveTarget = nullptr;
+        return false;
+    }
+    MoveTowards(PickupLocation, Now, 50.0f);
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool FCoreAthenaBotController::Loot(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
@@ -5175,6 +5249,32 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
     // Into the bot's own inventory (8.30 keeps it in the controller's AFortInventory; Core's brain holds it), and the
     // pickup is gone as when a player takes it.
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
+    // An Endgame stone: a player's pickup hands it to the game state's OnPickupPreGivenToPlayer before its items go in
+    // and OnPickupPostGivenToPlayer after (the controller's IFortInventoryOwnerInterface::OnPickupPreGiven, 8.50
+    // 0x16F8F60), and the mutator captures the stone there (0x10630C0 -> 0x106EC40). The bot's controller isn't a player
+    // controller, so the bot's pickup calls the game state's pair itself; the stone isn't kept (Core's bot inventory has
+    // no place for it), the pickup goes as a taken one does.
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    const AFortAthenaMutator_Ashton* Ashton = GameMode ? AFortAthenaMutator_Ashton::GetCurrent(GameMode->GetWorld()) : nullptr;
+    const int32_t Stone = Ashton ? Ashton->FindStoneIndex(Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition))) : -1;
+    if (Stone >= 0)
+    {
+        AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(GameMode->GetWorld()->GetGameState()));
+        AController* BotController = reinterpret_cast<AController*>(Controller.Get());
+        if (!GameState || !BotController || !AFortGameStateAthena::HasOnPickupGivenToPlayer())
+        {
+            MarkUnreachable(Pickup);
+            return;
+        }
+        GameState->OnPickupPreGivenToPlayer(BotController, Pickup);
+        Pickup->bPickedUp = true;
+        Manager->ForgetLoot(Pickup);
+        GameState->OnPickupPostGivenToPlayer(BotController, Pickup);
+        Log::Info(L"Battle Royale bots: {} takes Endgame stone {} ({}), {}", BotName, Stone, NameOf(reinterpret_cast<const UObject*>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition))),
+            Ashton->IsStoneCaptured(Stone) ? L"captured" : L"not captured");
+        Pickup->K2_DestroyActor();
+        return;
+    }
     if (!GiveItem(Entry.ItemDefinition, std::max(static_cast<int32_t>(Entry.Count), 1), std::max(static_cast<int32_t>(Entry.LoadedAmmo), 0)))
     {
         MarkUnreachable(Pickup);

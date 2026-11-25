@@ -82,6 +82,35 @@ void AFortAthenaMutator_Ashton::GiveVillainLeaderItemCall(AFortPlayerControllerA
 #endif
 }
 
+int32_t AFortAthenaMutator_Ashton::FindStoneIndex(const UFortWorldItemDefinition* ItemDefinition) const
+{
+    if (!ItemDefinition || !UFortWorldItemDefinition::HasSpecialActorPickupTag() || !FAshtonStoneData::StaticStruct())
+    {
+        return -1;
+    }
+    // The stone whose GameplayTag the pickup's tag is under (SpecialActor.Ashton.Object.P.Pickup under .Object.P), as
+    // OnPickupDestroying's lookup (0x1067230) matches them.
+    const std::wstring PickupTag = static_cast<FGameplayTag>(const_cast<UFortWorldItemDefinition*>(ItemDefinition)->SpecialActorPickupTag).TagName.ToString().ToStdString();
+    const int32_t DataSize = FAshtonStoneData::StaticStruct()->GetStructureSize();
+    const uint8_t* DataList = reinterpret_cast<const uint8_t*>(&static_cast<FAshtonStoneData&>(StoneDataList));
+    for (int32_t Index = 0; !PickupTag.empty() && DataSize > 0 && Index < 6; ++Index)
+    {
+        const FAshtonStoneData& Data = *reinterpret_cast<const FAshtonStoneData*>(DataList + static_cast<ptrdiff_t>(Index) * DataSize);
+        const std::wstring StoneTag = static_cast<FGameplayTag>(const_cast<FAshtonStoneData&>(Data).GameplayTag).TagName.ToString().ToStdString();
+        if (!StoneTag.empty() && (PickupTag == StoneTag || PickupTag.starts_with(StoneTag + L".")))
+        {
+            return Index;
+        }
+    }
+    return -1;
+}
+
+bool AFortAthenaMutator_Ashton::IsStoneCaptured(int32_t StoneIndex) const
+{
+    const TStructArray<FAshtonStoneState>& Stones = StoneList;
+    return StoneIndex >= 0 && StoneIndex < Stones.Num() && Stones[StoneIndex].StoneState == 2;
+}
+
 void AFortAthenaMutator_Ashton::OnPickupSpawnedAndReady(AFortPickup* PickupObj, const UFortWorldItemDefinition* PickupItemDef)
 {
 #if WITH_SERVER_CODE
@@ -89,21 +118,7 @@ void AFortAthenaMutator_Ashton::OnPickupSpawnedAndReady(AFortPickup* PickupObj, 
     {
         return;
     }
-    // The stone whose GameplayTag the pickup's tag is under (SpecialActor.Ashton.Object.P.Pickup under .Object.P), as
-    // OnPickupDestroying's lookup (0x1067230) matches them.
-    const std::wstring PickupTag = static_cast<FGameplayTag>(const_cast<UFortWorldItemDefinition*>(PickupItemDef)->SpecialActorPickupTag).TagName.ToString().ToStdString();
-    const int32_t DataSize = FAshtonStoneData::StaticStruct() ? FAshtonStoneData::StaticStruct()->GetStructureSize() : 0;
-    const uint8_t* DataList = reinterpret_cast<const uint8_t*>(&static_cast<FAshtonStoneData&>(StoneDataList));
-    int32_t Found = -1;
-    for (int32_t Index = 0; DataSize > 0 && Index < 6 && Found < 0; ++Index)
-    {
-        const FAshtonStoneData& Data = *reinterpret_cast<const FAshtonStoneData*>(DataList + static_cast<ptrdiff_t>(Index) * DataSize);
-        const std::wstring StoneTag = static_cast<FGameplayTag>(const_cast<FAshtonStoneData&>(Data).GameplayTag).TagName.ToString().ToStdString();
-        if (!StoneTag.empty() && (PickupTag == StoneTag || PickupTag.starts_with(StoneTag + L".")))
-        {
-            Found = Index;
-        }
-    }
+    const int32_t Found = FindStoneIndex(PickupItemDef);
     TStructArray<FAshtonStoneState>& Stones = StoneList;
     if (Found < 0 || Found >= Stones.Num())
     {

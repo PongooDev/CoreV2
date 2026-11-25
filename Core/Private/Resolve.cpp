@@ -10132,6 +10132,7 @@ bool Finder::ResolvePickupGivenLive()
     };
     // The first pair: the interface's vtable is followed by other classes' (no RTTI), which repeat it.
     int32_t Found = -1;
+    int32_t FoundGameStateSlot = -1;
     for (int32_t Index = 0; Index + 1 < 0x40 && Found < 0; ++Index)
     {
         const uintptr_t Pre = VTableEntry(InterfaceVTable, Index);
@@ -10141,6 +10142,7 @@ bool Finder::ResolvePickupGivenLive()
         if (PreSlot > 0x100 && Post && GameStateSlot(Post) == PreSlot + 1)
         {
             Found = Index;
+            FoundGameStateSlot = PreSlot;
         }
     }
     if (Found < 0)
@@ -10150,8 +10152,10 @@ bool Finder::ResolvePickupGivenLive()
     }
     Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex = Found;
     Natives::IFortInventoryOwnerInterface_OnPickupPostGivenIndex = Found + 1;
-    Log::Info(L"Finder: IFortInventoryOwnerInterface::OnPickupPreGiven is slot 0x{:X}, OnPickupPostGiven 0x{:X} (the player controller's 0x{:X}, 0x{:X})", Found, Found + 1,
-        VTableEntry(InterfaceVTable, Found) - Finder::ImageBase(), VTableEntry(InterfaceVTable, Found + 1) - Finder::ImageBase());
+    Natives::AFortGameStateAthena_OnPickupPreGivenToPlayerIndex = FoundGameStateSlot;
+    Natives::AFortGameStateAthena_OnPickupPostGivenToPlayerIndex = FoundGameStateSlot + 1;
+    Log::Info(L"Finder: IFortInventoryOwnerInterface::OnPickupPreGiven is slot 0x{:X}, OnPickupPostGiven 0x{:X} (the player controller's 0x{:X}, 0x{:X}; the game state's slots 0x{:X}, 0x{:X})", Found,
+        Found + 1, VTableEntry(InterfaceVTable, Found) - Finder::ImageBase(), VTableEntry(InterfaceVTable, Found + 1) - Finder::ImageBase(), FoundGameStateSlot, FoundGameStateSlot + 1);
     return true;
 }
 

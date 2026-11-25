@@ -181,6 +181,20 @@ public:
         InvocationList.Empty();
     }
 
+    // Every bound object, pending kill or unreachable ones too (Epic's GetAllObjectsEvenIfUnreachable).
+    TArray<UObject*> GetAllObjectsEvenIfUnreachable() const
+    {
+        TArray<UObject*> Objects;
+        for (int32_t Index = 0; Index < InvocationList.Num(); ++Index)
+        {
+            if (UObject* Object = InvocationList[Index].GetUObjectEvenIfUnreachable())
+            {
+                Objects.Add(Object);
+            }
+        }
+        return Objects;
+    }
+
     // Epic's AddDynamic, AddUniqueDynamic, RemoveDynamic and IsAlreadyBound (TBaseDynamicMulticastDelegate's macros, which
     // name the function from a member function pointer): Core names its native by the name it added it under.
     void AddDynamic(UObject* InUserObject, FName InFunctionName)

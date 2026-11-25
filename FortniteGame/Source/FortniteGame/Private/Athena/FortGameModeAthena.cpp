@@ -220,21 +220,11 @@ namespace
     // shopping cart and golf cart (20%), the Quadcrasher (100%), the Stormwing (80%) and, as the native
     // FortAthenaJackalVehicle that no spawner spawns, the Driftboard (0%): no Driftboard stays. Not in Creative, whose
     // islands' vehicles are the players' own.
-    // From 7.30 the function is ShouldSpawnVehicle (the same check, but true while the game state's
-    // bPlaylistDataIsLoaded is false) and the spawner rolls it itself: Athena_VehicleSpawner_C's SpawnVehicle, with
-    // authority and AreAthenaVehiclesEnabled, calls ShouldSpawnVehicle(GetVehicleClassOverride(VehicleClass), or
-    // VehicleClass when there is no override) and spawns nothing when it says no. The spawner runs SpawnVehicle at
-    // BeginPlay once the map info is initialized, else from the game mode's OnMapInfoInitialized, which the game
-    // broadcasts from AFortGameStateAthena::OnPlaylistDataLoadCompleted (7.30 0xD722C0) -> AFortGameModeAthena::
-    // OnPlaylistDataLoaded (0xD238B0) -> AFortGameStateAthena::InitializeMapInfo (0xD6C400), all intact; it sets
-    // bPlaylistDataIsLoaded only after that, so the spawners already waiting keep their vehicle and later ones roll.
-    // That is the game's own order with its own check (0xD2FB60, called only through its exec), so Core rolls nothing
-    // on 7.30: a second roll would remove vehicles the game kept. It only counts what the spawners spawned. Builds with
-    // neither function (1.1 to 7.10) do nothing here.
+    // From 7.30 the spawners roll the playlist's percents themselves (ShouldSpawnVehicle, RollGatedPlacedVehicles), and
+    // builds with neither function (1.1 to 7.10) have nothing to roll.
     void ApplyVehicleSpawnPercents(AFortGameModeAthena* GameMode)
     {
-        const bool bCoreRolls = AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad();
-        if ((!bCoreRolls && !AFortGameModeAthena::HasShouldSpawnVehicle()) || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
+        if (!AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad() || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
         {
             return;
         }
@@ -249,7 +239,6 @@ namespace
         UWorld* World = GameMode->GetWorld();
         int32_t Placed = 0;
         int32_t Destroyed = 0;
-        int32_t Spawners = 0;
         for (TObjectIterator<AActor> It; It; ++It)
         {
             AActor* Spawner = *It;
@@ -260,12 +249,6 @@ namespace
             uint8_t* const SpawnerData = reinterpret_cast<uint8_t*>(Spawner);
             UClass* VehicleClass = *reinterpret_cast<UClass**>(SpawnerData + VehicleClassProperty->GetOffset_ForInternal());
             AActor*& Vehicle = *reinterpret_cast<AActor**>(SpawnerData + SpawnedVehicleProperty->GetOffset_ForInternal());
-            if (!bCoreRolls)
-            {
-                ++Spawners;
-                Placed += Vehicle && !Vehicle->IsPendingKill();
-                continue;
-            }
             if (!Vehicle || Vehicle->IsPendingKill())
             {
                 continue;
@@ -276,11 +259,6 @@ namespace
                 Vehicle = nullptr;
                 ++Destroyed;
             }
-        }
-        if (!bCoreRolls)
-        {
-            Log::Info(L"Battle Royale: {} of {} placed vehicle spawners spawned their vehicle (their own ShouldSpawnVehicle), {} didn't; Core rolls none", Placed, Spawners, Spawners - Placed);
-            return;
         }
         Log::Info(L"Battle Royale: {} of {} placed vehicles spawn (ShouldSpawnVehiclePostPlaylistLoad), {} destroyed", Placed - Destroyed, Placed, Destroyed);
     }
@@ -334,6 +312,11 @@ namespace
         FTimerHandle PlayersTimer;
         // The tick after OnCurrentPlaylistLoaded; before 4.4, CheckMatchPlaylist's.
         FTimerHandle PlaylistTimer;
+        // 7.30+: the placed spawners' vehicles spawned while ShouldSpawnVehicle's gate was open, rolled the tick after
+        // (RollGatedPlacedVehicles), once a world.
+        TArray<FWeakObjectPtr> GatedPlacedVehicles;
+        FTimerHandle GatedVehiclesTimer;
+        bool bGatedVehiclesTaken = false;
         // Creative's hub, logged once its levels are in.
         FTimerHandle CreativeHubTimer;
         // The playlist context tags SetPlaylistContextTags put in the game mode's GameContextTags, which the next
@@ -396,6 +379,99 @@ namespace
         Handle.Invalidate();
     }
 
+    // 7.30+ (#648): the placed vehicles the playlist doesn't allow. Athena_VehicleSpawner_C binds SpawnVehicle to the
+    // game mode's OnMapInfoInitialized, and SpawnVehicle spawns when ShouldSpawnVehicle says so. The game broadcasts it
+    // from AFortGameStateAthena::OnPlaylistDataLoadCompleted (8.51 0xFE6E80) -> the game mode's OnPlaylistDataLoaded
+    // (slot 0x1A9, 0xFA7E80) -> AFortGameStateAthena::InitializeMapInfo (0xFE3870), and sets bPlaylistDataIsLoaded
+    // (+0xF38) only at that function's end, so every waiting spawner got ShouldSpawnVehicle's "not loaded yet" true and
+    // every vehicle spawned whatever the playlist and its Min/MaxSpawnPercent rows say (18 Stormwings on 8.51, whose
+    // Default.BiPlane rows are 0). 7.30 (0xD722C0 -> 0xD238B0 -> 0xD6C400) has the same order. The roll that should
+    // follow isn't in the client builds, so Core makes it with the game's ShouldSpawnVehicle once the flag is set.
+    // OnCurrentPlaylistLoaded comes between the spawns and the flag: the spawners are pending kill by then (each
+    // destroys itself after its spawn) but still bound, so their SpawnedVehicle is taken here and rolled the tick
+    // after. Spawners that begin play later find the flag set and roll themselves. Not in Creative.
+    void RollGatedPlacedVehicles(AFortGameModeAthena* GameMode)
+    {
+        FMatchEvents& Events = MatchEventsOf(GameMode);
+        Events.GatedVehiclesTimer.Invalidate();
+        TArray<FWeakObjectPtr> Vehicles = Events.GatedPlacedVehicles;
+        Events.GatedPlacedVehicles.Empty();
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        if (!GameState || !GameState->bPlaylistDataIsLoaded)
+        {
+            Log::Warning(L"Battle Royale: the playlist data isn't loaded the tick after OnCurrentPlaylistLoaded, so the {} placed vehicles stay", Vehicles.Num());
+            return;
+        }
+        int32_t Placed = 0;
+        int32_t Destroyed = 0;
+        // Per vehicle class: how many spawned, and how many of them stay.
+        TMap<FName, TPair<int32_t, int32_t>> Classes;
+        for (const FWeakObjectPtr& WeakVehicle : Vehicles)
+        {
+            AActor* Vehicle = static_cast<AActor*>(WeakVehicle.Get());
+            if (!Vehicle)
+            {
+                continue;
+            }
+            ++Placed;
+            UClass* VehicleClass = Vehicle->GetClass();
+            TPair<int32_t, int32_t>& Counts = Classes.FindOrAdd(VehicleClass->GetFName());
+            ++Counts.Key;
+            if (!GameMode->ShouldSpawnVehicle(VehicleClass) && Vehicle->Destroy())
+            {
+                ++Destroyed;
+                continue;
+            }
+            ++Counts.Value;
+        }
+        FString ClassesText;
+        for (const TPair<FName, TPair<int32_t, int32_t>>& Pair : Classes)
+        {
+            ClassesText += FString::Printf(L"%s%s %d of %d", ClassesText.IsEmpty() ? L"" : L", ", *Pair.Key.ToString(), Pair.Value.Value, Pair.Value.Key);
+        }
+        Log::Info(L"Battle Royale: {} of {} placed vehicles spawn (the playlist's ShouldSpawnVehicle once its data is loaded), {} destroyed{}{}", Placed - Destroyed, Placed, Destroyed,
+            ClassesText.IsEmpty() ? L"" : L": ", ClassesText.ToStdString());
+    }
+
+    void TakeGatedPlacedVehicles(AFortGameModeAthena* GameMode)
+    {
+        FMatchEvents& Events = MatchEventsOf(GameMode);
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        if (Events.bGatedVehiclesTaken || !GameState || !AFortGameModeAthena::HasShouldSpawnVehicle() || AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad()
+            || !AFortGameModeAthena::HasMapInfoInitialized() || !AFortGameStateAthena::HasPlaylistDataLoadState() || GameState->bPlaylistDataIsLoaded
+            || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
+        {
+            return;
+        }
+        UClass* SpawnerClass = FindObject<UClass>(nullptr, L"/Game/Athena/DrivableVehicles/Athena_VehicleSpawner.Athena_VehicleSpawner_C");
+        const UProperty* SpawnedVehicleProperty = SpawnerClass ? SpawnerClass->FindPropertyByName(FName(L"SpawnedVehicle", FNAME_Find)) : nullptr;
+        if (!SpawnedVehicleProperty || SpawnedVehicleProperty->GetSize() != sizeof(AActor*))
+        {
+            return;
+        }
+        Events.bGatedVehiclesTaken = true;
+        int32_t Spawners = 0;
+        for (UObject* Object : GameMode->OnMapInfoInitialized.GetAllObjectsEvenIfUnreachable())
+        {
+            if (!Object->IsA(SpawnerClass))
+            {
+                continue;
+            }
+            ++Spawners;
+            AActor* Vehicle = *reinterpret_cast<AActor**>(reinterpret_cast<uint8_t*>(Object) + SpawnedVehicleProperty->GetOffset_ForInternal());
+            if (Vehicle && !Vehicle->IsPendingKill())
+            {
+                Events.GatedPlacedVehicles.Add(FWeakObjectPtr(Vehicle));
+            }
+        }
+        Log::Info(L"Battle Royale: {} placed vehicle spawners spawned {} vehicles before the playlist data was loaded (ShouldSpawnVehicle's gate open); they are rolled the tick after",
+            Spawners, Events.GatedPlacedVehicles.Num());
+        if (Events.GatedPlacedVehicles.Num() > 0)
+        {
+            SetGameModeTimer(GameMode, Events.GatedVehiclesTimer, NextTickDelay, &RollGatedPlacedVehicles);
+        }
+    }
+
     // The signature of Class's Blueprint delegate PropertyName (its UMulticastDelegateProperty's SignatureFunction), or
     // null where the class has no such delegate.
     const UFunction* DelegateSignature(UClass* Class, const wchar_t* PropertyName)
@@ -444,6 +520,16 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
     }
     ApplySpawnPercents(this);
 #endif
+}
+
+bool AFortGameModeAthena::ShouldSpawnVehicle(UClass* VehicleClass)
+{
+    Reflection::FParams Params(FindStaticFunction_ShouldSpawnVehicle(), true);
+    if (!Params.Set(L"VehicleClass", VehicleClass) || !Params.Call(this))
+    {
+        return true;
+    }
+    return Params.Take<bool>(L"ReturnValue");
 }
 
 bool AFortGameModeAthena::ShouldSpawnVehiclePostPlaylistLoad(UClass* VehicleClass)
@@ -3284,6 +3370,7 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
     {
         SetGameModeTimer(this, Events.CreativeHubTimer, CreativeHubLogDelay, [](AFortGameModeAthena* GameMode) { AFortCreativePortalManager::LogHub(GameMode); });
     }
+    TakeGatedPlacedVehicles(this);
     if (!Events.PlaylistTimer.IsValid())
     {
         SetGameModeTimer(this, Events.PlaylistTimer, NextTickDelay, &AfterCurrentPlaylistLoaded);

@@ -253,11 +253,16 @@ public:
     DefineUFunction(ShouldSpawnVehiclePostPlaylistLoad)
     static bool HasShouldSpawnVehiclePostPlaylistLoad() { return FindStaticFunction_ShouldSpawnVehiclePostPlaylistLoad() != nullptr; }
     bool ShouldSpawnVehiclePostPlaylistLoad(UClass* VehicleClass);
-    // Its 7.30 name (7.30 0xD2FB60, intact): the same check, but true while the game state's bPlaylistDataIsLoaded is
-    // false. The map's placed vehicle spawners (Athena_VehicleSpawner_C::SpawnVehicle) call it themselves before they
-    // spawn, so Core only checks that it exists and never calls it.
+    // Its 7.30 name (7.30 0xD2FB60, 8.51 0xFB3D90, intact): the same check, but true while the game state's
+    // bPlaylistDataIsLoaded is false. The map's placed vehicle spawners (Athena_VehicleSpawner_C::SpawnVehicle) call it
+    // before they spawn, and the ones waiting on OnMapInfoInitialized call it while that gate is still open (#648).
     DefineUFunction(ShouldSpawnVehicle)
     static bool HasShouldSpawnVehicle() { return FindStaticFunction_ShouldSpawnVehicle() != nullptr; }
+    bool ShouldSpawnVehicle(UClass* VehicleClass);
+    // What AFortGameStateAthena::InitializeMapInfo broadcasts at its end (8.51 0xFE3870 -> 0xF9E020, which then sets
+    // bMapInfoInitialized); the placed vehicle spawners bind SpawnVehicle to it at BeginPlay.
+    DefineUProperty(FMulticastScriptDelegate, OnMapInfoInitialized)
+    static bool HasMapInfoInitialized() { return Member_OnMapInfoInitialized.IsAvailable(); }
 
     // Has the map info roll the placed vending machines' rarities and what they sell (AFortAthenaMapInfo::
     // SpawnVendingMachines, from 3.5, #257) with the match's playlist's tables: at once where they are already in place,

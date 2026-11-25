@@ -12,7 +12,6 @@
 #include "GameFramework/Actor.h"
 #include "Hooks.h"
 #include "Log.h"
-#include "Misc/StringAssetReference.h"
 #include "Natives.h"
 #include "Pawns/FortMovementComp_Character.h"
 #include "Player/FortPlayerController.h"
@@ -426,14 +425,8 @@ bool AFortGameStateAthena::HasStreamedAdditionalPlaylistLevels() const
         return true;
     }
     // Counted, not matched by name: the name each streamed level is listed under is the game's to choose.
-    const TArray<TAssetPtr<UWorld>>& Levels = Playlist->AdditionalLevels;
-    int32_t Wanted = 0;
-    for (int32_t Index = 0; Index < Levels.Num(); ++Index)
-    {
-        Wanted += SoftElementAt(Levels, Index).ToStringReference().IsValid() ? 1 : 0;
-    }
     const TArray<FName>& Streamed = AdditionalPlaylistLevelsStreamed;
-    return Streamed.Num() >= Wanted;
+    return Streamed.Num() >= Playlist->GetAdditionalLevelPackageNames().Num();
 }
 
 void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
@@ -444,21 +437,24 @@ void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
     {
         return;
     }
-    const TArray<TAssetPtr<UWorld>>& Levels = Playlist->AdditionalLevels;
-    if (Levels.Num() > 0 && !Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)
+    // 8.51+: with the playlist's ConditionalAssetGroup lists its flags bring (8.51's Creative hub's Battle Royale rifts,
+    // BR_Portals_Enabled: PongooDev/CoreV2#654); the clients stream what AdditionalPlaylistLevelsStreamed lists
+    // (OnRep_AdditionalPlaylistLevelsStreamed, 8.51 0x12DB650).
+    const TArray<FString> PackageNames = Playlist->GetAdditionalLevelPackageNames();
+    if (PackageNames.Num() > 0 && !Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)
     {
         Log::Error(L"PLAYLIST: AFortGameState::StartStreamingAdditionalPlaylistLevel wasn't found, so {}'s {} additional levels don't stream in",
-            Playlist->PlaylistNameText(), Levels.Num());
+            Playlist->PlaylistNameText(), PackageNames.Num());
         return;
     }
-    for (int32_t Index = 0; Index < Levels.Num(); ++Index)
+    const TArray<UFortSharedAssetList*> ConditionalLists = Playlist->GetConditionalAssetLists();
+    for (UFortSharedAssetList* List : ConditionalLists)
     {
-        const FStringAssetReference& Level = SoftElementAt(Levels, Index).ToStringReference();
-        if (Level.IsValid())
-        {
-            const FString PackageName = Level.GetLongPackageName();
-            Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(this), FName(*PackageName));
-        }
+        Log::Info(L"PLAYLIST: {}'s conditional assets {} are brought by the runtime options' flags", Playlist->PlaylistNameText(), List->GetName().ToStdString());
+    }
+    for (const FString& PackageName : PackageNames)
+    {
+        Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(this), FName(*PackageName));
     }
 #endif
 }

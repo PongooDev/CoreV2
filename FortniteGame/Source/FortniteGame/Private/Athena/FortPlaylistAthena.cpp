@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "FortPlaylistUserOptions.h"
+#include "FortRuntimeOptions.h"
+#include "Misc/StringAssetReference.h"
 #include "UObject/UnrealType.h"
 #include "Log.h"
 
@@ -19,6 +21,57 @@ std::wstring UFortPlaylist::PlaylistNameText() const
         return static_cast<FName>(static_cast<const UFortPlaylistAthena*>(this)->PlaylistName).ToStdString();
     }
     return std::wstring(L"none");
+}
+
+TArray<UFortSharedAssetList*> UFortPlaylist::GetConditionalAssetLists() const
+{
+    TArray<UFortSharedAssetList*> Lists;
+    const UFortConditionalAssetGroup* Group = HasConditionalAssetGroup() ? static_cast<UFortConditionalAssetGroup*>(ConditionalAssetGroup) : nullptr;
+    const UFortRuntimeOptions* Options = UFortRuntimeOptions::HasPlaylistConditionalFlags() ? UFortRuntimeOptions::Get() : nullptr;
+    if (!Group || !Options || !UFortConditionalAssetGroup::HasConditionalAssetsToLoad())
+    {
+        return Lists;
+    }
+    // As 8.51's LoadCurrentPlaylistData (0xFE4E60) finds them: each flag's list, the key compared without its case.
+    const TArray<FString>& Flags = Options->PlaylistConditionalFlags;
+    const TMap<FString, UFortSharedAssetList*>& AssetsToLoad = Group->GetConditionalAssetsToLoad();
+    for (const FString& Flag : Flags)
+    {
+        for (const TPair<FString, UFortSharedAssetList*>& Entry : AssetsToLoad)
+        {
+            if (Entry.Value && _wcsicmp(*Entry.Key, *Flag) == 0)
+            {
+                Lists.Add(Entry.Value);
+                break;
+            }
+        }
+    }
+    return Lists;
+}
+
+TArray<FString> UFortPlaylist::GetAdditionalLevelPackageNames() const
+{
+    TArray<FString> PackageNames;
+    const auto AddLevels = [&PackageNames](const TArray<TAssetPtr<UWorld>>& Levels)
+    {
+        for (int32_t Index = 0; Index < Levels.Num(); ++Index)
+        {
+            const FStringAssetReference& Level = SoftElementAt(Levels, Index).ToStringReference();
+            if (Level.IsValid())
+            {
+                PackageNames.Add(Level.GetLongPackageName());
+            }
+        }
+    };
+    if (HasAdditionalLevels())
+    {
+        AddLevels(AdditionalLevels);
+    }
+    for (UFortSharedAssetList* List : GetConditionalAssetLists())
+    {
+        AddLevels(List->SharedAdditionalLevels);
+    }
+    return PackageNames;
 }
 
 bool UFortPlaylist::IsPlaylistNamed(FName Name) const

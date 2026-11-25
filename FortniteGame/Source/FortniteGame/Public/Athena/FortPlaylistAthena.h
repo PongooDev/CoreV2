@@ -14,6 +14,29 @@ class UDataTable;
 class UPlaylistUserOptions;
 class UWorld;
 
+// 8.51+: assets a playlist brings only under a flag (UFortRuntimeOptions' PlaylistConditionalFlags).
+class UFortSharedAssetList : public UObject
+{
+    DefineUnrealClass(UFortSharedAssetList, FortniteGame)
+
+public:
+    // Levels streamed in with the playlist's AdditionalLevels (8.51's Creative hub: its Battle Royale rifts).
+    DefineUProperty(TArray<TAssetPtr<UWorld>>, SharedAdditionalLevels)
+};
+
+class UFortConditionalAssetGroup : public UObject
+{
+    DefineUnrealClass(UFortConditionalAssetGroup, FortniteGame)
+
+public:
+    // By flag; 8.51's LoadCurrentPlaylistData (0xFE4E60) looks each of the runtime options' flags up in it (the game's
+    // FString hash and Stricmp: the case doesn't count) and fully loads the lists' SharedItemsToFullyLoad.
+    using FConditionalAssets = TMap<FString, UFortSharedAssetList*>;
+    static inline Reflection::FMemberInfo Member_ConditionalAssetsToLoad{ &StaticReflectionOwner, TEXT("ConditionalAssetsToLoad"), sizeof(FConditionalAssets), Reflection::EMemberKind::Value };
+    const FConditionalAssets& GetConditionalAssetsToLoad() const { return Reflection::AccessMember<FConditionalAssets>(this, Member_ConditionalAssetsToLoad); }
+    static bool HasConditionalAssetsToLoad() { return Member_ConditionalAssetsToLoad.IsAvailable(); }
+};
+
 // A playlist's settings as a data asset (from 3.5, where it replaced AFortAthenaPlaylistBase and the game mode's
 // PlaylistDataTables). AFortGameStateAthena::SetCurrentPlaylistId (3.5.1 0x9FA020) looks the match's up by its id and
 // keeps it as CurrentPlaylistData (from 6.01 in CurrentPlaylistInfo, an FPlaylistPropertyArray); ApplyPlaylistDataTables
@@ -42,6 +65,17 @@ public:
     // The levels the match streams in with the playlist (AFortGameState::StartStreamingAdditionalPlaylistLevel).
     DefineUProperty(TArray<TAssetPtr<UWorld>>, AdditionalLevels)
     static bool HasAdditionalLevels() { return Member_AdditionalLevels.IsAvailable(); }
+    // 8.51+ (+0x170): the asset lists the playlist brings under the runtime options' PlaylistConditionalFlags.
+    // Playlist_PlaygroundV2's Conditional_BR_Portal_Group: BR_Portals_Enabled streams the hub's Battle Royale rifts
+    // (PG_Island_GroupMaster_BR_Portals), BR_Portals_Disabled their closed copy.
+    DefineUProperty(UFortConditionalAssetGroup*, ConditionalAssetGroup)
+    static bool HasConditionalAssetGroup() { return Member_ConditionalAssetGroup.IsAvailable(); }
+    // The asset lists of ConditionalAssetGroup the runtime options' flags name, in flag order (none before 8.51; Core's name
+    // for the lookup 8.51 inlines in LoadCurrentPlaylistData).
+    TArray<UFortSharedAssetList*> GetConditionalAssetLists() const;
+    // The package names of the levels the playlist streams in: AdditionalLevels, then the SharedAdditionalLevels of
+    // GetConditionalAssetLists (Core's name).
+    TArray<FString> GetAdditionalLevelPackageNames() const;
     DefineUProperty(TAssetPtr<UDataTable>, LootTierData)
     DefineUProperty(TAssetPtr<UDataTable>, LootPackages)
     static bool HasLootTables() { return Member_LootTierData.IsAvailable() && Member_LootPackages.IsAvailable(); }

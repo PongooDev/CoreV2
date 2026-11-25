@@ -17609,6 +17609,77 @@ bool Finder::ResolvePakPlatformFileVTable()
     return bResolved;
 }
 
+bool Finder::ResolvePakPrecacher()
+{
+    static const bool bResolved = []
+    {
+        // 9.00 (CL-6337466) reads .sig files as UE 4.24's FPakSignatureFile: one without its magic (Core's zeroed .sig)
+        // logs this line and FPakPlatformFile::GetPakSignatureFile caches no signatures for it. 8.40-8.51 have no such line
+        // and read Core's paks through the precacher without a crash, so they keep the precacher as it is.
+        if (Finder::StringRefs(L"Pak signature file for '%s' was invalid").empty())
+        {
+            return false;
+        }
+        if (!Natives::FPakPlatformFile_VTable)
+        {
+            Log::Error(L"Finder: FPakPrecacher not looked for: no FPakPlatformFile vtable");
+            return false;
+        }
+
+        // FPakPlatformFile::InitializeNewAsyncIO (slot 8, +0x40; 9.00 0x2A285F0) logs "Disabled pak precacher ..." when it
+        // doesn't make one, and otherwise ends FPakPrecacher::Init's
+        // FPlatformAtomics::InterlockedCompareExchangePointer(&PakPrecacherSingleton, new FPakPrecacher(...), nullptr):
+        // lock cmpxchg [rip+X], r64 (0x2A28684).
+        const uintptr_t InitializeNewAsyncIO = Finder::Unthunk(reinterpret_cast<uintptr_t>(Natives::FPakPlatformFile_VTable[8]));
+        const uintptr_t Disabled = FunctionOf(L"Disabled pak precacher to get an accurate load order. This should only be used to collect gameopenorder.log, as it is quite slow.");
+        uintptr_t Singleton = 0;
+        Finder::TraceFind(InitializeNewAsyncIO && InitializeNewAsyncIO == Disabled ? InitializeNewAsyncIO : 0, 160, [&](uintptr_t Instruction)
+        {
+            if (Byte(Instruction) != 0xF0 || (Byte(Instruction + 1) != 0x48 && Byte(Instruction + 1) != 0x4C) || Byte(Instruction + 2) != 0x0F
+                || Byte(Instruction + 3) != 0xB1 || (Byte(Instruction + 4) & 0xC7) != 0x05)
+            {
+                return false;
+            }
+            Singleton = Finder::RelativeTarget(Instruction, 5, 9);
+            return true;
+        });
+
+        // FPakPrecacher::RegisterPakFile (9.00 0x2A2DE80) loads the pak's signatures only if (SigningKey) after its "New pak
+        // file %s added to pak precacher." log: cmp qword ptr [r12+290h], 0 (0x2A2E154).
+        ptrdiff_t SigningKey = -1;
+        const std::vector<uintptr_t> Registers = Finder::StringRefs(L"New pak file %s added to pak precacher.");
+        Finder::TraceFind(Registers.size() == 1 ? Registers[0] : 0, 48, [&](uintptr_t Instruction)
+        {
+            if ((Byte(Instruction) != 0x48 && Byte(Instruction) != 0x49) || Byte(Instruction + 1) != 0x83 || (Byte(Instruction + 2) & 0xF8) != 0xB8)
+            {
+                return false;
+            }
+            const uint32_t Displacement = (Byte(Instruction + 2) & 7) == 4 ? 4 : 3;
+            if (Byte(Instruction + Displacement + 4) != 0)
+            {
+                return false;
+            }
+            SigningKey = *reinterpret_cast<const int32_t*>(Instruction + Displacement);
+            return true;
+        });
+
+        if (!Singleton || SigningKey < 0x100 || SigningKey > 0x400)
+        {
+            Log::Error(L"Finder: FPakPrecacher not found (InitializeNewAsyncIO 0x{:X}, \"Disabled pak precacher\" in 0x{:X}, PakPrecacherSingleton 0x{:X}, SigningKey {})",
+                InitializeNewAsyncIO ? InitializeNewAsyncIO - Finder::ImageBase() : 0, Disabled ? Disabled - Finder::ImageBase() : 0,
+                Singleton ? Singleton - Finder::ImageBase() : 0, SigningKey);
+            return false;
+        }
+
+        Natives::FPakPrecacher_PakPrecacherSingleton = reinterpret_cast<uint8_t**>(Singleton);
+        Natives::FPakPrecacher_SigningKey = SigningKey;
+        Log::Info(L"Finder: FPakPlatformFile::InitializeNewAsyncIO +0x{:X}, FPakPrecacher::PakPrecacherSingleton +0x{:X}, SigningKey +0x{:X}",
+            InitializeNewAsyncIO - Finder::ImageBase(), Singleton - Finder::ImageBase(), SigningKey);
+        return true;
+    }();
+    return bResolved;
+}
+
 bool Finder::ResolveEngineInit()
 {
     if (Natives::UEngine_InitIndex >= 0)

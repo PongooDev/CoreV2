@@ -178,9 +178,49 @@ namespace
     // later), so the pak-signing takeover happens as early as the vtable allows.
     constexpr int32_t OpenReadSlot = 25;
 
+    // FPakPlatformFile_vtbl slot 8 (+0x40) is InitializeNewAsyncIO (21.40 order; 9.00 0x2A285F0), which makes the
+    // FPakPrecacher. FPlatformFileManager::InitializeNewAsyncIO calls it through the vtable, after the pak platform file
+    // is set active.
+    constexpr int32_t InitializeNewAsyncIOSlot = 8;
+
     using FOpenRead = void* (*)(FPakPlatformFile*, const wchar_t*, bool);
     FOpenRead OriginalOpenRead = nullptr;
     bool bPakSigningTurnedOff = false;
+
+    using FInitializeNewAsyncIO = void (*)(FPakPlatformFile*);
+    FInitializeNewAsyncIO OriginalInitializeNewAsyncIO = nullptr;
+
+    // 9.00+: FPakPrecacher::Init(LowerLevel, GetPakSigningKey()) hands the precacher the signing key whatever bSigned is,
+    // so it loads each pak's .sig and checks every block it reads. Core's paks have no signatures it accepts
+    // (GetPakSignatureFile caches none for them), and DoSignatureCheck (0x2A22990) reads their null
+    // FPakSignatureFile's ChunkHashes (0x2A22ADF): the crash on the first async read of the server assets pak (#656).
+    // Epic never mounts a pak whose .sig is invalid, so it never gets there. With signing off, the precacher drops its
+    // key as well (both of its readers test the TSharedPtr's object), so no pak's signatures are loaded or checked.
+    void ClearPakPrecacherSigningKey()
+    {
+        uint8_t* const Precacher = Natives::FPakPrecacher_PakPrecacherSingleton ? *Natives::FPakPrecacher_PakPrecacherSingleton : nullptr;
+        if (!Precacher)
+        {
+            return;
+        }
+        void*& SigningKey = *reinterpret_cast<void**>(Precacher + Natives::FPakPrecacher_SigningKey);
+        if (SigningKey)
+        {
+            SigningKey = nullptr;  // the reference controller stays, so the precacher's destructor still releases the key
+            Log::Info(L"Pak signing: turned off on the pak precacher, so it checks no pak's signatures");
+        }
+    }
+
+    void InitializeNewAsyncIOThunk(FPakPlatformFile* This)
+    {
+        OriginalInitializeNewAsyncIO(This);
+        ClearPakPrecacherSigningKey();
+        if (Natives::FPakPlatformFile_VTable && OriginalInitializeNewAsyncIO)
+        {
+            Hooks::SwapVTable(L"FPakPlatformFile::InitializeNewAsyncIO (restore)", Natives::FPakPlatformFile_VTable,
+                InitializeNewAsyncIOSlot, reinterpret_cast<void*>(OriginalInitializeNewAsyncIO), nullptr);
+        }
+    }
 
     // Owner-approved exception (2026-11-24). Runs on the first OpenRead the engine routes through the pak platform file,
     // right after SetPlatformFile makes it the top platform file -- after PreInit's signed mount of the chain, and as the
@@ -220,6 +260,7 @@ void FPakPlatformFile::TurnOffSigningAndRemount(FPakPlatformFile* This)
     // (the deferred encrypted paks once their key is registered, Creative islands, streaming) are read unsigned. The
     // game's own signed paks were already mounted in PreInit.
     *reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(This) + Natives::FPakPlatformFile_bSigned) = false;
+    ClearPakPrecacherSigningKey();  // 9.00+, should the precacher already have been made
 
     // Mount every Content/Paks pak PreInit's signature check rejected (Core's paks, or one a user added): those on disk
     // that are neither in the engine's mounted list nor in its pending-key list. The deferred ones (the encrypted
@@ -281,6 +322,14 @@ void FPakPlatformFile::TakeOverPakSigning()
     // pristine for the packer's later code check.
     Hooks::SwapVTable(L"FPakPlatformFile::OpenRead", Natives::FPakPlatformFile_VTable, OpenReadSlot,
         reinterpret_cast<void*>(&OpenReadThunk), reinterpret_cast<void**>(&OriginalOpenRead));
+
+    // 9.00+ (same exception): the precacher InitializeNewAsyncIO makes would still check signatures; the thunk clears its
+    // signing key once it exists and puts the slot back. Builds that read .sig files the 8.51 way skip this.
+    if (Finder::ResolvePakPrecacher())
+    {
+        Hooks::SwapVTable(L"FPakPlatformFile::InitializeNewAsyncIO", Natives::FPakPlatformFile_VTable, InitializeNewAsyncIOSlot,
+            reinterpret_cast<void*>(&InitializeNewAsyncIOThunk), reinterpret_cast<void**>(&OriginalInitializeNewAsyncIO));
+    }
 }
 
 void FPakPlatformFile::MountServerAssets()
@@ -321,6 +370,10 @@ void FPakPlatformFile::MountServerAssets()
     // Only the build's key signs a pak 8.40 reads signed, so Core's pak is mounted as an unsigned one: bSigned, which
     // Mount hands to the FPakFile it makes, is off for this one call. The game's own paks were all mounted signed in
     // PreInit, and any mounted later still are.
+    if (Finder::ResolvePakPlatformFileVTable() && Finder::ResolvePakPrecacher())
+    {
+        ClearPakPrecacherSigningKey();  // 9.00+: the precacher would otherwise check this pak's (absent) signatures
+    }
     bool& bSigned = *reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(PakPlatformFile) + Natives::FPakPlatformFile_bSigned);
     const bool bWasSigned = bSigned;
     bSigned = false;

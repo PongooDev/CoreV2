@@ -196,6 +196,13 @@ namespace Natives
     // vtable swap can't catch them, whereas file operations always go through IPlatformFile* -- and OpenRead is the one
     // the engine routes through the pak platform file while the config system is still reading the inis.
     inline void** FPakPlatformFile_VTable = nullptr;
+    // 9.00+ (Finder::ResolvePakPrecacher): FPakPrecacher::PakPrecacherSingleton (9.00 0x5CAA380), which
+    // FPakPlatformFile::InitializeNewAsyncIO (slot 8, 0x2A285F0) makes, and the offset of the precacher's SigningKey
+    // (TSharedPtr object, +0x290), set from GetPakSigningKey() by its constructor (0x2A1BFA0). RegisterPakFile
+    // (0x2A2DE80) loads a pak's FPakSignatureFile and the read callback (0x2A1D810) starts DoSignatureCheck only while
+    // it is set.
+    inline uint8_t** FPakPrecacher_PakPrecacherSingleton = nullptr;
+    inline ptrdiff_t FPakPrecacher_SigningKey = -1;
     inline const wchar_t* (*FPlatformProcess_UserName)(bool bOnlyAlphaNumeric) = nullptr;
     inline bool (*FPackageName_FindPackagesInDirectory)(TArray<FString>& OutPackages, const FString& RootDir) = nullptr;
     inline FString* FPackageName_MapPackageExtension = nullptr;

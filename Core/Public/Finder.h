@@ -217,6 +217,10 @@ namespace Finder
     // 8.40+: FPakPlatformFile's vtable and the InitializeAfterSetActive slot, from GetName's lea rax, [L"PakFile"]; ret
     // (its own .rdata slot is slot 14). For CoreRedirect's pak-signing takeover. False (logged once) where not found.
     bool ResolvePakPlatformFileVTable();
+    // 9.00+ (CL-6337466, UE 4.24's FPakSignatureFile): FPakPrecacher::PakPrecacherSingleton and the offset of its
+    // SigningKey, from FPakPlatformFile::InitializeNewAsyncIO (vtable slot 8) and RegisterPakFile. False (logged once)
+    // where not found, and false without a log on builds whose .sig files aren't read that way (1.1-8.51).
+    bool ResolvePakPrecacher();
     // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).
     bool ResolveEngineInit();
     // FBaseServiceMcp::GetBasicAuth, which every MCP service's vtable holds (packed builds, FFortMcpConfig).

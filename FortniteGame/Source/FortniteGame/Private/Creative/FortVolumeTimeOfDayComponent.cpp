@@ -114,11 +114,15 @@ void UFortVolumeTimeOfDayComponent::MutatorSettingsChanged(const FPropertyOverri
         Speed = 0.0f;
     }
 
+    // A manager the island's clear destroyed (below) is spawned again.
     AFortTimeOfDayManager* Manager = TimeOfDayManager;
-    if (!Manager)
+    if (!Manager || Manager->IsPendingKill())
     {
         // The island's own manager is one of the world's class (AFortTimeOfDayManager's constructor makes it always
-        // relevant and replicated), at the island.
+        // relevant and replicated), where the world's is. Not at the island: the volume manager registers every actor
+        // spawned inside a volume with it (HandleOnActorSpawned, 8.51 0x1179200, by location), and switching the
+        // island destroys the volume's AInfo actors with the rest (ServerClearVolume_Implementation 0x1188FA0 ->
+        // 0x116D730), which left the component on a dead manager (#646).
         UWorld* const World = GetWorld();
         AFortGameState* const GameState = World ? Cast<AFortGameState>(World->GetGameState()) : nullptr;
         AFortTimeOfDayManager* const WorldManager = GameState ? GameState->FortTimeOfDayManager : nullptr;
@@ -127,8 +131,7 @@ void UFortVolumeTimeOfDayComponent::MutatorSettingsChanged(const FPropertyOverri
             UE_LOG(LogFortCreative, Warning, TEXT("MutatorSettingsChanged: %s has no world time of day manager to copy"), *Volume->GetName());
             return;
         }
-        FTransform SpawnTransform = WorldManager->GetTransform();
-        SpawnTransform.Translation = Volume->GetTransform().Translation;
+        const FTransform SpawnTransform = WorldManager->GetTransform();
         Manager = Cast<AFortTimeOfDayManager>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, WorldManager->GetClass(), SpawnTransform,
             ESpawnActorCollisionHandlingMethod::AlwaysSpawn, Volume));
         if (!Manager)

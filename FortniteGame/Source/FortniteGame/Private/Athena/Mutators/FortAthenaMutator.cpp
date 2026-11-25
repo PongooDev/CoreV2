@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "Athena/Mutators/FortAthenaMutator.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
@@ -34,6 +37,38 @@ void AFortAthenaMutator::FortGameStateAthena_OnPostEarnedKill(AFortPlayerControl
     {
         CallVirtual<void>(this, Natives::AFortAthenaMutator_OnPostEarnedKillIndex, KillerController);
     }
+#endif
+}
+
+int32_t AFortAthenaMutator::GiveItemToAllPlayers(UFortWorldItemDefinition* ItemDefinition, int32_t Count) const
+{
+#if WITH_SERVER_CODE
+    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
+    if (!GameMode || !ItemDefinition || Count <= 0)
+    {
+        return 0;
+    }
+    int32_t Given = 0;
+    const TArray<AFortPlayerControllerAthena*>& Alive = GameMode->AlivePlayers;
+    for (int32_t Index = 0; Index < Alive.Num(); ++Index)
+    {
+        AFortPlayerControllerAthena* PlayerController = Alive[Index];
+        if (!PlayerController || PlayerController->IsPendingKill())
+        {
+            continue;
+        }
+        // Core's: a weapon comes loaded, as the game's grants of a mutator's items do.
+        UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(PlayerController, nullptr), ItemDefinition, Count, false, 1, true);
+        ++Given;
+    }
+    // Core's player bots aren't in AlivePlayers (their controllers are stock AAIControllers).
+    if (FCoreAthenaBotManager* Bots = FCoreAthenaBotManager::Get())
+    {
+        Given += Bots->GiveItemToBots(ItemDefinition, Count);
+    }
+    return Given;
+#else
+    return 0;
 #endif
 }
 
@@ -130,6 +165,29 @@ bool AFortAthenaMutator_InventoryOverride::ShouldDropBotItem(const UFortItemDefi
 #else
     return false;
 #endif
+}
+
+bool AFortAthenaMutator_InventoryOverride::HasActiveLoadouts(const AFortGameStateAthena* GameState)
+{
+#if WITH_SERVER_CODE
+    UClass* const OverrideClass = StaticClass();
+    const TArray<UObject*>* MutatorList = GameState && OverrideClass && HasInventoryLoadouts() ? GameState->GetGameplayMutatorList() : nullptr;
+    for (int32_t Index = 0; MutatorList && Index < MutatorList->Num(); ++Index)
+    {
+        UObject* Mutator = (*MutatorList)[Index];
+        if (!Mutator || !Mutator->IsA(OverrideClass) || (AFortAthenaMutator::HasMutatorActive() && !reinterpret_cast<AFortAthenaMutator*>(Mutator)->bMutatorActive))
+        {
+            continue;
+        }
+        const AFortAthenaMutator_InventoryOverride* Override = reinterpret_cast<const AFortAthenaMutator_InventoryOverride*>(Mutator);
+        const TStructArray<FItemLoadoutContainer>& Loadouts = Override->InventoryLoadouts;
+        if (Loadouts.Num() > 0)
+        {
+            return true;
+        }
+    }
+#endif
+    return false;
 }
 
 bool AFortAthenaMutator_InventoryOverride::GetInventoryOverrideForBot(bool bInitialSpawn, uint8_t TeamIndex, const AFortGameStateAthena* GameState, TArray<const FItemAndCount*>& OutItems) const

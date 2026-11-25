@@ -5375,6 +5375,23 @@ bool FCoreAthenaBotController::GiveItem(UFortItemDefinition* Definition, int32_t
 #endif
 }
 
+bool FCoreAthenaBotController::GiveGrantedItem(UFortItemDefinition* Definition, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    // The weapons come loaded, as a granted weapon does; a gun the bot has no free slot for stays out (a grant adds, it
+    // doesn't swap).
+    UFortWeaponItemDefinition* Weapon = Definition && !GetConsumableInfo(Definition) ? Cast<UFortWeaponItemDefinition>(Definition) : nullptr;
+    if (!Definition || (Weapon && WeaponSlotFor(Weapon) != -1))
+    {
+        return false;
+    }
+    const int32_t LoadedAmmo = Weapon ? GetWeaponInfo(Weapon).ClipSize : 0;
+    return GiveItem(Definition, Count, LoadedAmmo);
+#else
+    return false;
+#endif
+}
+
 void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
 {
 #if WITH_SERVER_CODE
@@ -5382,8 +5399,7 @@ void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
     // GetStartingItems (8.50 CL-6058028 0xFA3A20) is the game mode's StartingItems plus the answer of the first mutator's
     // FortGameModeAthena_GetInventoryOverride that answers (its loop stops at the slot's 2). The bot already has the
     // StartingItems it uses (the pickaxe); the override is AFortAthenaMutator_InventoryOverride's, asked with the bot's
-    // team. The weapons come loaded, as a granted weapon does; a gun the bot has no free slot for stays out (a grant adds,
-    // it doesn't swap).
+    // team (GiveGrantedItem).
     AFortGameModeAthena* GameMode = Manager->GetGameMode();
     UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
     AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
@@ -5412,17 +5428,7 @@ void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
     for (const FItemAndCount* Entry : Items)
     {
         UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->Item) : nullptr;
-        if (!Definition)
-        {
-            continue;
-        }
-        UFortWeaponItemDefinition* Weapon = GetConsumableInfo(Definition) ? nullptr : Cast<UFortWeaponItemDefinition>(Definition);
-        if (Weapon && WeaponSlotFor(Weapon) != -1)
-        {
-            continue;
-        }
-        const int32_t LoadedAmmo = Weapon ? GetWeaponInfo(Weapon).ClipSize : 0;
-        Given += GiveItem(Definition, FMath::Max(static_cast<int32_t>(Entry->Count), 1), LoadedAmmo) ? 1 : 0;
+        Given += Definition && GiveGrantedItem(Definition, FMath::Max(static_cast<int32_t>(Entry->Count), 1)) ? 1 : 0;
     }
     if (Given > 0)
     {

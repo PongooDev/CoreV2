@@ -29,6 +29,7 @@
 #include "Athena/AthenaFillFloor.h"
 #include "Athena/FortAthenaExitCraftSpawner.h"
 #include "Athena/Mutators/FortAthenaMutator_Ashton.h"
+#include "Athena/Mutators/FortAthenaMutator_GiveItemsAtGamePhaseStep.h"
 #include "Athena/Mutators/FortAthenaMutator_Goose.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortAthenaVehicle.h"
@@ -461,6 +462,8 @@ static void InstallHooks()
             AFortAthenaMutator_Goose::HookNatives();
             // 8.50's Endgame: the stone capture, the gauntlet's give, the team loadouts and the death removals.
             AFortAthenaMutator_Ashton::HookNatives();
+            // 8.00+ LTM items: the give-items mutators' natives (Food Fight's glider and grappler, Gun Game, Air Royale; #643).
+            AFortAthenaMutator_GiveItemsAtGamePhaseStep::HookNatives();
             // 8.40's Food Fight: Deep Fried: the lava stops at the mascots (#614).
             AAthenaFillFloor::HasSetCapHeight();
             // 8.30's Pirate Cannon: firing the passenger (ServerFireActorInCannon_Implementation, stripped).

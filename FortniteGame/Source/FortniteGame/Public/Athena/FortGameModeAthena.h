@@ -220,7 +220,8 @@ public:
 
     // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
-    // What GetStartingItems adds as the player leaves the aircraft or respawns, in an Endgame match (8.50): its team's loadout.
+    // What GetStartingItems adds with each new pawn, in a match with an inventory override loadout (8.50+): Endgame's team
+    // loadouts, Slide's, Blades' and Close Encounters' items.
     void GiveMutatorStartingItems(AController* NewPlayer, bool bInitialSpawn);
     void ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport);
 

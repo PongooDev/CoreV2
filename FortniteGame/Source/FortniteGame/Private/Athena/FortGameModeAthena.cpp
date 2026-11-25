@@ -636,9 +636,13 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // launcher, the jetpack) and GA_AshtonPack_Milo_BlockAbilities activate as they are granted and need the new pawn as
     // the ability system's avatar; granted at the bus's SpawnDefaultPawnFor they found none, so a Chitauri had the pack
     // but no weapons and could pick up floor loot (CoreV2 #642). Items the player still holds aren't given twice
-    // (GiveStartingItems). Only in an Endgame match.
+    // (GiveStartingItems). The same answer comes from every inventory override mutator with a loadout (CoreV2 #643):
+    // Slide's grappler, Blades' sword, Close Encounters' jetpack (InventoryUpdateOverride Always). Only in a match with
+    // one; the slot is found from 8.50 (AFortAthenaMutator_Ashton::HookNatives).
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
-    if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_Ashton::GetCurrent(GetWorld()))
+    UWorld* World = GetWorld();
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_InventoryOverride::HasActiveLoadouts(GameState))
     {
         return;
     }
@@ -646,7 +650,7 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // Core's: bInitialSpawn true at the aircraft's exit, the match's first spawn after the warmup.
     GetStartingItems(Items, bInitialSpawn, NewPlayer);
     PlayerController->GiveStartingItems(Items);
-    Log::Info(L"Endgame: {} takes its team's loadout with its new pawn ({} starting items{})", NewPlayer->GetName().ToStdString(), Items.Num(), bInitialSpawn ? L", leaving the aircraft" : L"");
+    Log::Info(L"Battle Royale: {} takes the playlist's loadout with its new pawn ({} starting items{})", NewPlayer->GetName().ToStdString(), Items.Num(), bInitialSpawn ? L", leaving the aircraft" : L"");
     Items.Empty();
 #endif
 }
@@ -3498,7 +3502,7 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
     {
         AthenaPlayer->ClaimCreativePortal();
     }
-    // 8.50's Endgame: the team's loadout on the pawn just possessed.
+    // The playlist's loadout on the pawn just possessed (8.50's Endgame teams, Slide, Blades, Close Encounters).
     if (Pawn && GameState && GameState->GamePhase >= EAthenaGamePhase::GetWarmup() && GameState->GamePhase < EAthenaGamePhase::GetEndGame())
     {
         GiveMutatorStartingItems(reinterpret_cast<AController*>(Player), GameState->GamePhase == EAthenaGamePhase::GetAircraft());

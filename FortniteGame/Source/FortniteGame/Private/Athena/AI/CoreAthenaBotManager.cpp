@@ -1040,6 +1040,16 @@ int32_t FCoreAthenaBotManager::GetAliveBotCount() const
     return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [](const auto& Bot) { return Bot->IsInMatch(); }));
 }
 
+int32_t FCoreAthenaBotManager::GiveItemToBots(UFortItemDefinition* Definition, int32_t Count)
+{
+    int32_t Given = 0;
+    for (const auto& Bot : PlayerBots)
+    {
+        Given += Bot->IsInMatch() && Bot->GiveGrantedItem(Definition, Count) ? 1 : 0;
+    }
+    return Given;
+}
+
 FCoreAthenaBotController* FCoreAthenaBotManager::FindBot(const UObject* PawnOrPlayerState) const
 {
     if (!PawnOrPlayerState)

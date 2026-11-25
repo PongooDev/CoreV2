@@ -26,6 +26,7 @@ class AFortPickup;
 class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
+class UFortItemDefinition;
 class APawn;
 class UFortWeaponItemDefinition;
 class UObject;
@@ -154,6 +155,8 @@ public:
     // players.
     int32_t GetAliveBotCount() const;
     bool HasAliveBots() const { return GetAliveBotCount() > 0; }
+    // A playlist's grant to every player (the give-items mutators) for each bot in the match: the bots given it.
+    int32_t GiveItemToBots(UFortItemDefinition* Definition, int32_t Count);
     // The playlist's team size (1 solo, 2 duos, 4 squads, 20 Teams of 20, 50 50v50), and a bot's teammates still in the
     // match: its squad's, in a large team game.
     int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }

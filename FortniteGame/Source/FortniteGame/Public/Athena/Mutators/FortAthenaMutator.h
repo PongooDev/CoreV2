@@ -37,6 +37,10 @@ public:
     // Server only; nothing on a build where the slot isn't found.
     static bool HasOnPostEarnedKill();
     void FortGameStateAthena_OnPostEarnedKill(AFortPlayerController* KillerController);
+
+    // Core's: Count of ItemDefinition to each player still in the match (the game mode's AlivePlayers) and each of
+    // Core's player bots, for the give-items mutators. Returns the players given it.
+    int32_t GiveItemToAllPlayers(UFortWorldItemDefinition* ItemDefinition, int32_t Count) const;
 };
 
 // Team Rumble's mutator (6.31's Playlist_Respawn_24, RespawnMutator_C). Its FortGameStateAthena_OnPostEarnedKill scores
@@ -133,6 +137,10 @@ public:
     }
     // TeamLoadouts is 8.30's (none in 6.30 to 8.20).
     static bool HasTeamLoadouts() { return Member_TeamLoadouts.IsAvailable() && FItemLoadoutTeamMap::StaticStruct(); }
+    // Core's: whether an active inventory override mutator among the game state's GameplayMutators has a loadout to give
+    // (Endgame's AshtonInventoryMutator, Slide's Mutator_InventoryOverride_Slide, Blades' and Close Encounters'), so the
+    // game mode's GetStartingItems has an override to add.
+    static bool HasActiveLoadouts(const AFortGameStateAthena* GameState);
 
     // 21.40's FortGameModeAthena_GetInventoryOverride (8.30 CL-5793395 0xFF5660, vtable slot 0x7E8; 8.50 CL-6058028
     // 0x108C490, slot 0x7D8): the loadout a player gets now, appended to OutItems, and true where the mutator answers (the

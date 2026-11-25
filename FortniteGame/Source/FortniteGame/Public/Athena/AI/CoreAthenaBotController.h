@@ -317,6 +317,8 @@ public:
     ECoreAthenaBotState GetState() const { return State; }
     bool IsAlive() const { return State != ECoreAthenaBotState::Dead; }
     const std::wstring& GetBotName() const { return BotName; }
+    // An item a playlist grants (a mutator's loadout or give-items list) into the bot's inventory: false when it stays out.
+    bool GiveGrantedItem(UFortItemDefinition* Definition, int32_t Count);
     int32_t GetKills() const { return Kills; }
     // The enemy the bot is fighting, the opponent it is heading for (Investigate), and the POI it is travelling to (an
     // index into the manager's spots, or -1).

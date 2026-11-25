@@ -21,10 +21,20 @@ void* UFortMcpProfileWorld::BindToPlayerController(AFortPlayerController* Player
 
 #if WITH_SERVER_CODE
     uint8_t* const Profile = reinterpret_cast<uint8_t*>(this);
-    // 8.00 has no bIsInventoryInitialized to set: its bind clears the inventory's own flag (Natives stays -1).
-    if (Natives::UFortMcpProfileWorld_bIsInventoryInitialized >= 0 && *reinterpret_cast<void**>(Profile + Natives::UFortMcpProfileWorld_Inventory))
+    // 7.40 and later no longer clear the flag in the bind, so the finder has no offset (Natives stays -1), but the flag is
+    // still there and reflected (8.20 +0x2C8). Nothing in the client exe sets it: the server code that did is stripped.
+    // Leaving it false made AttemptUnregistrationSave (8.20 0x12BF4B0) skip the player's save at every unregistration
+    // ("profile inventory wasn't initialized, skipped saved"): their backpack was unlocked unsaved (#628).
+    if (*reinterpret_cast<void**>(Profile + Natives::UFortMcpProfileWorld_Inventory))
     {
-        Profile[Natives::UFortMcpProfileWorld_bIsInventoryInitialized] = 1;
+        if (Natives::UFortMcpProfileWorld_bIsInventoryInitialized >= 0)
+        {
+            Profile[Natives::UFortMcpProfileWorld_bIsInventoryInitialized] = 1;
+        }
+        else
+        {
+            bIsInventoryInitialized = true;
+        }
     }
 
     FFortWorldPlayerLoadout& Loadout = CachedPlayerLoadout;

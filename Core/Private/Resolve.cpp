@@ -9057,7 +9057,7 @@ bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
     }
     if (InitializedOffset <= 0)
     {
-        Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController no longer clears bIsInventoryInitialized (this build clears the inventory's own flag)");
+        Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController no longer clears bIsInventoryInitialized (this build clears the inventory's own flag); Core sets the reflected member");
     }
     Natives::UFortMcpProfileWorld_BindToPlayerControllerIndex = BindIndex;
     Natives::UFortMcpProfileWorld_Inventory = InventoryOffset;

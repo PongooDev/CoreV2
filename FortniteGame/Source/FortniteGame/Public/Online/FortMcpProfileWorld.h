@@ -34,6 +34,9 @@ class UFortMcpProfileWorld : public UObject
 public:
     DefineUProperty(FString, ProfileId)
     DefineUStructProperty(FFortWorldPlayerLoadout, CachedPlayerLoadout)
+    // Read by UFortRegisteredPlayerInfo::AttemptUnregistrationSave (8.20 CL-5625478 0x12BF4B0, through 0xE89EE0): a
+    // profile whose inventory isn't initialized is unlocked unsaved.
+    DefineOptionalUProperty(bool, bIsInventoryInitialized)
 
     void* BindToPlayerController(AFortPlayerController* PlayerController, bool bUseOutpostInventory);
     void InitializeTheater(const FString& TheaterGuid);

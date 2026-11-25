@@ -6,6 +6,7 @@
 #include "Athena/FortPlaylistAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "Natives.h"
 #include "FortGameModeZone.h"
 #include "FortKismetLibrary.h"
 #include "Hooks.h"
@@ -55,6 +56,25 @@ bool AFortAthenaMutator_Ashton::IsVillain(const AFortPlayerStateAthena* PlayerSt
     }
     const int32_t Team = static_cast<uint8_t>(PlayerState->TeamIndex);
     return Team - static_cast<int32_t>(Playlist->DefaultFirstTeam) == static_cast<int32_t>(GetVillainTeamNum());
+}
+
+bool AFortAthenaMutator_Ashton::CanInteractWithGameObject(AFortPickup* Pickup, AFortPlayerController* Controller) const
+{
+    static UClass* InteractInterface = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInteractInterface");
+    if (!Pickup || !Controller || !InteractInterface || !Natives::UObject_GetInterfaceAddress
+        || !Finder::ResolveAshtonCanInteractWithGameObjectLive(Member_OnVillainRespawnsRemainingChanged.GetOffsetChecked() + static_cast<ptrdiff_t>(sizeof(FMulticastScriptDelegate))))
+    {
+        return false;
+    }
+    void* Interactable = Natives::UObject_GetInterfaceAddress(reinterpret_cast<UObject*>(Pickup), InteractInterface);
+    if (!Interactable)
+    {
+        return false;
+    }
+    bool bResult = false;
+    using FCanInteractWithGameObject = char (*)(const AFortAthenaMutator_Ashton* This, bool* bOutResult, void* Interactable, AFortPlayerController* Controller);
+    const auto Function = reinterpret_cast<FCanInteractWithGameObject>((*reinterpret_cast<void* const* const*>(this))[Natives::AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex]);
+    return Function(this, &bResult, Interactable, Controller) == 2 && bResult;
 }
 
 void AFortAthenaMutator_Ashton::GiveVillainLeaderItemCall(AFortPlayerControllerAthena* NewVillainLeader)
@@ -171,6 +191,9 @@ void AFortAthenaMutator_Ashton::HookNatives()
     // The team loadouts: what the game mode's GetStartingItems adds for AshtonInventoryMutator (AFortGameModeAthena's
     // SpawnDefaultPawnFor_Implementation gives it at the aircraft's exit).
     const bool bStartingItems = Finder::ResolveGetStartingItemsLive(AFortGameModeZone::StartingItemsOffset());
+
+    // Thanos's stone pickups: the mutator's answer that lets a villain interact with a stone (Core's ServerHandlePickup).
+    Finder::ResolveAshtonCanInteractWithGameObjectLive(Member_OnVillainRespawnsRemainingChanged.GetOffsetChecked() + static_cast<ptrdiff_t>(sizeof(FMulticastScriptDelegate)));
 
     Finder::FAshtonMutatorSites Sites;
     if (!Finder::ResolveAshtonMutatorLive(Member_VillainLeaderPC.GetOffsetChecked(), Member_VillainLeaderItemDef.GetOffsetChecked(), Member_VillainItemDefs.GetOffsetChecked(), Sites))

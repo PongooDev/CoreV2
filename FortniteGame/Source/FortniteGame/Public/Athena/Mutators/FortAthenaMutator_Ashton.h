@@ -73,6 +73,12 @@ public:
     // Whether that stone's StoneList entry is Captured (EAshtonStoneStateType 2).
     bool IsStoneCaptured(int32_t StoneIndex) const;
 
+    // Its override of FortGameStateAthena_CanInteractWithGameObject (8.50 slot 0xFC, 0x10632A0), which the game state asks
+    // before the player's blocked actions are checked: true for a stone (an AFortGameModePickup) and a controller on the
+    // villains' team. The client skips its InteractUse check on that answer (0x11D8F40), so Thanos, whose InteractUse is
+    // blocked, still takes stones; false where the build has no such slot.
+    bool CanInteractWithGameObject(AFortPickup* Pickup, AFortPlayerController* Controller) const;
+
     // The stripped calls, where the build has them (Finder::ResolveAshtonMutatorLive), and the pickup's and the game mode's
     // calls the mode needs. Logged once at boot.
     static void HookNatives();

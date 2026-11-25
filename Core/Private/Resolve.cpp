@@ -9958,6 +9958,69 @@ bool Finder::ResolveGooseMutatorLive(FGooseMutatorSites& OutSites)
     return true;
 }
 
+bool Finder::ResolveAshtonCanInteractWithGameObjectLive(ptrdiff_t VillainTeamNumOffset)
+{
+    // 8.50 (CL-6058028) / 8.51: the Endgame mutator's override of FortGameStateAthena_CanInteractWithGameObject (8.50 slot
+    // 0xFC, 0x10632A0; 8.51 0x1061080), which the game state asks of each mutator (0xFF04F0) before the interaction
+    // component checks the player's blocked actions (0x11D8F40: InteractUse, InteractSearch). For an AFortGameModePickup
+    // and a controller on the villains' team (TeamIndex - DefaultFirstTeam == VillainTeamNum, movzx eax, [r14+2A8h]) it
+    // sets the out bool (mov byte ptr [rsi], 1) and returns 2: a villain takes a stone with his actions blocked. Its
+    // neighbour 0xF3 (the stone CanInteract) reads VillainTeamNum too but stores a compare, not a 1.
+    if (Natives::AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex >= 0)
+    {
+        return true;
+    }
+    void** AshtonVTable = VillainTeamNumOffset > 0 ? CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_Ashton") : nullptr;
+    void** MutatorVTable = AshtonVTable ? CdoVTable(L"/Script/FortniteGame.FortAthenaMutator") : nullptr;
+    if (!MutatorVTable)
+    {
+        return false;
+    }
+    int32_t Found = -1;
+    int32_t Matches = 0;
+    for (int32_t Index = 0; Index < 0x140; ++Index)
+    {
+        const uintptr_t Own = VTableEntry(AshtonVTable, Index);
+        if (!Own || Own == VTableEntry(MutatorVTable, Index))
+        {
+            continue;
+        }
+        const uintptr_t End = Finder::FunctionEnd(Own);
+        if (!End || End - Own > 0x100)
+        {
+            continue;
+        }
+        bool bReadsVillainTeam = false;
+        bool bSetsTrueAndAnswers = false;
+        for (uintptr_t Site = Own; Site + 8 <= End; ++Site)
+        {
+            if (Byte(Site) == 0x0F && Byte(Site + 1) == 0xB6 && (Byte(Site + 2) & 0xC0) == 0x80 && (Byte(Site + 2) & 7) != 4
+                && *reinterpret_cast<const int32_t*>(Site + 3) == static_cast<int32_t>(VillainTeamNumOffset))
+            {
+                bReadsVillainTeam = true;
+            }
+            if (Byte(Site) == 0xC6 && (Byte(Site + 1) & 0xF8) == 0x00 && (Byte(Site + 1) & 7) != 4 && (Byte(Site + 1) & 7) != 5 && Byte(Site + 2) == 0x01
+                && Byte(Site + 3) == 0xB0 && Byte(Site + 4) == 0x02)
+            {
+                bSetsTrueAndAnswers = true;
+            }
+        }
+        if (bReadsVillainTeam && bSetsTrueAndAnswers)
+        {
+            Found = Found < 0 ? Index : Found;
+            ++Matches;
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_Ashton's FortGameStateAthena_CanInteractWithGameObject override not found ({} candidates), Thanos can't take a stone", Matches);
+        return false;
+    }
+    Natives::AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex = Found;
+    Log::Info(L"Finder: AFortAthenaMutator_Ashton's FortGameStateAthena_CanInteractWithGameObject is slot 0x{:X} (0x{:X})", Found, VTableEntry(AshtonVTable, Found) - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites)
 {
     // 8.50 (CL-6058028), Endgame. The intact code around three stripped calls:

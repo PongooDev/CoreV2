@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "Finder.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
@@ -67,10 +68,19 @@ namespace
     // ServerHandlePickup. Thanos (the Infinity Gauntlet) has it blocked: he can't pick anything up. The controller's is
     // asked here for both (Core resolves its slot; a pawn in stasis doesn't walk over anything). Where the slot isn't
     // known, or the pawn has no player controller, nothing is refused.
-    bool CanInteractUse(AFortPlayerPawn* Pawn)
+    // 8.50's interaction component asks the game state's mutators (FortGameStateAthena_CanInteractWithGameObject, 0xFF04F0)
+    // before the blocked actions (0x11D8F40), and skips them on a yes: Endgame says yes to a villain on a stone, so Thanos
+    // (InteractUse blocked by the gauntlet) still takes the later stones. Core asked only CanPerformAction, and refused
+    // every stone after the first (CoreV2 #649).
+    bool CanInteractUse(AFortPlayerPawn* Pawn, AFortPickup* Pickup = nullptr)
     {
         AFortPlayerController* PlayerController = Pawn ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Pawn->Controller))) : nullptr;
         if (!PlayerController || Natives::AFortPlayerController_CanPerformActionIndex < 0)
+        {
+            return true;
+        }
+        const AFortAthenaMutator_Ashton* Endgame = Pickup ? AFortAthenaMutator_Ashton::GetCurrent(Pawn->GetWorld()) : nullptr;
+        if (Endgame && Endgame->CanInteractWithGameObject(Pickup, PlayerController))
         {
             return true;
         }
@@ -110,7 +120,7 @@ void AFortPlayerPawn::ServerHandlePickup_Implementation(AFortPickup* Pickup, flo
         return;
     }
     // The client asks it before it sends the RPC; asked again so a pawn that can't interact takes nothing.
-    if (!CanInteractUse(this))
+    if (!CanInteractUse(this, Pickup))
     {
         Log::Info(L"Pickup: {} can't interact (Gameplay.Action.Player.InteractUse is blocked), so doesn't take {}", GetName().ToStdString(), Pickup->GetName().ToStdString());
         return;

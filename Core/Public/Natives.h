@@ -570,6 +570,9 @@ namespace Natives
     inline int32_t (*AFortQuickBars_FocusSlot)(UObject* This, int32_t InQuickBar, int32_t Slot, bool bUpdatePreviousFocusedSlot) = nullptr;
     inline int32_t IFortSpottableActorInterface_CanBeSpottedByIndex = -1;
     inline void* (*UObject_GetInterfaceAddress)(UObject* This, UClass* InterfaceClass) = nullptr;
+    // AFortAthenaMutator_Ashton's FortGameStateAthena_CanInteractWithGameObject (8.50 slot 0xFC):
+    // char (Mutator, bool* bOutResult, IFortInteractInterface* Interactable, AFortPlayerController* Controller); 2 answers.
+    inline int32_t AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex = -1;
     inline int32_t IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = -1;
     inline void (*UFortQueryItemType_Goal_SetContextHelper)(void* ContextData, const FScriptArray& Goals) = nullptr;
     inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;

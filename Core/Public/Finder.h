@@ -577,6 +577,9 @@ namespace Finder
     bool ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites);
     // IFortInventoryOwnerInterface::OnPickupPreGiven and OnPickupPostGiven (Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex,
     // _OnPickupPostGivenIndex), from the player controller's interface vtable; needs ResolveInventoryOwnerLive first.
+    // AFortAthenaMutator_Ashton's override of FortGameStateAthena_CanInteractWithGameObject: the vtable slot
+    // (Natives::AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex). False on builds without Endgame.
+    bool ResolveAshtonCanInteractWithGameObjectLive(ptrdiff_t VillainTeamNumOffset);
     bool ResolvePickupGivenLive();
     // AFortGameModeZone::GetStartingItems' slot (Natives::AFortGameModeZone_GetStartingItemsIndex): Battle Royale's game mode's
     // override, the one virtual that copies StartingItems.

@@ -14260,7 +14260,18 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     const uintptr_t BlockAndCancel = StopEnd ? VTableEntry(AbilitySystemVTable, VirtualSlot(FindVirtualCall(AbilitySystemStop, StopEnd))) : 0;
     const uintptr_t BlockAndCancelEnd = BlockAndCancel ? Finder::FunctionEnd(BlockAndCancel) : 0;
     const std::vector<std::pair<uintptr_t, uintptr_t>> BlockAndCancelCalls = BlockAndCancelEnd ? Finder::DirectCalls(BlockAndCancel, BlockAndCancelEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
-    const uintptr_t CancelAbilities = BlockAndCancelCalls.empty() ? 0 : BlockAndCancelCalls.back().second;
+    uintptr_t CancelAbilities = BlockAndCancelCalls.empty() ? 0 : BlockAndCancelCalls.back().second;
+    // 9.00 (CL-6337466 0x804A10) tail-jumps to it (0x80C050, jmp at 0x804AE7 after xor r8d, r8d), so its last call is
+    // FGameplayTagContainer::FillParentTags (0x29F4750) on the blocked tags.
+    for (uintptr_t Site = BlockAndCancelCalls.empty() ? 0 : BlockAndCancelCalls.back().first + 5; Site && Site + 5 <= BlockAndCancelEnd; ++Site)
+    {
+        const uintptr_t Target = Byte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        if (Target && (Target < BlockAndCancel || Target >= BlockAndCancelEnd) && FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }))
+        {
+            CancelAbilities = Target;
+            break;
+        }
+    }
 
     // UpdateDBNOInteractCollision (1.8 0x80CC80): the only reader of "DBNOInteractCollision", the box teammates revive
     // through, made while DBNO and destroyed otherwise.
@@ -14378,7 +14389,8 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     // mov rcx, rsi (0x120B047) after the AI controller's two calls. 6.22 (CL-4543176 0x120D7A0) calls it (0xAE5AF0, at
     // 0x120D9D2) before the controller's calls instead and gives the controller a third, so the last call made once
     // there is the controller's (0xA94D30, mov rcx, rdi at 0x120DA2D), which read the pawn as a controller and crashed
-    // every revive. Of the calls made once, the last one given this wins; the last one at all where none is.
+    // every revive. Of the calls made once, the last one given this wins; the last one at all where none is. 9.00
+    // (CL-6337466 0x1722580) calls it at 0x1722849 (0xE3BEE0); it needs CancelAbilities' tail jump above.
     const uintptr_t AIRevive = ExecNative(L"/Script/FortniteGame.FortAIPawn:ReviveFromDBNO");
     const uintptr_t AIReviveEnd = FunctionAndFragmentsEnd(AIRevive);
     const std::vector<std::pair<uintptr_t, uintptr_t>> AIReviveCalls = AIReviveEnd ? Finder::DirectCalls(AIRevive, AIReviveEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();

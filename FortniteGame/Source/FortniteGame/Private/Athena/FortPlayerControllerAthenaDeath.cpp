@@ -277,7 +277,7 @@ void AFortPlayerControllerAthena::HookVTables()
         Log::Error(L"Battle Royale: this build strips the pawn-death handler and its pieces were not found, so nobody who dies is out of the match");
         return;
     }
-    SwapStripped(L"AFortPlayerControllerAthena::OnPawnDied", Index, reinterpret_cast<void*>(&OnPawnDiedHK));
+    SwapStripped(L"AFortPlayerControllerAthena::OnPawnDied", Index, Natives::AFortPlayerControllerZone_OnPawnDiedWithPawn ? reinterpret_cast<void*>(&OnPawnDiedWithPawnHK) : reinterpret_cast<void*>(&OnPawnDiedHK));
     // The player state's own store of a death, which the restored handler hands its FDeathInfo to (OnPawnDied). From
     // 6.01 only: every reader of a stored death was read in 6.01's and 6.02's images, no older build's, and bInitialized
     // (from 4.4) changes what each of them does. Older builds keep the report written field by field. 6.01 to 6.22 are
@@ -376,7 +376,12 @@ void AFortPlayerControllerAthena::PrepareDeathReport(float LethalDamage, const F
 
 void AFortPlayerControllerAthena::OnPawnDiedHK(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer)
 {
-    This->OnPawnDied(Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+    This->OnPawnDied(nullptr, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+}
+
+void AFortPlayerControllerAthena::OnPawnDiedWithPawnHK(AFortPlayerControllerAthena* This, AFortPlayerPawn* DiedPawn, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer)
+{
+    This->OnPawnDied(DiedPawn, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
 }
 
 float AFortPlayerPawnAthena::GetDeathInfoDistance(AFortPawn* Victim, APawn* FinisherPawn, const FGameplayTagContainer& DamageTags)
@@ -449,11 +454,23 @@ bool AFortPlayerControllerAthena::IsTeamOut()
     return true;
 }
 
-void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer)
+void AFortPlayerControllerAthena::OnPawnDied(AFortPlayerPawn* DiedPawn, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer)
 {
+    // 9.00 (0x1085440) first clears the dead pawn's timer (+0xC40) on the world's timer manager.
+    if (UWorld* TimerWorld = DiedPawn && Natives::AFortPlayerPawn_PawnDiedTimerHandleOffset >= 0 ? GetWorld() : nullptr)
+    {
+        TimerWorld->GetTimerManager().ClearTimer(*reinterpret_cast<FTimerHandle*>(reinterpret_cast<uint8_t*>(DiedPawn) + Natives::AFortPlayerPawn_PawnDiedTimerHandleOffset));
+    }
     // 1.9 0x42DB20. Zone's handler first: the death report and ClientOnPawnDied, the inventory drop and where the
     // controller stands (Core's, PawnDiedInventoryDropCall).
-    Natives::AFortPlayerControllerZone_OnPawnDied(this, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+    if (Natives::AFortPlayerControllerZone_OnPawnDiedWithPawn)
+    {
+        Natives::AFortPlayerControllerZone_OnPawnDiedWithPawn(this, DiedPawn, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+    }
+    else
+    {
+        Natives::AFortPlayerControllerZone_OnPawnDied(this, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+    }
     // 3.5 keeps this much of its own body (3.5.1 0xA27A00): the player's map marker goes on the server.
     if (Natives::AFortPlayerControllerAthena_RemoveMapCursor && Role == ROLE_Authority)
     {

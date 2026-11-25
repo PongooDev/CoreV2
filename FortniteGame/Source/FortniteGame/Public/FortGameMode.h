@@ -55,6 +55,9 @@ public:
     // From 4.0 the game mode keeps the asset's path in DefaultDeathPenaltyData and the loaded asset in DeathPenaltyData.
     DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DefaultDeathPenaltyData)
     DefineUProperty(UFortGameDeathPenalty*, DeathPenaltyData)
+    // A Blueprint's stand-in for DeathPenaltyData (9.00's Wargames: IronCityMission_Parent sets IronCityDeathPenalty
+    // while a Wargame runs, and clears it at the end).
+    DefineUProperty(UFortGameDeathPenalty*, DeathPenaltyDataOverride)
 
 private:
     // Before 4.0, DeathPenaltyData was the asset's path (a TAssetPtr), with no DefaultDeathPenaltyData.

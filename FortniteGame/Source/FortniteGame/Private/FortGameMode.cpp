@@ -315,6 +315,14 @@ UFortPlaylistManager* AFortGameMode::GetPlaylistManager() const
 
 UFortGameDeathPenalty* AFortGameMode::GetDeathPenaltyData()
 {
+    // 9.00 (CL-6337466) 0x1374690: DeathPenaltyDataOverride, else DeathPenaltyData, else DefaultDeathPenaltyData loaded.
+    if (Member_DeathPenaltyDataOverride.IsAvailable())
+    {
+        if (UFortGameDeathPenalty* Override = DeathPenaltyDataOverride)
+        {
+            return Override;
+        }
+    }
     // 4.0 split the member: DefaultDeathPenaltyData holds the path and DeathPenaltyData the loaded asset. Before 4.0,
     // DeathPenaltyData was the path itself.
     if (Member_DeathPenaltyData.IsAvailable())

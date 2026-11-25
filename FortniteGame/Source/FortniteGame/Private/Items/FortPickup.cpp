@@ -1214,6 +1214,23 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     {
         InventoryOwner->OnPickupPreGiven(this);
     }
+    // A Battle Royale container's weapons come loaded (#85), and Core's ABuildingContainer::SpawnLoot loads them. Creative's
+    // placed chests (ABuildingCustomizableSpawnContainer, 6.01 on) keep their own intact SpawnLoot override (8.51
+    // 0x10FF350, 9.00 0x1188DB0): each of its SpawnItems becomes a new FFortItemEntry (8.51 0x144B200, LoadedAmmo 0) in a
+    // pickup marked Container, so each weapon came out of the chest empty (#665). It is loaded when it is given, as
+    // Battle Royale's are. 4.1's Other (15) has the Container bit too; Save the World's containers are left as they are.
+    const uint32_t Container = HasPickupSourceTypeFlags() ? static_cast<uint32_t>(EFortPickupSourceTypeFlag::GetContainer()) : 0;
+    const uint32_t SourceTypeFlags = Container ? static_cast<uint32_t>(PickupSourceTypeFlags) : 0;
+    if ((SourceTypeFlags & Container) && SourceTypeFlags != static_cast<uint32_t>(EFortPickupSourceTypeFlag::GetOther()) && AFortGameModeAthena::GetCurrent(this))
+    {
+        for (FFortItemEntry* Entry : GetPickupEntries(this))
+        {
+            if (Entry->LoadedAmmo <= 0)
+            {
+                Entry->LoadFullClip();
+            }
+        }
+    }
     if (AFortAIPawn* AIPawn = Cast<AFortAIPawn>(OwnerObject))
     {
         GivePickupToAI(AIPawn, InventoryOwner);

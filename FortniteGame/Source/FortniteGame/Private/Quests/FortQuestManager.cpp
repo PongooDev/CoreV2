@@ -1749,13 +1749,15 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
 // 1.8-8.20: TMap<ESubGame, UFortQuestManager*>. 8.30+: UFortQuestManager* QuestManagers[2] indexed by ESubGame (8.40
 // 0x40BC000 creates QuestManagers[SubGame] at +0x118, the profile load passes Athena as 1). Read as a map, 8.30's and
 // 8.40's array gave no Athena quest manager, so SendStatEventWithTagsHK took Battle Royale's quest manager for another
-// sub game's: no warmup gate (#625) and no save to the athena profile (#627).
+// sub game's: no warmup gate (#625) and no save to the athena profile (#627). d767f914 read the array but asked
+// Member_QuestManagers first, which is declared with the TMap's size (0x50) and so never resolved against the array
+// property (ElementSize 8): the manager was still not found (#433, 8.51). The array is read from its property alone.
 UFortQuestManager* UFortRegisteredPlayerInfo::FindQuestManager(uint8_t SubGame)
 {
     static const UProperty* Property = nullptr;
     if (!Property)
     {
-        Property = Member_QuestManagers.IsAvailable() ? StaticClass()->FindPropertyByName(FName(L"QuestManagers", FNAME_Find)) : nullptr;
+        Property = StaticClass()->FindPropertyByName(FName(L"QuestManagers", FNAME_Find));
         if (!Property)
         {
             return nullptr;
@@ -1763,7 +1765,7 @@ UFortQuestManager* UFortRegisteredPlayerInfo::FindQuestManager(uint8_t SubGame)
     }
     if (Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMapProperty))
     {
-        return Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(SubGame);
+        return Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(SubGame) : nullptr;
     }
     return SubGame < Property->ArrayDim ? *Property->ContainerPtrToValuePtr<UFortQuestManager*>(this, SubGame) : nullptr;
 }

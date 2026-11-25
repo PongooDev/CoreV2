@@ -431,6 +431,22 @@ public:
     void ServerToggleAutoRestartMinigame_Implementation();
     class AFortMinigame* GetMinigame();
 
+    // 9.00's (CL-6337466) Creative flight speed and sprint, AFortPlayerControllerGameplay's (Core models the controller
+    // without that class). No earlier build has them. Their _Implementations are the shared empty function (slots 0x3A9
+    // and 0x3A7); their _Validates are the game's (0x1801440, whether the player may fly). The client only sends them
+    // (0x17E4CC0 cycles FlyingModifierIndex through FlyingModifiers; 0x17E49F0 toggles bIsFlightSprinting, 0x17F0260
+    // ends it once the pawn slows down) and applies them in the OnReps: OnRep_FlyingModifierIndex (0x17EEFD0) clamps the
+    // index, sets the athena movement component's speed (0x17FFC90: FlyingModifiers[Index], scaled while sprinting) and
+    // broadcasts OnCreativeFlyingSpeedChanged; OnRep_IsFlightSprinting (0x17EF28A) sets the speed again.
+    DefineUFunction(ServerCreativeSetFlightSpeedIndex)
+    DefineUFunction(ServerCreativeSetFlightSprint)
+    DefineUFunction(OnRep_FlyingModifierIndex)
+    DefineUFunction(OnRep_IsFlightSprinting)
+    DefineUProperty(int32_t, FlyingModifierIndex)
+    DefineUProperty(bool, bIsFlightSprinting)
+    void ServerCreativeSetFlightSpeedIndex_Implementation(int32_t Index);
+    void ServerCreativeSetFlightSprint_Implementation(bool bSprint);
+
     // 7.10's (CL-4667333) island tools (PongooDev/CoreV2#488; FortPlayerControllerAthenaCreativeIslands.cpp): Publish
     // Island, Backup Island and Restore of the island menu, and an island code entered at a rift. Nothing on builds
     // without them (7.00 has none of these RPCs).
@@ -523,6 +539,8 @@ private:
     static void ServerClaimPortal_ImplementationHK(AFortPlayerControllerAthena* This);
     static void ServerReleasePortal_ImplementationHK(AFortPlayerControllerAthena* This);
     static void ServerToggleAutoRestartMinigame_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerCreativeSetFlightSpeedIndex_ImplementationHK(AFortPlayerControllerAthena* This, int32_t Index);
+    static void ServerCreativeSetFlightSprint_ImplementationHK(AFortPlayerControllerAthena* This, bool bSprint);
     // Whether Core restored ServerLoadPlotForPortal_Implementation (7.20), which LoadPlotForPortal then calls.
     static inline bool bServerLoadPlotForPortalRestored = false;
     // The player's island space: the one they stand in when it is theirs to edit, else their rift's.

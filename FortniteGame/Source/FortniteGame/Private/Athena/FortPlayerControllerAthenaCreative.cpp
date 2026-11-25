@@ -1262,6 +1262,38 @@ void AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame_Implementation
 #endif
 }
 
+void AFortPlayerControllerAthena::ServerCreativeSetFlightSpeedIndex_Implementation(int32_t Index)
+{
+#if WITH_SERVER_CODE
+    // Core's (no build has the body): the replicated index the client asked for, applied on the server's pawn by the
+    // game's own OnRep (its clamp into FlyingModifiers, the movement component's speed), as the owning client's OnRep
+    // applies it there. FlightSpeedWhenEnteredSprint is left as the constructor sets it: nothing in 9.00 reads it.
+    FlyingModifierIndex = Index;
+    Reflection::FParams Params(FindStaticFunction_OnRep_FlyingModifierIndex(), true);
+    Params.Call(this);
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerCreativeSetFlightSprint_Implementation(bool bSprint)
+{
+#if WITH_SERVER_CODE
+    // Core's (no build has the body): as ServerCreativeSetFlightSpeedIndex, with OnRep_IsFlightSprinting.
+    bIsFlightSprinting = bSprint;
+    Reflection::FParams Params(FindStaticFunction_OnRep_IsFlightSprinting(), true);
+    Params.Call(this);
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerCreativeSetFlightSpeedIndex_ImplementationHK(AFortPlayerControllerAthena* This, int32_t Index)
+{
+    This->ServerCreativeSetFlightSpeedIndex_Implementation(Index);
+}
+
+void AFortPlayerControllerAthena::ServerCreativeSetFlightSprint_ImplementationHK(AFortPlayerControllerAthena* This, bool bSprint)
+{
+    This->ServerCreativeSetFlightSprint_Implementation(bSprint);
+}
+
 void AFortPlayerControllerAthena::ServerClaimPortal_ImplementationHK(AFortPlayerControllerAthena* This)
 {
     This->ServerClaimPortal_Implementation();
@@ -1352,6 +1384,23 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         {
             Log::Error(L"Finder: AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame's restoration is missing a part (GetMinigame {}, AFortMinigame::ToggleAutoRestartMinigame {}), so the toggle does nothing",
                 FindStaticFunction_GetMinigame() ? L"found" : L"missing", AFortMinigame::FindStaticFunction_ToggleAutoRestartMinigame() ? L"found" : L"missing");
+        }
+    }
+
+    // 9.00 (CL-6337466): the Creative flight speed and sprint RPCs. Earlier builds have neither UFunction.
+    if (FindStaticFunction_ServerCreativeSetFlightSpeedIndex() && FindStaticFunction_ServerCreativeSetFlightSprint())
+    {
+        if (FindStaticFunction_OnRep_FlyingModifierIndex() && FindStaticFunction_OnRep_IsFlightSprinting())
+        {
+            RestoreImplementation(FindStaticFunction_ServerCreativeSetFlightSpeedIndex(), reinterpret_cast<void*>(&ServerCreativeSetFlightSpeedIndex_ImplementationHK),
+                L"ServerCreativeSetFlightSpeedIndex");
+            RestoreImplementation(FindStaticFunction_ServerCreativeSetFlightSprint(), reinterpret_cast<void*>(&ServerCreativeSetFlightSprint_ImplementationHK),
+                L"ServerCreativeSetFlightSprint");
+        }
+        else
+        {
+            Log::Error(L"Finder: AFortPlayerControllerAthena's Creative flight OnReps weren't found (OnRep_FlyingModifierIndex {}, OnRep_IsFlightSprinting {}), so flight speed and sprint stay the client's only",
+                FindStaticFunction_OnRep_FlyingModifierIndex() ? L"found" : L"missing", FindStaticFunction_OnRep_IsFlightSprinting() ? L"found" : L"missing");
         }
     }
 

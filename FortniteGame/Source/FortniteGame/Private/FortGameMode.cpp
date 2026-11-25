@@ -9,6 +9,7 @@
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameInstance.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Log.h"
@@ -295,6 +296,21 @@ TSubclassOf<AGameSession>* AFortGameMode::GetGameSessionClassHK(const AFortGameM
     }
     *Result = This->GetGameSessionClass();
     return Result;
+}
+
+UFortPlaylistManager* AFortGameMode::GetPlaylistManager() const
+{
+    if (Member_PlaylistManager.IsAvailable())
+    {
+        return PlaylistManager;
+    }
+    if (!UFortGameInstance::HasPlaylistManager())
+    {
+        return nullptr;
+    }
+    UWorld* World = GetWorld();
+    UFortGameInstance* GameInstance = World ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(static_cast<UGameInstance*>(World->OwningGameInstance))) : nullptr;
+    return GameInstance ? static_cast<UFortPlaylistManager*>(GameInstance->PlaylistManager) : nullptr;
 }
 
 UFortGameDeathPenalty* AFortGameMode::GetDeathPenaltyData()

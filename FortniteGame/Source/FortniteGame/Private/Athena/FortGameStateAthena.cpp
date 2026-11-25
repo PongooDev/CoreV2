@@ -25,7 +25,7 @@
 namespace
 {
 #if WITH_SERVER_CODE
-    // The world's Battle Royale game mode, whose PlaylistManager has the playlists (5.21 0xBD5BBD: the game state's
+    // The world's Battle Royale game mode, whose playlist manager has the playlists (5.21 0xBD5BBD: the game state's
     // world's AuthorityGameMode, if it is an AFortGameModeAthena).
     AFortGameModeAthena* AthenaGameModeOf(AFortGameStateAthena* GameState)
     {
@@ -165,7 +165,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(int32_t PlaylistId)
         CurrentPlaylistId = PlaylistId;
     }
     AFortGameModeAthena* GameMode = AthenaGameModeOf(this);
-    UFortPlaylistManager* Playlists = GameMode ? static_cast<UFortPlaylistManager*>(GameMode->PlaylistManager) : nullptr;
+    UFortPlaylistManager* Playlists = GameMode ? GameMode->GetPlaylistManager() : nullptr;
     UFortPlaylistAthena* Playlist = Playlists ? Playlists->GetPlaylist(PlaylistId) : nullptr;
     if (!Playlist)
     {
@@ -194,7 +194,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
         return;
     }
     AFortGameModeAthena* GameMode = AthenaGameModeOf(this);
-    UFortPlaylistManager* Playlists = GameMode ? static_cast<UFortPlaylistManager*>(GameMode->PlaylistManager) : nullptr;
+    UFortPlaylistManager* Playlists = GameMode ? GameMode->GetPlaylistManager() : nullptr;
     UFortPlaylistAthena* Playlist = Playlists ? Playlists->GetPlaylist(PlaylistName) : nullptr;
     if (!Playlist)
     {

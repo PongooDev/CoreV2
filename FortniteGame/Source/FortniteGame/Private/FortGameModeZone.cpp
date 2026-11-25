@@ -751,7 +751,7 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
         if (!bHasOwner)
         {
             OutpostPlayerState->bIsOutpostOwner = true;
-            OutpostPlayerState->bCanEditOutpost = true;
+            OutpostPlayerState->SetHasPermissionToEditOutpost(true);
         }
     }
 #endif

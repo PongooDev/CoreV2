@@ -3,6 +3,7 @@
 #include "Containers/Array.h"
 #include "Engine/GameInstance.h"
 
+class UFortPlaylistManager;
 class UFortRegisteredPlayerInfo;
 class USidecarSys;
 
@@ -20,6 +21,10 @@ public:
     // controller copies (AFortPlayerController::CreativeModeProfile, from UFortRegisteredPlayerInfo +0x108 on 7.00).
     DefineUProperty(bool, bCreativeModeProfileEnabled)
     static bool HasCreativeModeProfileEnabled() { return StaticClass() && Member_bCreativeModeProfileEnabled.IsAvailable(); }
+
+    // From 9.00 (+0x800), moved from AFortGameMode::PlaylistManager.
+    DefineUProperty(UFortPlaylistManager*, PlaylistManager)
+    static bool HasPlaylistManager() { return StaticClass() && Member_PlaylistManager.IsAvailable(); }
 
     void Init();
 

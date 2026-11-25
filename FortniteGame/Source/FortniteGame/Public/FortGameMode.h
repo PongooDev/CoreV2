@@ -50,6 +50,7 @@ public:
     DefineUProperty(FName, CurrentPlaylistName)
     static bool HasCurrentPlaylistName() { return Member_CurrentPlaylistName.IsAvailable(); }
     DefineUProperty(FString, CurrentBucketId)
+    // Before 9.00 (8.51 +0x448). 9.00 moved it to UFortGameInstance::PlaylistManager: use GetPlaylistManager.
     DefineUProperty(UFortPlaylistManager*, PlaylistManager)
     // From 4.0 the game mode keeps the asset's path in DefaultDeathPenaltyData and the loaded asset in DeathPenaltyData.
     DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DefaultDeathPenaltyData)
@@ -63,6 +64,9 @@ public:
     // The death penalty (Save the World's resurrect durability costs), loading it from its path if need be; null when
     // the game mode has none.
     UFortGameDeathPenalty* GetDeathPenaltyData();
+    // The playlists: the game mode's PlaylistManager, from 9.00 the world's game instance's (9.00 0x1375970:
+    // GetWorld()->OwningGameInstance +0x800). Null without one.
+    UFortPlaylistManager* GetPlaylistManager() const;
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

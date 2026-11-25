@@ -7767,7 +7767,7 @@ bool Finder::ResolveMissionGenerationLive()
     return true;
 }
 
-bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset)
+bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset, ptrdiff_t GameplayStateOffset)
 {
     // 5.21 ends a mission with UFortMcpProfileCampaign::EndMatch, for every player at once, and RemoveParticipantAccount
     // (0xF8DA40) no longer sends EndPrimaryMission or names the mission's status: it waits for the leaving player's
@@ -8006,10 +8006,20 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     }
     // AFortGameState::SetGameplayState sets the state and calls OnRep_GameplayState. 1.1's and 1.2's zone override inlines
     // it; 1.7.2's (0x5C6400) calls it as Super, so the base class's vtable is searched then (same slot in the zone class).
-    int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains, AnyEntry) : -1;
-    if (OnRepIndex >= 0 && GameStateIndex < 0)
+    // The entry must also hold GameplayState's offset: 9.00's zone vtable has a slot 0x126 (0x13B45A0) that calls slot
+    // 0xFE (the OnRep's) on each object of an array at +0x908, and was taken for SetGameplayState, so EndOfZone was
+    // never set; its zone override (slot 0xEC, 0x13BD680) calls AFortGameState::SetGameplayState (0x1386960) as Super.
+    // The plain search stays the fallback.
+    const auto OnRepOnly = std::vector<std::vector<int32_t>>{ OnRepCall };
+    const auto WithState = std::vector<std::vector<int32_t>>{ OnRepCall, Bytes32(GameplayStateOffset) };
+    void** BaseGameStateVTable = CdoVTable(L"/Script/FortniteGame.FortGameState");
+    int32_t GameStateIndex = -1;
+    for (const auto* Patterns : { &WithState, &OnRepOnly })
     {
-        GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains, AnyEntry);
+        for (void** VTable : { GameStateVTable, BaseGameStateVTable })
+        {
+            GameStateIndex = OnRepIndex >= 0 && GameStateIndex < 0 ? FirstEntryContaining(VTable, *Patterns, Contains, AnyEntry) : GameStateIndex;
+        }
     }
 
     if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped && !bHasEndMatch) || !GameSessionId || (!GetEnumName && !bHasEndMatch) || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)

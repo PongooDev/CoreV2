@@ -529,3 +529,8 @@ ptrdiff_t AFortGameState::MissionManagerOffset()
 {
     return Member_MissionManager.GetOffsetChecked();
 }
+
+ptrdiff_t AFortGameState::GameplayStateOffset()
+{
+    return Member_GameplayState.GetOffsetChecked();
+}

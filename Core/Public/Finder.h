@@ -597,7 +597,7 @@ namespace Finder
     std::vector<uint8_t*> GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, int32_t EncounterAssignmentsOffset, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls, std::vector<uint8_t*>& OutEncounterCalls);
     uint8_t* FirstCallInImplementation(UFunction* Function, uintptr_t Target);
     uint8_t* ImplementationCall(UFunction* Function);
-    bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);
+    bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset, ptrdiff_t GameplayStateOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, UObject* PlayerControllerDefault, ptrdiff_t WorldInventoryOffset);
     uint8_t* QuickBarChangedWorldManagerCall();
     uint8_t* ExplorationActorFinderCall(ptrdiff_t DistanceRangeMinOffset, ptrdiff_t DistanceRangeMaxOffset);

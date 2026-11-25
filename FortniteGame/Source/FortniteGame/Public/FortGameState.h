@@ -178,6 +178,7 @@ public:
     const TMap<FString, FString>* GetMatchOptions() const;
 
     static ptrdiff_t MissionManagerOffset();
+    static ptrdiff_t GameplayStateOffset();
 };
 
 class AFortGameStateZone : public AFortGameState

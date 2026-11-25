@@ -590,7 +590,7 @@ void AFortMissionManager::CollectEarnedBadgeData(AFortPlayerController* PlayerCo
 
 void AFortMissionManager::HookVTables()
 {
-    if (!Finder::ResolveZoneEndLive(AFortMission::MissionInfoOffset(), AFortWorldManager::ZoneFinishedOffset(), AFortWorldManager::ZoneCompletedOffset(), AFortGameModeZone::EndOfZoneRemainTimeOffset(), AFortGameModeZone::ActiveSpawnPadOffset()))
+    if (!Finder::ResolveZoneEndLive(AFortMission::MissionInfoOffset(), AFortWorldManager::ZoneFinishedOffset(), AFortWorldManager::ZoneCompletedOffset(), AFortGameModeZone::EndOfZoneRemainTimeOffset(), AFortGameModeZone::ActiveSpawnPadOffset(), AFortGameState::GameplayStateOffset()))
     {
         return;
     }

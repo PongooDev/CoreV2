@@ -21664,3 +21664,214 @@ ptrdiff_t Finder::MinigameAutoRestartOffset(uintptr_t ToggleAutoRestartExec)
     }
     return Offset;
 }
+
+bool Finder::ResolveCreativeMoveToolLive(const FCreativeMoveToolAnchors& Anchors)
+{
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    const auto FollowJump = [](uintptr_t Function) { return Function && Byte(Function) == 0xE9 ? Finder::RelativeTarget(Function, 1, 5) : Function; };
+    const auto IsData = [](uintptr_t Address) { return Address && !IsInText(Address) && Finder::IsReadable(reinterpret_cast<const void*>(Address), 8); };
+    using FCalls = std::vector<std::pair<uintptr_t, uintptr_t>>;
+
+    // AFortCreativeMoveTool::DetermineActorMoveMode (9.00 0x1930AB0): the callee of HandleCopyPickupPressed_Implementation
+    // (0x19395F0) that reads InteractionBehaviors; GetInteractionBehaviorForActor (0x1930BB0) is its own callee that does.
+    const int32_t BehaviorsOffset = static_cast<int32_t>(Anchors.InteractionBehaviorsOffset);
+    const uintptr_t CopyPickup = FollowJump(Anchors.HandleCopyPickupPressed);
+    for (const auto& [Call, Target] : CopyPickup && BehaviorsOffset > 0x7F ? Finder::DecodedDirectCalls(CopyPickup) : FCalls{})
+    {
+        if (!Natives::AFortCreativeMoveTool_DetermineActorMoveMode && Finder::ReadsMemberAt(Target, BehaviorsOffset))
+        {
+            Natives::AFortCreativeMoveTool_DetermineActorMoveMode = Target;
+        }
+    }
+    for (const auto& [Call, Target] : Natives::AFortCreativeMoveTool_DetermineActorMoveMode ? Finder::DecodedDirectCalls(Natives::AFortCreativeMoveTool_DetermineActorMoveMode) : FCalls{})
+    {
+        if (!Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor && Finder::ReadsMemberAt(Target, BehaviorsOffset))
+        {
+            Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor = Target;
+        }
+    }
+
+    // The overlap check (0x193CF20) is the only code that loads CreativeMoveTool.Spawning_OverlapCloseEnoughValue's float
+    // (movss xmm, [rip+X]); the variable's registration (0x159500) takes the float's address.
+    const std::vector<uintptr_t> OverlapNames = Finder::StringRefs(L"CreativeMoveTool.Spawning_OverlapCloseEnoughValue");
+    const uintptr_t OverlapRegistration = OverlapNames.empty() ? 0 : Finder::FunctionStart(OverlapNames.front());
+    for (const auto& [Lea, Global] : OverlapRegistration ? Finder::DecodedAddressesTaken(OverlapRegistration) : FCalls{})
+    {
+        if (Natives::AFortCreativeMoveTool_IsOverlappingIdenticalActor || !IsData(Global))
+        {
+            continue;
+        }
+        for (const uintptr_t ModRm : Finder::RipReferencesTo(Global))
+        {
+            const bool bMovss = (Byte(ModRm - 3) == 0xF3 && Byte(ModRm - 2) == 0x0F && Byte(ModRm - 1) == 0x10)
+                || (Byte(ModRm - 4) == 0xF3 && (Byte(ModRm - 3) & 0xF0) == 0x40 && Byte(ModRm - 2) == 0x0F && Byte(ModRm - 1) == 0x10);
+            const uintptr_t Function = bMovss ? Finder::FunctionStart(ModRm) : 0;
+            if (Function && Function != OverlapRegistration)
+            {
+                Natives::AFortCreativeMoveTool_IsOverlappingIdenticalActor = Function;
+                break;
+            }
+        }
+    }
+
+    // FFortCreativeBudgetTracker: the asset cost lookup (0x130D3B0) logs its miss; the cost table is the global it
+    // addresses twice (lea rcx, then add rcx, [rip+X]). CanAddActors (0x12F6B50) calls the actor cost (0x130D260), which
+    // calls the asset cost, and reads the class tracker's ChildClassesAtLimit and ParentClassesAtLimit.
+    const std::vector<uintptr_t> CostLogs = Finder::StringRefs(L"FFortCreativeBudgetTracker: Could not find asset memory costs for '%s'");
+    const uintptr_t AssetCost = CostLogs.empty() ? 0 : Finder::FunctionStart(CostLogs.front());
+    const FCalls AssetCostRefs = AssetCost ? Finder::DecodedRipReferences(AssetCost) : FCalls{};
+    for (const auto& [Instruction, Global] : AssetCostRefs)
+    {
+        const auto Count = std::count_if(AssetCostRefs.begin(), AssetCostRefs.end(), [Global](const auto& Each) { return Each.second == Global; });
+        if (!Natives::FortCreativeAssetCosts && Count >= 2 && IsData(Global))
+        {
+            Natives::FortCreativeAssetCosts = reinterpret_cast<void*>(Global);
+        }
+    }
+    // CanAddActors also reads Creative.Budget.Enabled first (its registration takes the variable's address).
+    const std::vector<uintptr_t> BudgetNames = Finder::StringRefs(L"Creative.Budget.Enabled");
+    const uintptr_t BudgetRegistration = BudgetNames.empty() ? 0 : Finder::FunctionStart(BudgetNames.front());
+    std::vector<uintptr_t> BudgetVariables;
+    for (const auto& [Lea, Global] : BudgetRegistration ? Finder::DecodedAddressesTaken(BudgetRegistration) : FCalls{})
+    {
+        if (IsData(Global))
+        {
+            BudgetVariables.push_back(Global);
+        }
+    }
+    const auto ReadsBudgetEnabled = [&BudgetVariables](uintptr_t Function)
+    {
+        for (const auto& [Instruction, Global] : Finder::DecodedRipReferences(Function))
+        {
+            if (std::find(BudgetVariables.begin(), BudgetVariables.end(), Global) != BudgetVariables.end())
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const int32_t ChildOffset = static_cast<int32_t>(Anchors.ChildClassesAtLimitOffset);
+    const int32_t ParentOffset = static_cast<int32_t>(Anchors.ParentClassesAtLimitOffset);
+    for (const uintptr_t ActorCostCall : AssetCost && ChildOffset > 0x7F && ParentOffset > 0x7F ? Finder::CallsTo(AssetCost, false) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t ActorCost = Finder::FunctionStart(ActorCostCall);
+        for (const uintptr_t Call : ActorCost && !Natives::FFortCreativeBudgetTracker_CanAddActors ? Finder::CallsTo(ActorCost, false) : std::vector<uintptr_t>{})
+        {
+            const uintptr_t Caller = Finder::FunctionStart(Call);
+            if (Caller && Finder::ReadsMemberAt(Caller, ChildOffset) && Finder::ReadsMemberAt(Caller, ParentOffset) && ReadsBudgetEnabled(Caller))
+            {
+                Natives::FFortCreativeBudgetTracker_CanAddActors = Caller;
+                break;
+            }
+        }
+    }
+
+    // The level save's actor template (FActorTemplateRecord), taken from an actor and put onto one: their stat names.
+    const std::vector<uintptr_t> CreateTemplate = Finder::StringRefs(L"STAT_Level_Save_CreateTemplate");
+    const std::vector<uintptr_t> ApplyTemplate = Finder::StringRefs(L"STAT_Level_Save_ApplyTemplate");
+    Natives::LevelSave_CreateTemplate = CreateTemplate.size() == 1 ? Finder::FunctionStart(CreateTemplate.front()) : 0;
+    Natives::LevelSave_ApplyTemplate = ApplyTemplate.size() == 1 ? Finder::FunctionStart(ApplyTemplate.front()) : 0;
+
+    // UKismetSystemLibrary::LineTraceSingle and LineTraceMulti (9.00 0x2D77A70, 0x2D775C0), each called once by its exec,
+    // call ConvertToCollisionChannel, ConfigureCollisionParams (0x2D64920), GetWorldFromContextObject, then the world's
+    // LineTraceSingleByChannel (0x2B78600) or LineTraceMultiByChannel (0x2B78420). Both must agree on the middle two.
+    const auto KismetTrace = [](uintptr_t Exec) -> FCalls
+    {
+        const FCalls Calls = Exec ? Finder::DecodedDirectCalls(Exec) : FCalls{};
+        for (const auto& [Call, Target] : Calls)
+        {
+            const auto Count = std::count_if(Calls.begin(), Calls.end(), [Target](const auto& Each) { return Each.second == Target; });
+            FCalls Inner = Count == 1 ? Finder::DecodedDirectCalls(Target) : FCalls{};
+            if (Inner.size() >= 4)
+            {
+                return Inner;
+            }
+        }
+        return {};
+    };
+    const FCalls SingleCalls = KismetTrace(Anchors.LineTraceSingleExec);
+    const FCalls MultiCalls = KismetTrace(Anchors.LineTraceMultiExec);
+    if (SingleCalls.size() >= 4 && MultiCalls.size() >= 4 && SingleCalls[1].second == MultiCalls[1].second && SingleCalls[2].second == MultiCalls[2].second
+        && SingleCalls[3].second != MultiCalls[3].second)
+    {
+        Natives::KismetSystemLibrary_ConfigureCollisionParams = SingleCalls[1].second;
+        Natives::UWorld_LineTraceSingleByChannel = SingleCalls[3].second;
+        Natives::UWorld_LineTraceMultiByChannel = MultiCalls[3].second;
+    }
+
+    // ABuildingActor's slot 0xA1 (9.00 0x1132920) calls the support status restore (0x11B2F00, which reads
+    // SavedDirectlySupportedStatus) and right after it the structural grid registration (0x119AAA0).
+    const int32_t SupportOffset = static_cast<int32_t>(Anchors.SavedDirectlySupportedStatusOffset);
+    for (int32_t Slot = 0; Anchors.BuildingActorVTable && SupportOffset > 0x7F && Slot < Anchors.BuildingActorVTableSlots && !Natives::ABuildingSMActor_ApplySavedSupportStatus; ++Slot)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(Anchors.BuildingActorVTable[Slot]);
+        if (!IsInText(Function) || IsCoreFunction(Function) || Finder::IsStubFunction(Function))
+        {
+            continue;
+        }
+        const FCalls Calls = Finder::DecodedDirectCalls(Function);
+        for (size_t Index = 0; Index + 1 < Calls.size(); ++Index)
+        {
+            if (Calls[Index + 1].second != Calls[Index].second && Finder::ReadsMemberAt(Calls[Index].second, SupportOffset))
+            {
+                Natives::ABuildingSMActor_ApplySavedSupportStatus = Calls[Index].second;
+                Natives::ABuildingSMActor_AddToStructuralGrid = Calls[Index + 1].second;
+                break;
+            }
+        }
+    }
+
+    // ClientStartInteracting_Implementation (0x192F710) prepares each selected building as StartInteracting does on the
+    // server: its callee that resets BuildingAnimation (0x11B7160).
+    const int32_t AnimationOffset = static_cast<int32_t>(Anchors.BuildingAnimationOffset);
+    for (const auto& [Call, Target] : Anchors.ClientStartInteracting && AnimationOffset > 0x7F ? Finder::DecodedDirectCalls(FollowJump(Anchors.ClientStartInteracting)) : FCalls{})
+    {
+        if (!Natives::ABuildingSMActor_PrepareForMove && Finder::ReadsMemberAt(Target, AnimationOffset))
+        {
+            Natives::ABuildingSMActor_PrepareForMove = Target;
+        }
+    }
+
+    // ClearMovementModeOnServer (0x192F220, ServerClearMovementMode_Implementation's jump target) puts a moved building
+    // back: its largest virtual call is the building's collision touch pass (slot 0xD5), and it broadcasts the static
+    // relevancy delegate (Data at X, ArrayNum at X+8, lock count at X+0x14).
+    const uintptr_t ClearMovementMode = FollowJump(Anchors.ServerClearMovementMode);
+    int32_t LargestDisplacement = -1;
+    for (const int32_t Displacement : ClearMovementMode ? Finder::DecodedVirtualCallDisplacements(ClearMovementMode) : std::vector<int32_t>{})
+    {
+        LargestDisplacement = std::max(LargestDisplacement, Displacement);
+    }
+    Natives::ABuildingActor_ResolveCollisionTouchesIndex = LargestDisplacement > 0 && LargestDisplacement % 8 == 0 ? LargestDisplacement / 8 : -1;
+    const FCalls ClearRefs = ClearMovementMode ? Finder::DecodedRipReferences(ClearMovementMode) : FCalls{};
+    const auto ClearReferences = [&ClearRefs](uintptr_t Address) { return std::any_of(ClearRefs.begin(), ClearRefs.end(), [Address](const auto& Each) { return Each.second == Address; }); };
+    for (const auto& [Instruction, Global] : ClearRefs)
+    {
+        if (!Natives::BuildingActorRelevancyChanged && IsData(Global) && ClearReferences(Global + 8) && ClearReferences(Global + 0x14))
+        {
+            Natives::BuildingActorRelevancyChanged = reinterpret_cast<void*>(Global);
+        }
+    }
+
+    // AActor::GetActorBounds (its exec's last call) asks GetComponentsBoundingBox (call [rax+520h] on 9.00);
+    // CalculateComponentsBoundingBoxInLocalSpace is the next virtual in AActor.
+    const FCalls BoundsExecCalls = Anchors.GetActorBoundsExec ? Finder::DecodedDirectCalls(Anchors.GetActorBoundsExec) : FCalls{};
+    const std::vector<int32_t> BoundsCalls = BoundsExecCalls.empty() ? std::vector<int32_t>{} : Finder::DecodedVirtualCallDisplacements(BoundsExecCalls.back().second);
+    Natives::AActor_GetComponentsBoundingBoxIndex = !BoundsCalls.empty() && BoundsCalls.front() > 0 && BoundsCalls.front() % 8 == 0 ? BoundsCalls.front() / 8 : -1;
+    Natives::AActor_CalculateComponentsBoundingBoxInLocalSpaceIndex = Natives::AActor_GetComponentsBoundingBoxIndex >= 0 ? Natives::AActor_GetComponentsBoundingBoxIndex + 1 : -1;
+
+    Log::Info(L"Finder: AFortCreativeMoveTool server pieces: DetermineActorMoveMode 0x{:X}, GetInteractionBehaviorForActor 0x{:X}, overlap check 0x{:X}; budget CanAddActors 0x{:X}, "
+              L"asset costs 0x{:X}; templates create 0x{:X} apply 0x{:X}; ConfigureCollisionParams 0x{:X}, LineTraceSingleByChannel 0x{:X}, LineTraceMultiByChannel 0x{:X}; "
+              L"saved support 0x{:X}, structural grid add 0x{:X}, prepare for move 0x{:X}; relevancy delegate 0x{:X}; collision touches slot 0x{:X}; GetComponentsBoundingBox slot 0x{:X}",
+        Rva(Natives::AFortCreativeMoveTool_DetermineActorMoveMode), Rva(Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor),
+        Rva(Natives::AFortCreativeMoveTool_IsOverlappingIdenticalActor), Rva(Natives::FFortCreativeBudgetTracker_CanAddActors),
+        Rva(reinterpret_cast<uintptr_t>(Natives::FortCreativeAssetCosts)), Rva(Natives::LevelSave_CreateTemplate), Rva(Natives::LevelSave_ApplyTemplate),
+        Rva(Natives::KismetSystemLibrary_ConfigureCollisionParams), Rva(Natives::UWorld_LineTraceSingleByChannel), Rva(Natives::UWorld_LineTraceMultiByChannel),
+        Rva(Natives::ABuildingSMActor_ApplySavedSupportStatus), Rva(Natives::ABuildingSMActor_AddToStructuralGrid), Rva(Natives::ABuildingSMActor_PrepareForMove),
+        Rva(reinterpret_cast<uintptr_t>(Natives::BuildingActorRelevancyChanged)), Natives::ABuildingActor_ResolveCollisionTouchesIndex, Natives::AActor_GetComponentsBoundingBoxIndex);
+    return Natives::AFortCreativeMoveTool_DetermineActorMoveMode && Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor
+        && Natives::AFortCreativeMoveTool_IsOverlappingIdenticalActor && Natives::FFortCreativeBudgetTracker_CanAddActors && Natives::FortCreativeAssetCosts
+        && Natives::LevelSave_CreateTemplate && Natives::LevelSave_ApplyTemplate && Natives::KismetSystemLibrary_ConfigureCollisionParams
+        && Natives::UWorld_LineTraceSingleByChannel && Natives::UWorld_LineTraceMultiByChannel && Natives::ABuildingSMActor_ApplySavedSupportStatus
+        && Natives::ABuildingSMActor_AddToStructuralGrid && Natives::ABuildingSMActor_PrepareForMove && Natives::BuildingActorRelevancyChanged && Natives::ABuildingActor_ResolveCollisionTouchesIndex >= 0
+        && Natives::AActor_GetComponentsBoundingBoxIndex >= 0;
+}

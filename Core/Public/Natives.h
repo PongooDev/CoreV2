@@ -805,6 +805,28 @@ namespace Natives
     inline int32_t ABuildingSMActor_CanBePlayerEditedIndex = -1;
     inline int32_t ABuildingSMActor_GetEditingPlayerIndex = -1;
     inline int32_t ABuildingSMActor_SetEditingPlayerIndex = -1;
+    // 9.00 (CL-6337466): the intact code AFortCreativeMoveTool's restored server functions call (Finder::
+    // ResolveCreativeMoveToolLive). Null or -1 where the build doesn't have that shape.
+    inline uintptr_t AFortCreativeMoveTool_DetermineActorMoveMode = 0;
+    inline uintptr_t AFortCreativeMoveTool_GetInteractionBehaviorForActor = 0;
+    inline uintptr_t AFortCreativeMoveTool_IsOverlappingIdenticalActor = 0;
+    inline uintptr_t FFortCreativeBudgetTracker_CanAddActors = 0;
+    // The global table of asset costs FFortCreativeBudgetTracker reads (TMap<FCreativeActorId, FCreativeAssetCost>).
+    inline void* FortCreativeAssetCosts = nullptr;
+    inline uintptr_t LevelSave_CreateTemplate = 0;
+    inline uintptr_t LevelSave_ApplyTemplate = 0;
+    inline uintptr_t KismetSystemLibrary_ConfigureCollisionParams = 0;
+    inline uintptr_t UWorld_LineTraceSingleByChannel = 0;
+    inline uintptr_t UWorld_LineTraceMultiByChannel = 0;
+    inline uintptr_t ABuildingSMActor_ApplySavedSupportStatus = 0;
+    inline uintptr_t ABuildingSMActor_AddToStructuralGrid = 0;
+    // What the start of a move does to a building (9.00 0x11B7160: stops its build animation, among others).
+    inline uintptr_t ABuildingSMActor_PrepareForMove = 0;
+    // The static TMulticastDelegate<void(AActor*)> a building's move start and end broadcast (relevancy).
+    inline void* BuildingActorRelevancyChanged = nullptr;
+    inline int32_t ABuildingActor_ResolveCollisionTouchesIndex = -1;
+    inline int32_t AActor_GetComponentsBoundingBoxIndex = -1;
+    inline int32_t AActor_CalculateComponentsBoundingBoxInLocalSpaceIndex = -1;
     inline int32_t ABuildingSMActor_NeedsRepairIndex = -1;
     inline int32_t ABuildingSMActor_RepairBuildingIndex = -1;
     inline int32_t UCharacterMovementComponent_ServerMove_ImplementationIndex = -1;

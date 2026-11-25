@@ -1,5 +1,6 @@
 #pragma once
 
+#include "UObject/AssetPtr.h"
 #include "Containers/Array.h"
 #include "Internationalization/Text.h"
 #include "Items/FortItemDefinition.h"
@@ -386,6 +387,24 @@ public:
     DefineUFunction(MoveToolRemoved)
     void MoveToolRemoved();
     DECLARE_FUNCTION(execMoveToolRemoved);
+
+    // 9.00 (CL-6337466): the Creative phone is AFortPlayerControllerGameplay's to give (#658). Athena_PlayerController's
+    // HandlePermissions only calls SetIsCreativeModeEnabled, which broadcasts OnCreativeModeEnabledChangedDelegate; the
+    // phone's load and grant (GrantCreativePhoneItemDefLoadedCallback, whose exec calls the shared empty function) were
+    // compiled out. Before 9.00 the blueprint gives WID_CreativeTool itself.
+    DefineUFunction(GrantCreativePhoneItemDefLoadedCallback)
+    DefineUFunction(ClientEnsureCreativePhoneIsInProperSlot)
+    DefineUFunction(OnCreativeModeEnabledChanged)
+    DefineUFunction(IsCreativeModeEnabled)
+    DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, CreativeMoveToolItemDefinition)
+    DefineUProperty(FMulticastScriptDelegate, OnCreativeModeEnabledChangedDelegate)
+    void GrantCreativePhoneItemDefLoadedCallback();
+    DECLARE_FUNCTION(execGrantCreativePhoneItemDefLoadedCallback);
+    // Core's handler of OnCreativeModeEnabledChangedDelegate (bound at each Possess): the phone's load as the creative
+    // mode comes on, its removal as it goes off.
+    void HandleCreativeModeEnabledChanged(bool bIsEnabled);
+    DECLARE_FUNCTION(execHandleCreativeModeEnabledChanged);
+    static void BindCreativeModeEnabledChanged(AFortPlayerControllerAthena* Controller);
 
     void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
     // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative

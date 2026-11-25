@@ -23,6 +23,8 @@ public:
     void SetPhysicsAngularVelocityInRadians(const FVector& NewAngVel, bool bAddToCurrent = false, FName BoneName = FName());
 };
 
+class UStaticMesh;
+
 class UMeshComponent : public UPrimitiveComponent
 {
     DefineUnrealClass(UMeshComponent, Engine)
@@ -34,6 +36,7 @@ class UStaticMeshComponent : public UMeshComponent
 
 public:
     DefineUFunction(GetLocalBounds)
+    DefineUProperty(UStaticMesh*, StaticMesh)
 
     // The mesh's box in the component's own space. False if there is no mesh or no GetLocalBounds.
     bool GetLocalBounds(FVector& Min, FVector& Max) const;

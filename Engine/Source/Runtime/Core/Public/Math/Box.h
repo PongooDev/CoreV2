@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Math/Transform.h"
 #include "Math/Vector.h"
 
 #include <algorithm>
+#include <cmath>
 
 // An axis aligned box (Engine's FBox: Min, Max and IsValid, 0x1C).
 struct FBox
@@ -42,6 +44,26 @@ struct FBox
             *this += Other.Max;
         }
         return *this;
+    }
+
+    // Epic's: the box around this one moved by M (an invalid box stays invalid).
+    FBox TransformBy(const FTransform& M) const
+    {
+        if (!IsValid)
+        {
+            return FBox();
+        }
+        const FMatrix Matrix = M.ToMatrixWithScale();
+        const FVector Origin = GetCenter();
+        const FVector Extent = GetExtent();
+        const FVector NewOrigin = Matrix.TransformPosition(Origin);
+        const auto AbsAxis = [&Matrix](int32_t Axis, float Scale)
+        {
+            const FVector Row = Matrix.GetScaledAxis(Axis) * Scale;
+            return FVector(std::fabs(Row.X), std::fabs(Row.Y), std::fabs(Row.Z));
+        };
+        const FVector NewExtent = AbsAxis(0, Extent.X) + AbsAxis(1, Extent.Y) + AbsAxis(2, Extent.Z);
+        return FBox(NewOrigin - NewExtent, NewOrigin + NewExtent);
     }
 
     bool IsInside(const FVector& Point) const

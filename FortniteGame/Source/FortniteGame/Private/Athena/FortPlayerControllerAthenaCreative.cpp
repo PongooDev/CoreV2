@@ -7,6 +7,7 @@
 #include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Creative/FortAthenaCreativePortal.h"
+#include "Creative/FortCreativeMoveTool.h"
 #include "Creative/FortCreativePortalManager.h"
 #include "Creative/FortLevelSaveComponent.h"
 #include "Creative/FortVolume.h"
@@ -18,6 +19,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
+#include "FortKismetLibrary.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
@@ -1009,6 +1011,97 @@ DEFINE_FUNCTION(AFortPlayerControllerAthena::execMoveToolRemoved)
     P_NATIVE_END;
 }
 
+namespace
+{
+    UFunction* CreativeModeEnabledChangedHandler = nullptr;
+}
+
+void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
+{
+#if WITH_SERVER_CODE
+    // Core's (no build has the body): the phone once its definition is in, given as 8.51's Athena_PlayerController's
+    // GrantItem gives it (GiveItemToInventoryOwner, one, notified, level -1), unless the player has it already, then put
+    // in its slot by the owning client.
+    UFortWorldItemDefinition* Phone = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(CreativeMoveToolItemDefinition).Get();
+    Reflection::FParams Enabled(FindStaticFunction_IsCreativeModeEnabled(), true);
+    if (Role != ROLE_Authority || !Phone || !Enabled.Call(this) || !Enabled.Take<bool>(L"ReturnValue"))
+    {
+        return;
+    }
+    AFortInventory* Inventory = WorldInventory;
+    bool bHasPhone = false;
+    if (Inventory)
+    {
+        TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num() && !bHasPhone; ++Index)
+        {
+            bHasPhone = Instances[Index] && static_cast<UFortItemDefinition*>(Instances[Index]->ItemEntry.ItemDefinition) == static_cast<UFortItemDefinition*>(Phone);
+        }
+    }
+    if (!bHasPhone)
+    {
+        UFortKismetLibrary::K2_GiveItemToPlayer(this, Phone, 1, true, -1);
+    }
+    Reflection::FParams Slot(FindStaticFunction_ClientEnsureCreativePhoneIsInProperSlot(), true);
+    Slot.Call(this);
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerControllerAthena::execGrantCreativePhoneItemDefLoadedCallback)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerControllerAthena*>(Context)->GrantCreativePhoneItemDefLoadedCallback();
+    P_NATIVE_END;
+}
+
+void AFortPlayerControllerAthena::HandleCreativeModeEnabledChanged(bool bIsEnabled)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    const TAssetPtr<UFortWorldItemDefinition>& PhoneReference = CreativeMoveToolItemDefinition;
+    if (!bIsEnabled)
+    {
+        // As 8.51's RevokeItem (K2_RemoveItemFromPlayer, all of them, forced).
+        if (UFortWorldItemDefinition* Phone = PhoneReference.Get())
+        {
+            UFortKismetLibrary::K2_RemoveItemFromPlayer(this, Phone, -1, true);
+        }
+        return;
+    }
+    // Core's: the definition loads at once on the game thread where Epic's waits for the streamable manager; the grant is
+    // the game's own callback either way.
+    if (PhoneReference.LoadSynchronous())
+    {
+        Reflection::FParams Grant(FindStaticFunction_GrantCreativePhoneItemDefLoadedCallback(), true);
+        Grant.Call(this);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerControllerAthena::execHandleCreativeModeEnabledChanged)
+{
+    P_GET_UBOOL(bIsEnabled);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerControllerAthena*>(Context)->HandleCreativeModeEnabledChanged(bIsEnabled);
+    P_NATIVE_END;
+}
+
+void AFortPlayerControllerAthena::BindCreativeModeEnabledChanged(AFortPlayerControllerAthena* Controller)
+{
+#if WITH_SERVER_CODE
+    if (Controller && CreativeModeEnabledChangedHandler)
+    {
+        FMulticastScriptDelegate& Changed = Controller->OnCreativeModeEnabledChangedDelegate;
+        Changed.AddUniqueDynamic(Controller, CreativeModeEnabledChangedHandler->GetFName());
+    }
+#endif
+}
+
 void AFortPlayerControllerAthena::ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef)
 {
     Reflection::FParams Params(FindStaticFunction_ClientCycleQuickBarToCreativeItem(), true);
@@ -1401,6 +1494,43 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         {
             Log::Error(L"Finder: AFortPlayerControllerAthena's Creative flight OnReps weren't found (OnRep_FlyingModifierIndex {}, OnRep_IsFlightSprinting {}), so flight speed and sprint stay the client's only",
                 FindStaticFunction_OnRep_FlyingModifierIndex() ? L"found" : L"missing", FindStaticFunction_OnRep_IsFlightSprinting() ? L"found" : L"missing");
+        }
+    }
+
+    // 9.00: the phone's selection and spawning server code (AFortCreativeMoveTool).
+    AFortCreativeMoveTool::RestoreStrippedServerFunctions();
+
+    // 9.00 (#658): the phone's grant, which the blueprint left to SetIsCreativeModeEnabled. Earlier builds have no
+    // GrantCreativePhoneItemDefLoadedCallback (their blueprint gives the phone).
+    if (UFunction* Grant = FindStaticFunction_GrantCreativePhoneItemDefLoadedCallback())
+    {
+        const uintptr_t Exec = reinterpret_cast<uintptr_t>(Grant->GetNativeFunc());
+        // The exec's first call or tail jump (9.00 0xA1E075: jmp to the shared empty function).
+        bool bStripped = false;
+        for (uintptr_t Site = Exec; Exec && Site < Exec + 0x40; ++Site)
+        {
+            const uint8_t Opcode = *reinterpret_cast<const uint8_t*>(Site);
+            if (Opcode == 0xE8 || Opcode == 0xE9)
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+                if (Finder::FunctionStart(Target) == Target || Finder::IsStubFunction(Target))
+                {
+                    bStripped = Finder::IsStubFunction(Target);
+                    break;
+                }
+            }
+        }
+        UFunction* Signature = FindStaticFunction_OnCreativeModeEnabledChanged();
+        if (bStripped && Signature && FindStaticFunction_IsCreativeModeEnabled() && Member_CreativeMoveToolItemDefinition.IsAvailable() && Member_OnCreativeModeEnabledChangedDelegate.IsAvailable())
+        {
+            Grant->SetNativeFunc(&execGrantCreativePhoneItemDefLoadedCallback);
+            CreativeModeEnabledChangedHandler = StaticClass()->AddNativeFunction(L"HandleCreativeModeEnabledChanged", &execHandleCreativeModeEnabledChanged, Signature);
+            Log::Info(L"Hook AFortPlayerControllerGameplay::GrantCreativePhoneItemDefLoadedCallback: native (the build's exec 0x{:X} calls only the shared empty function); OnCreativeModeEnabledChangedDelegate {}",
+                Exec - Finder::ImageBase(), CreativeModeEnabledChangedHandler ? L"handled" : L"not handled (no native added)");
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortPlayerControllerGameplay::GrantCreativePhoneItemDefLoadedCallback is native in this build or its parts are missing (stripped {})", bStripped ? L"yes" : L"no");
         }
     }
 

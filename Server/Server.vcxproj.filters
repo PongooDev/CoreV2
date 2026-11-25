@@ -769,6 +769,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Box.h">
       <Filter>Engine\Source\Runtime\Core\Public\Math</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Matrix.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Math</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\BoxSphereBounds.h">
       <Filter>Engine\Source\Runtime\Core\Public\Math</Filter>
     </ClInclude>
@@ -1076,6 +1079,9 @@
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\StaticMesh.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\StaticMeshActor.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h">
@@ -1551,6 +1557,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortLevelSaveComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortCreativeMoveTool.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolume.h">
@@ -2387,6 +2396,12 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortLevelSaveComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortCreativeBudgetTracker.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortCreativeMoveTool.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolume.cpp">

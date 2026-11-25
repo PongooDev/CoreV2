@@ -160,6 +160,12 @@ namespace Finder
     // Every `lea r64, [rip+disp32]` of the function's pieces, decoded instruction by instruction: the lea's address and the
     // address it takes (a function bound into a delegate, a string, a global).
     std::vector<std::pair<uintptr_t, uintptr_t>> DecodedAddressesTaken(uintptr_t Function);
+    // Every rip-relative memory operand of the function's instructions (any opcode): (instruction, target).
+    std::vector<std::pair<uintptr_t, uintptr_t>> DecodedRipReferences(uintptr_t Function);
+    // The displacements of the function's calls through a register's memory (call qword ptr [reg+disp]), in order.
+    std::vector<int32_t> DecodedVirtualCallDisplacements(uintptr_t Function);
+    // The modrm bytes of the instructions anywhere in the executable sections that address Target rip-relatively.
+    std::vector<uintptr_t> RipReferencesTo(uintptr_t Target);
     // Whether an instruction of the function's pieces addresses memory at [reg+Displacement] (disp32, not off rbp): a
     // member of an object it reads or writes.
     // bR13Base also takes [r13+Displacement] (mod 2, rm 5 with REX.B), which the rbp exclusion drops: 7.30 (CL-4834550)
@@ -324,6 +330,26 @@ namespace Finder
     // OnCeaseRelevant (ContextOverrideVTable is its own).
     bool ResolveContextOverrideLive(void** ContextOverrideVTable);
     bool ResolveQuickBarFocusLive();
+    // 9.00's Creative phone (AFortCreativeMoveTool::RestoreStrippedServerFunctions): what the finder starts from.
+    struct FCreativeMoveToolAnchors
+    {
+        uintptr_t HandleCopyPickupPressed = 0;
+        uintptr_t ServerClearMovementMode = 0;
+        uintptr_t ClientStartInteracting = 0;
+        ptrdiff_t BuildingAnimationOffset = -1;
+        ptrdiff_t InteractionBehaviorsOffset = -1;
+        void** BuildingActorVTable = nullptr;
+        int32_t BuildingActorVTableSlots = 0;
+        ptrdiff_t SavedDirectlySupportedStatusOffset = -1;
+        ptrdiff_t ChildClassesAtLimitOffset = -1;
+        ptrdiff_t ParentClassesAtLimitOffset = -1;
+        uintptr_t GetActorBoundsExec = 0;
+        uintptr_t LineTraceSingleExec = 0;
+        uintptr_t LineTraceMultiExec = 0;
+    };
+    // Logs each result; false when one is missing (nothing is restored then).
+    bool ResolveCreativeMoveToolLive(const FCreativeMoveToolAnchors& Anchors);
+
     bool ResolveSpottingLive(UClass* SpottableActorInterface);
     bool ResolveNavigationSystemLive();
     bool ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNavigationSystemOffset);

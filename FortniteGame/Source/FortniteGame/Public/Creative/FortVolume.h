@@ -28,6 +28,57 @@ namespace EVolumeState
     inline constexpr uint8_t Ready = 3;
 }
 
+struct FFortCreativeClassInstanceTracker
+{
+    DefineUnrealStruct(FFortCreativeClassInstanceTracker, FortniteGame)
+
+public:
+    DefineUProperty(TArray<UClass*>, ChildClassesAtLimit)
+    DefineUProperty(TArray<UClass*>, ParentClassesAtLimit)
+
+    // Epic's (8.51 0x125ADF0; 9.00 has no copy): whether NewActors, net of ActorsToRemove, add an actor of a class at
+    // its limit.
+    bool CanAddActors(const TArray<AActor*>& NewActors, const TArray<AActor*>& ActorsToRemove) const;
+
+    static ptrdiff_t ChildClassesAtLimitOffset() { return Member_ChildClassesAtLimit.IsAvailable() ? Member_ChildClassesAtLimit.GetOffsetChecked() : -1; }
+    static ptrdiff_t ParentClassesAtLimitOffset() { return Member_ParentClassesAtLimit.IsAvailable() ? Member_ParentClassesAtLimit.GetOffsetChecked() : -1; }
+};
+
+struct FMemoryBudget
+{
+    int32_t TotalMemory;
+    int32_t InUseMemory;
+    uint8_t Padding[8];
+};
+
+// An island's cost budget (Epic's FFortCreativeBudgetTracker).
+struct FFortCreativeBudgetTracker
+{
+    DefineUnrealStruct(FFortCreativeBudgetTracker, FortniteGame)
+
+public:
+    DefineUProperty(FMemoryBudget, GlobalBudget)
+    DefineUStructProperty(FFortCreativeClassInstanceTracker, ClassTracker)
+
+    // Epic's (8.51 0x125A360, the one-actor form of 0x125A3F0; 9.00 has no copy): whether the island can take NewActor
+    // in place of ActorsToRemove. Without removals it is the build's own CanAddActors (9.00 0x12F6B50).
+    bool CanAddActor(AActor* NewActor, const TArray<AActor*>& ActorsToRemove) const;
+    bool CanAddActors(const TArray<AActor*>& NewActors, const TArray<AActor*>& ActorsToRemove) const;
+
+    // 8.51 0x126ECA0 (the asset cost, intact in 9.00 as 0x130D3B0): the asset's memory cost from the build's cost table.
+    static int32_t CostUsedByAsset(const TArray<FName>& ActorId);
+    // The instance cost the budget check adds per actor (from the same table, else Creative.FixedInstanceCost).
+    static int32_t InstanceCostOf(const TArray<FName>& ActorId);
+    // 8.51 0x1149FC0 (FCreativeActorId from an actor): its class's name, and a static mesh actor's mesh name.
+    static TArray<FName> MakeActorId(const AActor* Actor);
+
+    static ptrdiff_t ClassTrackerOffset() { return Member_ClassTracker.IsAvailable() ? Member_ClassTracker.GetOffsetChecked() : -1; }
+
+private:
+    // The tracker's unreflected TMap<FCreativeActorId, int32> of asset instance counts, after GlobalBudget (+0x20).
+    const int32_t* FindAssetInstances(const TArray<FName>& ActorId) const;
+};
+
 // A Creative island's space (from 7.00; FortVolumeActor_Base_C in Athena_Playground): its playset (the island's own
 // level, streamed by its UPlaysetLevelStreamComponent), its UFortLevelSaveComponent (what was built on it) and the
 // rifts linked to it.
@@ -43,6 +94,7 @@ public:
     // The hub's rifts linked to the island (each rift's LinkedVolume registers it here).
     DefineUProperty(TArray<AFortAthenaCreativePortal*>, LinkedPortals)
     static bool HasLinkedPortals() { return Member_LinkedPortals.IsAvailable(); }
+    DefineUStructProperty(FFortCreativeBudgetTracker, BudgetTracker)
 
     // The volume's task queue, which its island's loads and resets run on (the game's own getter, 7.00 0xD8F7A0: TaskQueue,
     // made on first use). Null where the build's getter wasn't found.
@@ -85,6 +137,8 @@ class AFortVolumeManager : public AInfo
     DefineUFunction(GetVolumeForActor)
     DefineUFunction(GetAllPlayersInVolume)
     DefineUFunction(ResetVolumeAndLevelRecord)
+    DefineUFunction(GetVolumeForLocation)
+    DefineUFunction(ResaveActor)
 
 public:
     // Broadcast by HandleVolumeStateChanged (8.00 0xEF5E70) with each registered volume's new EVolumeState (the volume's
@@ -101,6 +155,9 @@ public:
     void ResetVolumeAndLevelRecord(AFortVolume* Volume, AFortPlayerController* RequestingFortPC = nullptr);
 
     static AFortVolumeManager* Get(const UObject* WorldContextObject);
+    // The game's own UFunctions (STAT_Find_Volume's lookup; the level save's update of an actor that changed).
+    AFortVolume* GetVolumeForLocation(const FVector& Location);
+    void ResaveActor(AActor* Actor);
 };
 
 // A player start of Creative's (from 7.00): the hub's, by each rift (PortalIndex), and the islands' own, by their tags:

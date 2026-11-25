@@ -79,6 +79,13 @@ public:
     static bool HasIsInitiallyBuilding() { return Member_bIsInitiallyBuilding.IsAvailable(); }
     DefineUProperty(TArray<UMaterialInstanceDynamic*>, AnimatingMIDs)
     DefineUProperty(UStaticMeshComponent*, StaticMeshComponent)
+    DefineBitfieldUProperty(bMirrored)
+    DefineBitfieldUProperty(bRegisterWithStructuralGrid)
+    DefineBitfieldUProperty(bIsForPreviewing)
+    DefineUProperty(uint8_t, SavedDirectlySupportedStatus)
+    DefineUProperty(uint8_t, BuildingAnimation)
+    static ptrdiff_t BuildingAnimationOffset() { return Member_BuildingAnimation.IsAvailable() ? Member_BuildingAnimation.GetOffsetChecked() : -1; }
+    static ptrdiff_t SavedDirectlySupportedStatusOffset() { return Member_SavedDirectlySupportedStatus.IsAvailable() ? Member_SavedDirectlySupportedStatus.GetOffsetChecked() : -1; }
     DefineUProperty(AFortPlayerStateZone*, EditingPlayer)
 
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);

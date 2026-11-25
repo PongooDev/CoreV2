@@ -3,6 +3,7 @@
 #include "AI/Navigation/NavCollision.h"
 #include "Finder.h"
 #include "Log.h"
+#include "ReflectionParams.h"
 #include "UObject/Class.h"
 
 namespace
@@ -128,4 +129,10 @@ int32_t UStaticMesh::NavCollisionSetupIndex()
         return -1;
     }();
     return Index;
+}
+
+FBox UStaticMesh::GetBoundingBox() const
+{
+    Reflection::FParams Params(FindStaticFunction_GetBoundingBox());
+    return Params.Call(const_cast<UStaticMesh*>(this)) ? Params.Take<FBox>(L"ReturnValue") : FBox();
 }

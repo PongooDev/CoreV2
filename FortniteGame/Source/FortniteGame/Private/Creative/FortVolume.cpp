@@ -103,6 +103,26 @@ AFortVolume* AFortVolumeManager::GetVolumeForActor(const AActor* Actor)
     return Result ? *Result : nullptr;
 }
 
+AFortVolume* AFortVolumeManager::GetVolumeForLocation(const FVector& Location)
+{
+    Reflection::FParams Params(FindStaticFunction_GetVolumeForLocation(), true);
+    if (!Params.Set(L"Location", Location) || !Params.Call(this))
+    {
+        return nullptr;
+    }
+    AFortVolume** Result = Params.Get<AFortVolume*>(L"ReturnValue");
+    return Result ? *Result : nullptr;
+}
+
+void AFortVolumeManager::ResaveActor(AActor* Actor)
+{
+    Reflection::FParams Params(FindStaticFunction_ResaveActor(), true);
+    if (Params.Set(L"Actor", Actor))
+    {
+        Params.Call(this);
+    }
+}
+
 std::vector<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume* Volume)
 {
     std::vector<AController*> Players;

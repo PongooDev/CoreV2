@@ -66,6 +66,8 @@ public:
     DefineUProperty(int32_t, CurrentBuildingLevel)
     // Set on props and trees a player's new piece replaces: the piece kills them as it is placed.
     DefineBitfieldUProperty(bDestroyOnPlayerBuildingPlacement)
+    DefineUProperty(float, CullDistance)
+    DefineUProperty(float, BaselineScale)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
     DefineBitfieldUProperty(bPlayerPlaced)
     static bool HasPlayerPlaced() { return Member_bPlayerPlaced.IsAvailable(); }

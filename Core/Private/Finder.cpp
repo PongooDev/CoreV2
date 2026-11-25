@@ -718,6 +718,53 @@ std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedAddressesTaken(uintp
     return Taken;
 }
 
+std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedRipReferences(uintptr_t Function)
+{
+    std::vector<std::pair<uintptr_t, uintptr_t>> References;
+    ForEachInstruction(Function, [&](uintptr_t Address, const hde64s& Instruction)
+    {
+        if ((Instruction.flags & F_MODRM) && Instruction.modrm_mod == 0 && Instruction.modrm_rm == 5)
+        {
+            References.emplace_back(Address, Address + Instruction.len + static_cast<int32_t>(Instruction.disp.disp32));
+        }
+    });
+    return References;
+}
+
+std::vector<int32_t> Finder::DecodedVirtualCallDisplacements(uintptr_t Function)
+{
+    std::vector<int32_t> Displacements;
+    ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
+    {
+        // call qword ptr [reg+disp8/disp32]: FF /2, not rip-relative or SIB.
+        if (Instruction.opcode == 0xFF && (Instruction.flags & F_MODRM) && Instruction.modrm_reg == 2 && (Instruction.modrm_mod == 1 || Instruction.modrm_mod == 2)
+            && Instruction.modrm_rm != 4)
+        {
+            Displacements.push_back(Instruction.modrm_mod == 1 ? static_cast<int8_t>(Instruction.disp.disp8) : static_cast<int32_t>(Instruction.disp.disp32));
+        }
+    });
+    return Displacements;
+}
+
+std::vector<uintptr_t> Finder::RipReferencesTo(uintptr_t Target)
+{
+    // Any instruction whose last four bytes are a rip-relative disp32 to Target (no immediate after it), with the
+    // modrm byte before it: mod 0, rm 5.
+    std::vector<uintptr_t> References;
+    for (const auto& [Begin, End] : ExecutableSections())
+    {
+        for (uintptr_t Address = Begin + 1; Address + 4 <= End; ++Address)
+        {
+            const uint8_t ModRm = *reinterpret_cast<const uint8_t*>(Address - 1);
+            if ((ModRm & 0xC7) == 0x05 && Address + 4 + *reinterpret_cast<const int32_t*>(Address) == Target)
+            {
+                References.push_back(Address - 1);
+            }
+        }
+    }
+    return References;
+}
+
 bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement, bool bR13Base)
 {
     bool bReads = false;

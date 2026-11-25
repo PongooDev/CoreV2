@@ -3575,6 +3575,7 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
         PlayerState->OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
     }
     CheckTeamSwitches(this);
+    AFortPlayerControllerAthena::BindCreativeModeEnabledChanged(Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Player)));
     // 7.40: the player's squad and team for the clients' squad maps (GameMemberInfoArray), once the game has placed them
     // (the game mode's squad assignment, 7.40 0xD4DC50, writes SquadId from the session's squads). A player Core places
     // later gets theirs from PlaceLatePlayerInSquad, and a respawn's Possess finds their item already there.

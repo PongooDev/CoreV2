@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Math/Box.h"
 #include "Reflection.h"
 #include "UObject/Object.h"
 
@@ -9,6 +10,7 @@ class UNavCollisionBase;
 class UStaticMesh : public UObject
 {
     DefineUnrealClass(UStaticMesh, Engine)
+    DefineUFunction(GetBoundingBox)
 
 public:
     DefineUProperty(UBodySetup*, BodySetup)
@@ -23,4 +25,7 @@ public:
     // The vtable slot of UNavCollisionBase::Setup, read off UStaticMesh::PostLoad's call of it (7.00 and 6.31 0x47,
     // `jmp qword ptr [rax+238h]` right after the new collision is stored); -1 if PostLoad doesn't have that shape.
     static int32_t NavCollisionSetupIndex();
+
+    // The mesh's own box (its bounds' box), the game's UFunction.
+    FBox GetBoundingBox() const;
 };

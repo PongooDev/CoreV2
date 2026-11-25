@@ -62,6 +62,7 @@ public:
     DefineBitfieldUProperty(bReplicateMovement)
     DefineBitfieldUProperty(bHidden)
     DefineBitfieldUProperty(bCanBeDamaged)
+    DefineBitfieldUProperty(bActorEnableCollision)
     DefineBitfieldUProperty(bAllowReceiveTickEventOnDedicatedServer)
     DefineUProperty(FName, NetDriverName)
     DefineUProperty(TEnumAsByte<ENetRole>, Role)

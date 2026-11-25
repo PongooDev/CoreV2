@@ -11,6 +11,7 @@ class AController;
 class AFortPickup;
 class AFortGameStateAthena;
 class AFortAthenaMapInfo;
+class AFortVolumeManager;
 class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
@@ -126,6 +127,8 @@ class AFortGameStateAthena : public AFortGameStateZone
     DefineUnrealClass(AFortGameStateAthena, FortniteGame)
 
 public:
+    // Creative's volume manager (from 7.00).
+    DefineOptionalUProperty(AFortVolumeManager*, VolumeManager)
     // Set by AFortGameModeAthena's phase changes. After Warmup a dead player is out of the match: the pawn-death handler
     // (1.7.2 0x437C30) only takes a player out of the alive players from Aircraft on. GamePhaseStep follows on its own,
     // on the server too: the game state's Tick (5.40 0xC061E0) works it out every frame from the phase, the warmup

@@ -15796,7 +15796,10 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
             continue;
         }
         Checked.push_back(Target);
-        if (ContainsDisp32(Target, Target + 0x60, static_cast<int32_t>(QuotaOffset + 8)))
+        // Within the callee: 9.00 (CL-6337466) calls a 0x19-byte getter (0x2A92450) whose next 0x60 bytes run into
+        // another function holding the same displacement.
+        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+        if (ContainsDisp32(Target, TargetEnd ? std::min(TargetEnd, Target + 0x60) : Target + 0x60, static_cast<int32_t>(QuotaOffset + 8)))
         {
             Quota = Target;
             ++Count;

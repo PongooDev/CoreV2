@@ -1834,7 +1834,9 @@ void AFortMinigame::HookNatives()
         const uintptr_t Assign = AssignRefs.size() == 1 ? Finder::FunctionStart(AssignRefs[0]) : 0;
         const int32_t BucketsOffset = Member_PlayerBuckets.IsAvailable() ? static_cast<int32_t>(Member_PlayerBuckets.GetOffsetChecked()) : -1;
         const int32_t NumTeamsOffset = Member_NumTeams.IsAvailable() ? static_cast<int32_t>(Member_NumTeams.GetOffsetChecked()) : -1;
-        const bool bAssignStripped = Assign && !Finder::ReadsMemberAt(Assign, BucketsOffset) && !Finder::ReadsMemberAt(Assign, BucketsOffset + 8);
+        // 9.00 (CL-6337466 0x1524C70) reads the buckets' Num for its "Moved player %s to bucket %d" log (idiv dword ptr
+        // [rdi+890h]) but still adds nobody: stripped is touching neither the buckets' data nor their address.
+        const bool bAssignStripped = Assign && !Finder::ReadsMemberAt(Assign, BucketsOffset) && !Finder::TakesMemberAddressAt(Assign, BucketsOffset);
         const auto AssignCalls = bAssignStripped ? Finder::CallsTo(Assign, false) : decltype(Finder::CallsTo(0, false))();
         uint8_t* const AddCall = bAssignStripped && FindStaticFunction_AddMinigamePlayer() ? Finder::ImplementationCall(FindStaticFunction_AddMinigamePlayer()) : nullptr;
         const uintptr_t AddBody = AddCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(AddCall), 1, 5) : 0;

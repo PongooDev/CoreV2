@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+struct FItemAndCount;
 class AAIController;
 class AActor;
 class ABuildingContainer;
@@ -473,6 +474,8 @@ private:
     // The loadout the playlist's AFortAthenaMutator_InventoryOverride gives a player at this point of the match (6.30+,
     // FortGameModeAthena_GetInventoryOverride), into the bot's inventory. bInitialSpawn: the bot's first pawn of the match.
     void GiveStartingItems(bool bInitialSpawn);
+    // The loadout gadgets' look and, in Endgame, the Chitauri weapons, which a player's inventory gives (ApplyGadgetData).
+    void ApplyLoadoutGadgets(const TArray<const FItemAndCount*>& Items);
 
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);

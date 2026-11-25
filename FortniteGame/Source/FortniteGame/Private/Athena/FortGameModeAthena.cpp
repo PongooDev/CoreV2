@@ -606,12 +606,10 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
             // The pawn's address goes with it: HandlePawnDestroyed logs each dead pawn's (#411).
             Log::Info(L"Battle Royale: {} respawns in the air as {} (0x{:X}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where they died{}", NewPlayer->GetName().ToStdString(),
                 Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z, RespawnHeight, GameRespawnPlace);
-            GiveMutatorStartingItems(NewPlayer, false);
         }
         else if (Pawn)
         {
             Log::Info(L"Battle Royale: {} leaves the aircraft as {}", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString());
-            GiveMutatorStartingItems(NewPlayer, true);
         }
         else
         {
@@ -619,17 +617,8 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         }
         return Pawn;
     }
-    APawn* Pawn = AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
-    // A respawn on the ground in the safe zones phase (a playlist without bRespawnInAir) gets its loadout as well.
-    AFortGameStateAthena* SpawnGameState = Pawn && NewPlayer ? AthenaGameStateOf(this) : nullptr;
-    if (SpawnGameState && SpawnGameState->GamePhase == EAthenaGamePhase::GetSafeZones())
-    {
-        GiveMutatorStartingItems(NewPlayer, false);
-    }
-    return Pawn;
-#else
-    return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
 #endif
+    return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
 }
 
 void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool bInitialSpawn)
@@ -638,11 +627,16 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // 8.50's Endgame: the team loadouts are AshtonInventoryMutator's answer to GetStartingItems (its
     // FortGameModeAthena_GetInventoryOverride, 0x108C490): the Chitauri's AGID_AshtonPack_Milo Always, the heroes'
     // AGID_Athena_Booty_Ashton, R and VR Ore guns, ammo and wood only while the game phase is Aircraft
-    // (AircraftPhaseOnly). Nothing left in the build calls GetStartingItems. Core's: a player's pawn spawns, at the
-    // aircraft's exit (the one moment of the Aircraft phase a player gets a pawn; StartAircraftPhase's stripped
-    // per-player call, Core's ResetToStartingItems, comes before the phase is set) and at each respawn: a villain's death
-    // takes the Chitauri kit (VillainItemDefs, the death handler 0x106F380), which Always gives back as they return
-    // (CoreV2 #640). Items the player still holds aren't given twice (GiveStartingItems). Only in an Endgame match.
+    // (AircraftPhaseOnly). Nothing left in the build calls GetStartingItems. Core's: each time the player possesses a
+    // new pawn (OnPlayerPossessedPawn), from the warmup island on (the kit's GA_AshtonPack_EquipWeapon_Milo reads
+    // Default.Ashton.Milo.JetpackOnStarter for the starter island), at the aircraft's exit (StartAircraftPhase's stripped
+    // per-player call, Core's ResetToStartingItems, takes the warmup's items before the phase is set) and at each respawn
+    // (a villain's death takes the Chitauri kit, VillainItemDefs, the death handler 0x106F380; CoreV2 #640). After the
+    // possession, because a gadget's ability set is passive: GA_AshtonPack_EquipWeapon_Milo (the Milo rifle, the
+    // launcher, the jetpack) and GA_AshtonPack_Milo_BlockAbilities activate as they are granted and need the new pawn as
+    // the ability system's avatar; granted at the bus's SpawnDefaultPawnFor they found none, so a Chitauri had the pack
+    // but no weapons and could pick up floor loot (CoreV2 #642). Items the player still holds aren't given twice
+    // (GiveStartingItems). Only in an Endgame match.
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
     if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_Ashton::GetCurrent(GetWorld()))
     {
@@ -652,7 +646,7 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // Core's: bInitialSpawn true at the aircraft's exit, the match's first spawn after the warmup.
     GetStartingItems(Items, bInitialSpawn, NewPlayer);
     PlayerController->GiveStartingItems(Items);
-    Log::Info(L"Endgame: {} {} with its team's loadout ({} starting items)", NewPlayer->GetName().ToStdString(), bInitialSpawn ? L"leaves the aircraft" : L"respawns", Items.Num());
+    Log::Info(L"Endgame: {} takes its team's loadout with its new pawn ({} starting items{})", NewPlayer->GetName().ToStdString(), Items.Num(), bInitialSpawn ? L", leaving the aircraft" : L"");
     Items.Empty();
 #endif
 }
@@ -3503,6 +3497,11 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
     if (AFortPlayerControllerAthena* AthenaPlayer = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Player)))
     {
         AthenaPlayer->ClaimCreativePortal();
+    }
+    // 8.50's Endgame: the team's loadout on the pawn just possessed.
+    if (Pawn && GameState && GameState->GamePhase >= EAthenaGamePhase::GetWarmup() && GameState->GamePhase < EAthenaGamePhase::GetEndGame())
+    {
+        GiveMutatorStartingItems(reinterpret_cast<AController*>(Player), GameState->GamePhase == EAthenaGamePhase::GetAircraft());
     }
 #endif
 }

@@ -30,6 +30,7 @@
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Athena/Mutators/FortAthenaMutator.h"
+#include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
 #include "Engine/AssetManager.h"
 #include "Engine/DataTable.h"
@@ -5325,6 +5326,66 @@ void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
     {
         Log::Info(L"Battle Royale bots: {} gets the playlist's {} of {} items{}", BotName, Given, Items.Num(), bInitialSpawn ? L" (its first spawn)" : L"");
     }
+    ApplyLoadoutGadgets(Items);
+#endif
+}
+
+void FCoreAthenaBotController::ApplyLoadoutGadgets(const TArray<const FItemAndCount*>& Items)
+{
+#if WITH_SERVER_CODE
+    // 8.50's Endgame (CoreV2 #642): a player's loadout gadget is applied by the inventory (ApplyGadgetData): its
+    // CharacterParts dress them (the Chitauri's AGID_AshtonPack_Milo, the heroes' AGID_Athena_Booty_Ashton has none) and
+    // its passive ability GA_AshtonPack_EquipWeapon_Milo gives the Chitauri their Milo rifle and launcher. A bot's items
+    // aren't an inventory, so neither happened and bots weren't Chitauri. Core's: the gadget's parts go on the bot's
+    // player state over the outfit's, and a villain bot is given the Endgame mutator's weapons among VillainItemDefs.
+    AFortPlayerStateAthena* State = GetPlayerState();
+    if (!State)
+    {
+        return;
+    }
+    bool bChanged = false;
+    bool bDressed = false;
+    for (const FItemAndCount* Entry : Items)
+    {
+        UFortGadgetItemDefinition* Gadget = Entry ? Cast<UFortGadgetItemDefinition>(static_cast<UFortItemDefinition*>(Entry->Item)) : nullptr;
+        const UProperty* PartsProperty = Gadget ? Gadget->GetClass()->FindPropertyByName(FName(L"CharacterParts", FNAME_Find)) : nullptr;
+        if (!PartsProperty)
+        {
+            continue;
+        }
+        const TArray<UCustomCharacterPart*>& Parts = *reinterpret_cast<const TArray<UCustomCharacterPart*>*>(reinterpret_cast<const uint8_t*>(Gadget) + PartsProperty->GetOffset_ForInternal());
+        bDressed |= Parts.Num() > 0;
+        for (UCustomCharacterPart* Part : Parts)
+        {
+            const EFortCustomPartType PartType = Part ? static_cast<EFortCustomPartType>(Part->CharacterPartType) : EFortCustomPartType::GetNumTypes();
+            if (PartType < EFortCustomPartType::GetNumTypes() && State->GetCharacterPart(PartType) != Part)
+            {
+                State->GetCharacterPart(PartType) = Part;
+                bChanged = true;
+            }
+        }
+    }
+    if (bChanged)
+    {
+        State->OnRep_CharacterParts();
+        State->ForceNetUpdate();
+    }
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    const AFortAthenaMutator_Ashton* Ashton = GameMode && bDressed ? AFortAthenaMutator_Ashton::GetCurrent(GameMode->GetWorld()) : nullptr;
+    if (!Ashton || !Ashton->IsVillain(State))
+    {
+        return;
+    }
+    const TArray<UFortWorldItemDefinition*>& VillainItems = const_cast<AFortAthenaMutator_Ashton*>(Ashton)->VillainItemDefs;
+    for (int32_t Index = 0; Index < VillainItems.Num(); ++Index)
+    {
+        UFortWeaponItemDefinition* Weapon = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(VillainItems[Index]));
+        if (Weapon && WeaponSlotFor(Weapon) == -1)
+        {
+            GiveItem(Weapon, 1, GetWeaponInfo(Weapon).ClipSize);
+        }
+    }
+    Log::Info(L"Battle Royale bots: {} is a Chitauri (the Endgame kit's parts and weapons)", BotName);
 #endif
 }
 

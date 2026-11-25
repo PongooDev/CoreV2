@@ -280,6 +280,11 @@ float UFortAmmoItemDefinition::GetRegenCooldown() const
     return reinterpret_cast<const FScalableFloat*>(Bytes + RegenCooldownOffset())->GetValueAtLevel(0.0f);
 }
 
+bool UFortAmmoItemDefinition::IsConsumed() const
+{
+    return !Member_bIsConsumed.IsAvailable() || bIsConsumed;
+}
+
 UFortItemDefinition* UFortItem::GetItemDefinitionBP() const
 {
     Reflection::FParams Params(StaticFunction_GetItemDefinitionBP());

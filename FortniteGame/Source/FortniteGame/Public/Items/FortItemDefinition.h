@@ -312,8 +312,14 @@ class UFortAmmoItemDefinition : public UFortWorldItemDefinition
 
 public:
     DefineUProperty(float, RegenCooldown)
+    DefineUProperty(bool, bIsConsumed)
 
     static ptrdiff_t RegenCooldownOffset();
+
+    // Whether firing takes this ammo out of the inventory. A weapon whose AmmoData isn't consumed counts its reserve as
+    // infinite (8.50 AFortWeapon slot 0xF4, 0x188F380: 0x7FFFFFFF when slot 0xFD, 0x18883F0, finds !bIsConsumed).
+    // True on builds without the member.
+    bool IsConsumed() const;
 
     // The ammo's regen cooldown in seconds: the float up to 6.22, the FScalableFloat's value at level 0 from 6.30
     // (CL-4573096), as 21.40's RegenCooldown still is. Read it through here, not Member_RegenCooldown (CoreV2 #455).

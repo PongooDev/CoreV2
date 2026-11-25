@@ -57,6 +57,22 @@ AFortAIGoalManager* UFortKismetLibrary::GetAIGoalManager(UObject* WorldContextOb
     return AFortAIGoalManager::GetCurrent(WorldContextObject);
 }
 
+namespace
+{
+    // 8.50's Chitauri Energy Launcher (WID_AshtonPack_Milo_Launcher, #644) couldn't fire: GA_AshtonPack_EquipWeapon_Milo
+    // gives it with GiveItemToInventoryOwner, its bPreventDefaultPreload is set, it has no ReloadAbility, and its
+    // AmmoData AmmoInfiniteEnergy isn't consumed. The weapon takes AmmoCount from the item's LoadedAmmo (0x1891E10) and
+    // only its reload step (slot 0x101, 0x18A62D0) fills it, which the server never ran for it, so its primary
+    // ability's CheckCost (0xD3C730, magazine cost) failed on an empty magazine. With unconsumed ammo the reserve is
+    // infinite (0x188F380), so a reload would load ClipSize; the given item starts loaded, as one reload leaves it.
+    bool HasUnconsumedAmmo(UFortWorldItemDefinition* ItemDefinition)
+    {
+        UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(ItemDefinition));
+        UFortAmmoItemDefinition* AmmoDefinition = WeaponDefinition ? Cast<UFortAmmoItemDefinition>(WeaponDefinition->AmmoData.LoadSynchronous()) : nullptr;
+        return AmmoDefinition && !AmmoDefinition->IsConsumed();
+    }
+}
+
 void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip, bool bDropOverflow)
 {
 #if WITH_SERVER_CODE
@@ -115,7 +131,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
 
             FFortItemEntry& NewEntry = WorldItem->ItemEntry;
             NewEntry.inventory_overflow_date = bOverflow;
-            if (bLoadFullClip)
+            if (bLoadFullClip || HasUnconsumedAmmo(ItemDefinition))
             {
                 NewEntry.LoadFullClip();
             }

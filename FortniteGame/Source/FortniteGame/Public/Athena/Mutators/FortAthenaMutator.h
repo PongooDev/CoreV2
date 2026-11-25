@@ -11,8 +11,12 @@
 class AFortGameStateAthena;
 class AFortPawn;
 class AFortPlayerController;
+class AFortPlayerControllerAthena;
 class AFortPlayerStateAthena;
+class APawn;
+class APlayerState;
 class UFortItemDefinition;
+class UFortWeaponItemDefinition;
 class UFortWorldItemDefinition;
 
 // Battle Royale's gameplay mutator (from 6.01): an AFortGameplayMutator in the game. Core declares no
@@ -37,6 +41,13 @@ public:
     // Server only; nothing on a build where the slot isn't found.
     static bool HasOnPostEarnedKill();
     void FortGameStateAthena_OnPostEarnedKill(AFortPlayerController* KillerController);
+
+    // 21.40's FortGameModeAthena_CheckWinConditionOnPlayerRemoval (8.50/8.51 slot 0xD2): the mutator's say on the win as
+    // someone leaves the match, which AFortGameModeAthena::RemoveFromAlivePlayers asks (2 ends its loop and its own
+    // check). PlayersLeft is the game state's count before the removal. Endgame's (8.51 0x105CBE0) reads neither the
+    // player nor the killer. Returns the slot's answer, 0 where the build has no slot.
+    uint8_t FortGameModeAthena_CheckWinConditionOnPlayerRemoval(AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, int32_t PlayersLeft, APawn* FinisherPawn,
+        const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
 
     // Core's: Count of ItemDefinition to each player still in the match (the game mode's AlivePlayers) and each of
     // Core's player bots, for the give-items mutators. Returns the players given it.

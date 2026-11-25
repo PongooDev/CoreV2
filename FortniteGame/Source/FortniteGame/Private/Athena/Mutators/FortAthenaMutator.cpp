@@ -40,6 +40,18 @@ void AFortAthenaMutator::FortGameStateAthena_OnPostEarnedKill(AFortPlayerControl
 #endif
 }
 
+uint8_t AFortAthenaMutator::FortGameModeAthena_CheckWinConditionOnPlayerRemoval(AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, int32_t PlayersLeft,
+    APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
+{
+#if WITH_SERVER_CODE
+    if (Finder::ResolveCheckWinConditionOnPlayerRemovalLive())
+    {
+        return CallVirtual<uint8_t>(this, Natives::AFortAthenaMutator_CheckWinConditionOnPlayerRemovalIndex, Player, KillerPlayerState, PlayersLeft, FinisherPawn, FinishingWeapon, DeathCause);
+    }
+#endif
+    return 0;
+}
+
 int32_t AFortAthenaMutator::GiveItemToAllPlayers(UFortWorldItemDefinition* ItemDefinition, int32_t Count) const
 {
 #if WITH_SERVER_CODE

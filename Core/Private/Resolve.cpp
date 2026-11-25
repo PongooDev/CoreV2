@@ -10021,6 +10021,57 @@ bool Finder::ResolveAshtonCanInteractWithGameObjectLive(ptrdiff_t VillainTeamNum
     return true;
 }
 
+bool Finder::ResolveCheckWinConditionOnPlayerRemovalLive()
+{
+    // AFortGameModeAthena::RemoveFromAlivePlayers (8.51 CL-6165369 0xFAE8C0, 8.50 CL-6058028 0xFB0F90) asks each of the
+    // game mode's mutators for the win before its own check: "call qword ptr [rax+690h]; lea rcx, [...]; cmp al, 2"
+    // (8.51 0xFAEDBB, 8.50 0xFB148B), slot 0xD2, the one vtable call there whose answer is compared with 2. Endgame's
+    // override (8.51 0x105CBE0) ends the match once a side has no one left in the game mode's TeamAlivePlayers.
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortAthenaMutator_CheckWinConditionOnPlayerRemovalIndex >= 0;
+    }
+    const uintptr_t Remove = reinterpret_cast<uintptr_t>(Natives::AFortGameModeAthena_RemoveFromAlivePlayers);
+    const uintptr_t End = IsInText(Remove) ? Finder::FunctionEnd(Remove) : 0;
+    if (!End)
+    {
+        return false;
+    }
+    bSearched = true;
+    int32_t Found = -1;
+    int32_t Matches = 0;
+    for (uintptr_t Site = Remove; Site + 6 <= End; ++Site)
+    {
+        if (Byte(Site) != 0xFF || Byte(Site + 1) != 0x90)
+        {
+            continue;
+        }
+        const int32_t Displacement = *reinterpret_cast<const int32_t*>(Site + 2);
+        if (Displacement <= 0 || Displacement % 8 != 0)
+        {
+            continue;
+        }
+        for (uintptr_t Compare = Site + 6; Compare + 2 <= End && Compare < Site + 6 + 12; ++Compare)
+        {
+            if (Byte(Compare) == 0x3C && Byte(Compare + 1) == 0x02)
+            {
+                Found = Displacement / 8;
+                ++Matches;
+                break;
+            }
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: the mutators' FortGameModeAthena_CheckWinConditionOnPlayerRemoval call not found in RemoveFromAlivePlayers 0x{:X} ({} candidates)", Remove - Finder::ImageBase(), Matches);
+        return false;
+    }
+    Natives::AFortAthenaMutator_CheckWinConditionOnPlayerRemovalIndex = Found;
+    Log::Info(L"Finder: AFortAthenaMutator's FortGameModeAthena_CheckWinConditionOnPlayerRemoval is slot 0x{:X} (RemoveFromAlivePlayers 0x{:X})", Found, Remove - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites)
 {
     // 8.50 (CL-6058028), Endgame. The intact code around three stripped calls:

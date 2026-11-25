@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "GameFramework/Actor.h"
+#include "Math/UnrealMathUtility.h"
+#include "Templates/Sorting.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Reflection.h"
 #include "StructArray.h"
@@ -63,24 +66,41 @@ public:
         return Result;
     }
 
-    // GetTeamAssignment's Smallest method (ETeamAssignmentMethod::Smallest): of the teams with room for the party's
-    // members, the one with the fewest players, the lowest on a tie; INDEX_NONE when none has room. The match's beacon
+    // GetTeamAssignment's Smallest method (ETeamAssignmentMethod::Smallest; 8.51 CL-6165369 0x630230): of the teams with
+    // room for the party's members, the one with the fewest players; INDEX_NONE when none has room. Equal teams are put
+    // in a random order (FSortTeamSizeSmallestToLargest, 0x616FA0: rand() % 2 on equal sizes), so the first player of a
+    // two-team game isn't always on the first team (Endgame's villains are team 0, CoreV2 #651). The match's beacon
     // uses Manual (AFortPartyBeaconHost's ConfigureForMatchAssignment), keeping the matchmaking service's teams, so this
     // is for a reservation Core makes itself.
     int32_t GetTeamAssignment(const FPartyReservation& Party) const
     {
-        int32_t SmallestTeam = INDEX_NONE;
-        int32_t SmallestTeamCount = INT32_MAX;
+        struct FTeamBalanceInfo
+        {
+            int32_t TeamIdx;
+            int32_t CurrentSize;
+        };
+        struct FSortTeamSizeSmallestToLargest
+        {
+            bool operator()(const FTeamBalanceInfo& A, const FTeamBalanceInfo& B) const
+            {
+                return A.CurrentSize == B.CurrentSize ? FMath::Rand() % 2 != 0 : A.CurrentSize < B.CurrentSize;
+            }
+        };
+        TArray<FTeamBalanceInfo> PotentialTeamChoices;
         for (int32_t TeamIdx = 0; TeamIdx < NumTeams; ++TeamIdx)
         {
             const int32_t CurrentPlayersOnTeam = GetNumPlayersOnTeam(TeamIdx);
-            if (CurrentPlayersOnTeam + Party.GetMember_PartyMembers().Num() <= NumPlayersPerTeam && CurrentPlayersOnTeam < SmallestTeamCount)
+            if (CurrentPlayersOnTeam + Party.GetMember_PartyMembers().Num() <= NumPlayersPerTeam)
             {
-                SmallestTeam = TeamIdx;
-                SmallestTeamCount = CurrentPlayersOnTeam;
+                PotentialTeamChoices.Add({ TeamIdx, CurrentPlayersOnTeam });
             }
         }
-        return SmallestTeam;
+        if (PotentialTeamChoices.Num() == 0)
+        {
+            return INDEX_NONE;
+        }
+        Sort(PotentialTeamChoices.GetData(), PotentialTeamChoices.Num(), FSortTeamSizeSmallestToLargest());
+        return PotentialTeamChoices[0].TeamIdx;
     }
 };
 

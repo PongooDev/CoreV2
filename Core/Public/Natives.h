@@ -573,6 +573,10 @@ namespace Natives
     // AFortAthenaMutator_Ashton's FortGameStateAthena_CanInteractWithGameObject (8.50 slot 0xFC):
     // char (Mutator, bool* bOutResult, IFortInteractInterface* Interactable, AFortPlayerController* Controller); 2 answers.
     inline int32_t AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex = -1;
+    // AFortAthenaMutator's FortGameModeAthena_CheckWinConditionOnPlayerRemoval (21.40's name; 8.50/8.51 slot 0xD2,
+    // Endgame's 0x105CBE0 on 8.51): char (Mutator, AFortPlayerControllerAthena*, APlayerState* Killer, int32 PlayersLeft
+    // before the removal, APawn* Finisher, const UFortWeaponItemDefinition*, uint8 DeathCause); 2 answers. -1 where not found.
+    inline int32_t AFortAthenaMutator_CheckWinConditionOnPlayerRemovalIndex = -1;
     inline int32_t IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = -1;
     inline void (*UFortQueryItemType_Goal_SetContextHelper)(void* ContextData, const FScriptArray& Goals) = nullptr;
     inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;

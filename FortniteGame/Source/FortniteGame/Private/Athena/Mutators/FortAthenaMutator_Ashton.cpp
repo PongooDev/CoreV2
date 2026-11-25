@@ -194,6 +194,8 @@ void AFortAthenaMutator_Ashton::HookNatives()
 
     // Thanos's stone pickups: the mutator's answer that lets a villain interact with a stone (Core's ServerHandlePickup).
     Finder::ResolveAshtonCanInteractWithGameObjectLive(Member_OnVillainRespawnsRemainingChanged.GetOffsetChecked() + static_cast<ptrdiff_t>(sizeof(FMulticastScriptDelegate)));
+    // The win (MutatorControlled), which Core's bots' removal asks as RemoveFromAlivePlayers does a player's.
+    Finder::ResolveCheckWinConditionOnPlayerRemovalLive();
 
     Finder::FAshtonMutatorSites Sites;
     if (!Finder::ResolveAshtonMutatorLive(Member_VillainLeaderPC.GetOffsetChecked(), Member_VillainLeaderItemDef.GetOffsetChecked(), Member_VillainItemDefs.GetOffsetChecked(), Sites))

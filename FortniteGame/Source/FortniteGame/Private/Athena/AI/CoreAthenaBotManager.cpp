@@ -1163,6 +1163,46 @@ bool FCoreAthenaBotManager::IsMutatorControlledMatch() const
     return Athena && AFortAthenaMutator_Ashton::GetCurrent(Athena->GetWorld()) != nullptr;
 }
 
+FCoreAthenaBotManager::FScopedTeamAliveBots::FScopedTeamAliveBots(const FCoreAthenaBotManager* Manager)
+{
+    AFortGameModeAthena* Athena = Manager ? Manager->GetGameMode() : nullptr;
+    if (!Athena || !AFortGameModeAthena::HasTeamAlivePlayers())
+    {
+        return;
+    }
+    constexpr int32_t MaxTeams = 100;
+    const uint8_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
+    Added.AddZeroed(MaxTeams);
+    for (const auto& Bot : Manager->PlayerBots)
+    {
+        // A bot waiting to respawn is still its team's, as a respawning player stays in TeamAlivePlayers.
+        const int32_t Index = static_cast<int32_t>(Bot->GetTeam()) - static_cast<int32_t>(FirstTeam);
+        if (Bot->IsInMatch() && Index >= 0 && Index < MaxTeams)
+        {
+            ++Added[Index];
+        }
+    }
+    GameMode = Athena;
+    int32_t* const TeamAlivePlayers = &GameMode->GetMember_TeamAlivePlayers();
+    for (int32_t Index = 0; Index < MaxTeams; ++Index)
+    {
+        TeamAlivePlayers[Index] += Added[Index];
+    }
+}
+
+FCoreAthenaBotManager::FScopedTeamAliveBots::~FScopedTeamAliveBots()
+{
+    if (!GameMode)
+    {
+        return;
+    }
+    int32_t* const TeamAlivePlayers = &GameMode->GetMember_TeamAlivePlayers();
+    for (int32_t Index = 0; Index < Added.Num(); ++Index)
+    {
+        TeamAlivePlayers[Index] -= Added[Index];
+    }
+}
+
 void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
 {
     if (FCoreAthenaBotController* Killer = FindBot(KillerState))
@@ -3113,8 +3153,18 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
         AFortWeapon* FinishingWeapon = FinisherPawn ? static_cast<AFortWeapon*>(FinisherPawn->CurrentWeapon) : nullptr;
         const uint8_t DeathCause = State && AFortPlayerStateAthena::HasEliminator() && AFortPlayerStateAthena::HasToDeathCause()
             ? State->DeathInfo.DeathCause : EDeathCause::GetUnspecified();
+        const UFortWeaponItemDefinition* const FinishingWeaponData = FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr;
+        const int32_t PlayersLeftBefore = GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0;
         UpdateCounts();
-        CheckWinConditionLastManStanding(FinisherPawn, FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr, DeathCause);
+        // Endgame (CoreV2 #653): the mutator's win, as RemoveFromAlivePlayers asks it for a player (8.51 0xFAEDBB). Its
+        // override (0x105CBE0) reads neither the controller nor the killer, and a bot has no AFortPlayerControllerAthena.
+        AFortAthenaMutator_Ashton* Ashton = bAircraftStarted && !bMatchEnded ? AFortAthenaMutator_Ashton::GetCurrent(Athena->GetWorld()) : nullptr;
+        if (Ashton)
+        {
+            const FScopedTeamAliveBots TeamAliveBots(this);
+            Ashton->FortGameModeAthena_CheckWinConditionOnPlayerRemoval(nullptr, KillerState, PlayersLeftBefore, FinisherPawn, FinishingWeaponData, DeathCause);
+        }
+        CheckWinConditionLastManStanding(FinisherPawn, FinishingWeaponData, DeathCause);
     }
 #endif
 }

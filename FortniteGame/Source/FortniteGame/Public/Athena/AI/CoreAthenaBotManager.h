@@ -209,6 +209,22 @@ public:
     bool ShouldHoldNativeWinCheck() const;
     // An Endgame match (8.50's AFortAthenaMutator_Ashton): its mutator decides the win, so the bots' check stands aside.
     bool IsMutatorControlledMatch() const;
+    // 21.40's game mode counts its AliveBots into TeamAlivePlayers (it keeps no other count per team); Core's stays the
+    // players' (the game's own win check reads it). Endgame's win (its CheckWinConditionOnPlayerRemoval) is a side with
+    // nobody in TeamAlivePlayers, so while it is asked each team's bots in the match are counted in, and taken out
+    // again after. Does nothing without a manager.
+    class FScopedTeamAliveBots
+    {
+    public:
+        explicit FScopedTeamAliveBots(const FCoreAthenaBotManager* Manager);
+        ~FScopedTeamAliveBots();
+        FScopedTeamAliveBots(const FScopedTeamAliveBots&) = delete;
+        FScopedTeamAliveBots& operator=(const FScopedTeamAliveBots&) = delete;
+
+    private:
+        AFortGameModeAthena* GameMode = nullptr;
+        TArray<int32_t> Added;
+    };
     // The finisher's pawn, its weapon and the death cause are the elimination's, for the win it may end the match with.
     // Also for a player who left (the game's Logout took them out): AFortGameModeAthena::HandlePlayerStateDestroyed's,
     // the tick after, with none.

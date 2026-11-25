@@ -580,6 +580,10 @@ namespace Finder
     // AFortAthenaMutator_Ashton's override of FortGameStateAthena_CanInteractWithGameObject: the vtable slot
     // (Natives::AFortAthenaMutator_Ashton_CanInteractWithGameObjectIndex). False on builds without Endgame.
     bool ResolveAshtonCanInteractWithGameObjectLive(ptrdiff_t VillainTeamNumOffset);
+    // The game mode's mutators' FortGameModeAthena_CheckWinConditionOnPlayerRemoval: the vtable slot
+    // (Natives::AFortAthenaMutator_CheckWinConditionOnPlayerRemovalIndex), off RemoveFromAlivePlayers' call to it. Needs
+    // the pawn-death handler's finder first; false where it isn't found.
+    bool ResolveCheckWinConditionOnPlayerRemovalLive();
     bool ResolvePickupGivenLive();
     // AFortGameModeZone::GetStartingItems' slot (Natives::AFortGameModeZone_GetStartingItemsIndex): Battle Royale's game mode's
     // override, the one virtual that copies StartingItems.

@@ -17509,7 +17509,8 @@ bool Finder::ResolvePakPlatformFileMount()
         // new FPakFile(LowerLevel, InPakFilename, bSigned): mov rdx, [r12+8]; movzx r9d, byte ptr [r12+30h]; call
         // (0x2883AC6).
         const uintptr_t Mount = FunctionOf(L"Failed to mount pak \"%s\", pak is invalid.");
-        const bool bMountLogsFailure = Mount && Mount == FunctionOf(L"Pak \"%s\" does not exist!");
+        // 9.00 (CL-6337466) drops the "does not exist" line, so there Mount (0x2A2AD40) is taken on its failure line alone.
+        const bool bMountLogsFailure = Mount && (Mount == FunctionOf(L"Pak \"%s\" does not exist!") || Finder::StringRefs(L"Pak \"%s\" does not exist!").empty());
         ptrdiff_t SignedOffset = -1;
         Finder::TraceFind(bMountLogsFailure ? Mount : 0, 48, [&](uintptr_t Instruction)
         {

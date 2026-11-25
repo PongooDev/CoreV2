@@ -816,6 +816,68 @@ void AFortPlayerPawn::PopFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t P
     This->PopFootstepBankOverride(Priority, InFootstepBankOverride);
 }
 
+void AFortPlayerPawn::ManualReviveFromDBNO()
+{
+#if WITH_SERVER_CODE
+    // 🟡 The body is inferred, as AFortPlayerPawnAthena::ForceReviveFromDBNO's: a revive nobody performs is the build's
+    // own revive with the pawn's own controller as the reviver (a self revive), through the ReviveFromDBNO UFunction
+    // (ProcessEvent of ServerReviveFromDBNO, which on the server runs its _Implementation in place: Core's restored one
+    // where the build strips it, 9.00 among them).
+    if (Role != ROLE_Authority || !bIsDBNO)
+    {
+        return;
+    }
+    AController* const PawnController = static_cast<AController*>(Controller);
+    static UFunction* const Revive = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawn:ReviveFromDBNO");
+    Reflection::FParams Params(Revive, true);
+    if (!PawnController || !Revive || !Params.Set(L"EventInstigator", PawnController) || !Params.Call(this))
+    {
+        UE_LOG(LogFort, Warning, TEXT("ManualReviveFromDBNO: %s can't be revived (controller %s, ReviveFromDBNO %s)"), *GetName(), *GetNameSafe(PawnController),
+            Revive ? TEXT("found") : TEXT("not found"));
+        return;
+    }
+    UE_LOG(LogFort, Log, TEXT("ManualReviveFromDBNO: %s %s"), *GetName(), bIsDBNO ? TEXT("is still down (its controller's revive was refused)") : TEXT("is up"));
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execManualReviveFromDBNO)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->ManualReviveFromDBNO();
+    P_NATIVE_END;
+}
+
+void AFortPlayerPawn::HookManualReviveNative()
+{
+    // 8.30 on. 9.00 (CL-6337466): the exec (0xA1E060, folded with UNiagaraScript::execOnCompilationComplete) steps the
+    // frame and calls an empty function (0x32B4B0), so GenMission_TieredWaves' DoTeamRespawn got no downed player up at a
+    // wave's end (a Wargame's simulation to its amplifier). Builds without it, or that keep it, are left alone.
+    UFunction* Function = FindStaticFunction_ManualReviveFromDBNO();
+    if (!Function)
+    {
+        return;
+    }
+    const uintptr_t Exec = reinterpret_cast<uintptr_t>(Function->GetNativeFunc());
+    uintptr_t ExecNative = 0;
+    for (uintptr_t Site = Exec; Exec >= Finder::TextBegin() && Site + 5 <= Exec + 0x20 && Site + 5 <= Finder::TextEnd() && !ExecNative; ++Site)
+    {
+        const uint8_t Opcode = *reinterpret_cast<const uint8_t*>(Site);
+        if (Opcode == 0xE8 || Opcode == 0xE9)
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            ExecNative = Target >= Finder::TextBegin() && Target < Finder::TextEnd() ? Target : 0;
+        }
+    }
+    if (!ExecNative || !Finder::IsStubFunction(ExecNative))
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::ManualReviveFromDBNO is native in this build (exec +0x{:X})", Exec ? Exec - Finder::ImageBase() : 0);
+        return;
+    }
+    Function->SetNativeFunc(&execManualReviveFromDBNO);
+    Log::Info(L"Hook AFortPlayerPawn::ManualReviveFromDBNO: native (the build's exec +0x{:X} calls the stub +0x{:X})", Exec - Finder::ImageBase(), ExecNative - Finder::ImageBase());
+}
+
 void AFortPlayerPawn::HookNatives()
 {
     // The four overrides (6.00 on): each UFunction whose exec calls a stub gets Core's, and the gadget data's direct

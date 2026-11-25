@@ -43,6 +43,7 @@ class AFortPlayerPawn : public AFortPawn
 {
     DefineUnrealClass(AFortPlayerPawn, FortniteGame)
     DefineUFunction(ServerReviveFromDBNO)
+    DefineUFunction(ManualReviveFromDBNO)
     DefineUFunction(ServerSendZiplineState)
     DefineUFunction(OnRep_ZiplineState)
     DefineUFunction(ServerHandlePickup)
@@ -157,6 +158,12 @@ public:
     static void HookZiplineVTables();
     // The four override natives and the gadget data's calls to them, where the build strips them.
     static void HookNatives();
+
+    // 8.30+: the server gets a downed player up (GenMission_TieredWaves' DoTeamRespawn at a wave's end, which 9.00's
+    // Wargames turn on). Stripped from the build's server code.
+    void ManualReviveFromDBNO();
+    DECLARE_FUNCTION(execManualReviveFromDBNO);
+    static void HookManualReviveNative();
     // Both DLLs, before the detours are enabled: TryToAutoPickupWeapon's guard where the tick reaches it (7.40, 8.00).
     static void Hook();
 

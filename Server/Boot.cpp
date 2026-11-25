@@ -428,6 +428,7 @@ static void InstallHooks()
         AFortPlayerPawn::HookPickupVTables();
         AFortPlayerPawn::HookZiplineVTables();
         AFortPlayerPawn::HookNatives();
+        AFortPlayerPawn::HookManualReviveNative();
         AFortPawn::HookEmoteNatives();
         UNetDriver::AddPreReplicationCallback(&AFortPawn::RemoveDestroyedWeaponsFromLists);
         ACharacter::HookCheatMovement();

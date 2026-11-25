@@ -11884,10 +11884,38 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
         }
         MaxStackSize = Inlined && !bInlinedAmbiguous ? Inlined : MaxStackSize;
     }
+    // 9.00 (CL-6337466) calls GetMaxStackSize(AFortPlayerController*, const UFortItemDefinition*) (0x14FFC20) from both
+    // limits instead of inlining it, so the callee they share last is the controller's getter 0x1799630
+    // (mov rax, [rcx+1880h]; ...; mov rax, [rax+0F0h]), and there is no inlined one to find: every stack's limit read 1
+    // (#659). When the pick is such a getter, GetMaxStackSize is the one shared callee that makes a virtual call (the item
+    // definition's, call [rax+348h] at 0x14FFC56).
+    const uintptr_t PickedMaxStackSizeEnd = MaxStackSize ? Finder::FunctionEnd(MaxStackSize) : 0;
+    if (bControllerLimits && PickedMaxStackSizeEnd > MaxStackSize && Finder::BodyIs(MaxStackSize, { 0x48, 0x8B, 0x81 })
+        && !FindVirtualCall(MaxStackSize, PickedMaxStackSizeEnd) && !FindRawCall(MaxStackSize, PickedMaxStackSizeEnd))
+    {
+        uintptr_t Virtual = 0;
+        bool bVirtualAmbiguous = false;
+        for (const uintptr_t Target : Targets(BackpackLimit))
+        {
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            if (Target != Virtual && TargetEnd > Target && std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end() && FindVirtualCall(Target, TargetEnd))
+            {
+                bVirtualAmbiguous |= Virtual != 0;
+                Virtual = Target;
+            }
+        }
+        MaxStackSize = Virtual && !bVirtualAmbiguous ? Virtual : MaxStackSize;
+    }
 
+    // 9.00 inlines CanStackWith into the stack limit as 5.0 to 8.51 do (0x1501DA0: the entry getter 0xC13D90, the
+    // same-item test 0x14F74D0, the regen cooldown test 0x153BC30 at +0x210), but calls the item definition's durability
+    // test (0x153BB70, test al, al after it) instead of inlining it, which looked like a CanStackWith call: Core asked the
+    // durability test whether two stacks stack, and nothing stacked (#659). The inlined form, when the stack limit has it,
+    // comes first; a build that calls CanStackWith has none of it in the stack limit.
+    const auto [InlinedSameItem, BaseRegenCooldown] = StackLimit ? FindInlinedCanStackWith(StackLimit) : std::pair<uintptr_t, ptrdiff_t>{ 0, -1 };
     uintptr_t CanStackWith = 0;
     bool bAmbiguous = false;
-    for (const auto& [Call, Target] : StackLimitEnd > StackLimit ? Finder::DirectCalls(StackLimit, StackLimitEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    for (const auto& [Call, Target] : StackLimitEnd > StackLimit && !InlinedSameItem ? Finder::DirectCalls(StackLimit, StackLimitEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
     {
         if (Call + 7 <= StackLimitEnd && Byte(Call + 5) == 0x84 && Byte(Call + 6) == 0xC0)
         {
@@ -11895,7 +11923,6 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
             CanStackWith = Target;
         }
     }
-    const auto [InlinedSameItem, BaseRegenCooldown] = !CanStackWith && StackLimit ? FindInlinedCanStackWith(StackLimit) : std::pair<uintptr_t, ptrdiff_t>{ 0, -1 };
 
     ptrdiff_t InterfaceOffset = -1;
     int32_t NumItemsSlot = -1;
@@ -12049,7 +12076,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
     Natives::IFortInventoryInterface_GetMaxItemsIndex = MaxItemsSlot;
     Natives::AFortInventory_CanStackWith = reinterpret_cast<decltype(Natives::AFortInventory_CanStackWith)>(CanStackWith);
     Natives::AFortInventory_bControllerLimits = bControllerLimits;
-    Log::Info(L"Finder: AFortInventory overflow checks found (overflow +0x{:X}, stack limit +0x{:X}, backpack limit +0x{:X}, interface +0x{:X} slots {}/{})", Overflow - Finder::ImageBase(), StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
+    Log::Info(L"Finder: AFortInventory overflow checks found (overflow +0x{:X}, stack limit +0x{:X}, backpack limit +0x{:X}, GetMaxStackSize +0x{:X}, CanStackWith {}, interface +0x{:X} slots {}/{})", Overflow - Finder::ImageBase(), StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), MaxStackSize - Finder::ImageBase(), CanStackWith ? std::format(L"+0x{:X}", CanStackWith - Finder::ImageBase()) : std::wstring(L"inlined"), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
     return true;
 }
 

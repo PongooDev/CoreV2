@@ -606,11 +606,12 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
             // The pawn's address goes with it: HandlePawnDestroyed logs each dead pawn's (#411).
             Log::Info(L"Battle Royale: {} respawns in the air as {} (0x{:X}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where they died{}", NewPlayer->GetName().ToStdString(),
                 Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z, RespawnHeight, GameRespawnPlace);
+            GiveMutatorStartingItems(NewPlayer, false);
         }
         else if (Pawn)
         {
             Log::Info(L"Battle Royale: {} leaves the aircraft as {}", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString());
-            GiveAircraftExitLoadout(NewPlayer);
+            GiveMutatorStartingItems(NewPlayer, true);
         }
         else
         {
@@ -618,29 +619,40 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         }
         return Pawn;
     }
-#endif
+    APawn* Pawn = AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
+    // A respawn on the ground in the safe zones phase (a playlist without bRespawnInAir) gets its loadout as well.
+    AFortGameStateAthena* SpawnGameState = Pawn && NewPlayer ? AthenaGameStateOf(this) : nullptr;
+    if (SpawnGameState && SpawnGameState->GamePhase == EAthenaGamePhase::GetSafeZones())
+    {
+        GiveMutatorStartingItems(NewPlayer, false);
+    }
+    return Pawn;
+#else
     return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
+#endif
 }
 
-void AFortGameModeAthena::GiveAircraftExitLoadout(AController* NewPlayer)
+void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool bInitialSpawn)
 {
 #if WITH_SERVER_CODE
     // 8.50's Endgame: the team loadouts are AshtonInventoryMutator's answer to GetStartingItems (its
     // FortGameModeAthena_GetInventoryOverride, 0x108C490): the Chitauri's AGID_AshtonPack_Milo Always, the heroes'
     // AGID_Athena_Booty_Ashton, R and VR Ore guns, ammo and wood only while the game phase is Aircraft
-    // (AircraftPhaseOnly). Nothing left in the build calls GetStartingItems. Core's: the aircraft's exit, the one moment
-    // of the Aircraft phase a player gets a pawn (StartAircraftPhase's stripped per-player call, Core's
-    // ResetToStartingItems, comes before the phase is set). Only in an Endgame match.
+    // (AircraftPhaseOnly). Nothing left in the build calls GetStartingItems. Core's: a player's pawn spawns, at the
+    // aircraft's exit (the one moment of the Aircraft phase a player gets a pawn; StartAircraftPhase's stripped
+    // per-player call, Core's ResetToStartingItems, comes before the phase is set) and at each respawn: a villain's death
+    // takes the Chitauri kit (VillainItemDefs, the death handler 0x106F380), which Always gives back as they return
+    // (CoreV2 #640). Items the player still holds aren't given twice (GiveStartingItems). Only in an Endgame match.
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
     if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_Ashton::GetCurrent(GetWorld()))
     {
         return;
     }
     TStructArray<FItemAndCount> Items;
-    // Core's: bInitialSpawn true, leaving the aircraft being the match's first spawn after the warmup.
-    GetStartingItems(Items, true, NewPlayer);
+    // Core's: bInitialSpawn true at the aircraft's exit, the match's first spawn after the warmup.
+    GetStartingItems(Items, bInitialSpawn, NewPlayer);
     PlayerController->GiveStartingItems(Items);
-    Log::Info(L"Endgame: {} leaves the aircraft with its team's loadout ({} starting items)", NewPlayer->GetName().ToStdString(), Items.Num());
+    Log::Info(L"Endgame: {} {} with its team's loadout ({} starting items)", NewPlayer->GetName().ToStdString(), bInitialSpawn ? L"leaves the aircraft" : L"respawns", Items.Num());
     Items.Empty();
 #endif
 }

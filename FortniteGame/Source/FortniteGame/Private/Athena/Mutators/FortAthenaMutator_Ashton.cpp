@@ -65,6 +65,16 @@ void AFortAthenaMutator_Ashton::GiveVillainLeaderItemCall(AFortPlayerControllerA
     {
         return;
     }
+    // 🟡 Core's (inferred): the new leader gives up the Chitauri kit first, VillainItemDefs one each and forced, as the
+    // death handler takes it from a villain (0x106F60C). Its AGID_AshtonPack_Milo has the same GadgetPriority as the
+    // gauntlet and was given first, so AFortPlayerState's gadget part gathering (slot 0xE7, 0x176D370, which keeps the
+    // first gadget's part of each type at an equal priority) kept the Chitauri body and head over the gauntlet's XL
+    // Thanos: the player had Thanos's abilities and anim Blueprint in a Chitauri's body until the kit went (CoreV2 #640).
+    const TArray<UFortWorldItemDefinition*>& VillainItems = Mutator->VillainItemDefs;
+    for (int32_t Index = 0; Index < VillainItems.Num(); ++Index)
+    {
+        UFortKismetLibrary::K2_RemoveItemFromPlayer(NewVillainLeader, VillainItems[Index], 1, true);
+    }
     UFortWorldItemDefinition* LeaderItem = static_cast<UFortGadgetItemDefinition*>(Mutator->VillainLeaderItemDef);
     // Core's: bNotifyPlayer false (the build's FFortItemEntry(VillainLeaderItemDef, 1) says nothing of it).
     UFortKismetLibrary::K2_GiveItemToPlayer(NewVillainLeader, LeaderItem, 1, false);

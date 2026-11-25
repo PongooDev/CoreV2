@@ -75,7 +75,8 @@ private:
     // The promotion's stripped give (0x1070F0F, after VillainLeaderPC is set): the new leader is given VillainLeaderItemDef,
     // the Infinity Gauntlet (AGID_CarminePack), whose gadget data (ApplyGadgetData, from the inventory's item-added
     // handling) makes him Thanos: AS_CarminePack's abilities, the XL body and the gauntlet's anim Blueprint. The call
-    // passes only the controller; the mutator is the one whose VillainLeaderPC it now is.
+    // passes only the controller; the mutator is the one whose VillainLeaderPC it now is. The Chitauri kit
+    // (VillainItemDefs) goes first, so the gauntlet's parts are the ones the player state gathers.
     static void GiveVillainLeaderItemCall(AFortPlayerControllerAthena* NewVillainLeader);
 
     // OnPickupSpawnedAndReady(PickupObj, PickupItemDef), bound by BeginPlay (0x1056F60) to the game state's

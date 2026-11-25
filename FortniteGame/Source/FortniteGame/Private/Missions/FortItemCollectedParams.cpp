@@ -32,6 +32,18 @@ void UFortItemCollectedParams::SendItemCollected(AFortPlayerController* Collecte
     {
         Params->SetParams(CollectedItemDefinition, CollectedBy, AmountCollected);
         UFortMissionLibrary::ExecuteMissionEvent(CollectedBy, FName(L"ItemCollected", FNAME_Find), Params);
+        // MissionItemCollected is the mission manager's other collect event name (9.00 registers it at 0x13B7A0 beside
+        // ItemCollected's 0x13B400; 8.51 0x12EEC0), with the same UFortItemCollectedParams. A mission's handler is
+        // its HandleMissionEvent_<event name> (9.00 0x1566500), and the reactive harvest quests
+        // (Mission_GenericHarvestingItemDrop_Parent: Canny Crude's oil samples and the other GatherCollect quests) only
+        // have HandleMissionEvent_MissionItemCollected, which matches the item against their QuestWorldItemDefinition and
+        // sends the quest's Custom stat. No code in 8.51 or 9.00 sends it (the sender is stripped), so the quest stayed
+        // at 0 (#666). Builds without the name skip it.
+        const FName MissionItemCollected(L"MissionItemCollected", FNAME_Find);
+        if (!MissionItemCollected.IsNone())
+        {
+            UFortMissionLibrary::ExecuteMissionEvent(CollectedBy, MissionItemCollected, Params);
+        }
     }
     // The Collect event goes to the current sub game's quest manager, as the game's own senders send theirs: Battle
     // Royale's challenges count it there (6.00's "Pickup a Legendary Item in different matches", collect_legendary_rarity_item:

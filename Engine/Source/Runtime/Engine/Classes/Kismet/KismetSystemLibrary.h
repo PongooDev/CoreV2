@@ -26,6 +26,8 @@ class UKismetSystemLibrary : public UObject
     DefineUFunction(LineTraceSingle)
     DefineUFunction(K2_SetTimer)
     DefineUFunction(K2_ClearTimer)
+    DefineUFunction(K2_SetTimerDelegate)
+    DefineUFunction(K2_PauseTimerHandle)
     DefineUFunction(DoesImplementInterface)
     DefineUFunction(LoadAsset)
     DefineUFunction(CapsuleOverlapActors)

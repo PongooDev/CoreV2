@@ -15443,6 +15443,7 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
         Log::Error(L"Finder: UFortGadgetItemDefinition::ApplyGadgetData not found, so a gadget's tracked attributes aren't kept");
         return Bind;
     }
+    Natives::UFortGadgetItemDefinition_ApplyGadgetData = reinterpret_cast<decltype(Natives::UFortGadgetItemDefinition_ApplyGadgetData)>(ApplyGadgetData);
 
     // TArray's Num, 8 bytes in.
     const int32_t TrackedAttributesNum = static_cast<int32_t>(TrackedAttributesOffset + 8);

@@ -41,4 +41,9 @@ public:
 
     // Restores both give-items mutators' natives where the build stripped them.
     static void HookNatives();
+    // Whether HookNatives restored them (8.30 to 9.00).
+    static bool AreNativesRestored() { return bNativesRestored; }
+
+private:
+    static inline bool bNativesRestored = false;
 };

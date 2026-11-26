@@ -665,6 +665,13 @@ void AFortPlayerController::Possess(APawn* InPawn)
         }
     }
 
+    // A gadget the player was given without a pawn (9.00's big team glider, at BusFlying) gets its data now (#672).
+    AFortPlayerControllerZone* const GadgetController = AthenaController && PossessedPlayerPawn ? Cast<AFortPlayerControllerZone>(reinterpret_cast<UObject*>(this)) : nullptr;
+    if (GadgetController)
+    {
+        GadgetController->ApplyInventoryGadgetData();
+    }
+
     // "cheat skin" (#134, #136): after a respawn, the look the player chose instead of the one the hero (Battle Royale's
     // SetupHero above) put back. Only its look: the attributes above stay the player's own hero's.
     if (PossessedPlayerPawn && !bDisguisePossess)

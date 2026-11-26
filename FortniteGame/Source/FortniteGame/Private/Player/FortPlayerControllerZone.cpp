@@ -3,6 +3,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AttributeSet.h"
+#include "Athena/Mutators/FortAthenaMutator_GiveItemsAtGamePhaseStep.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
@@ -389,6 +390,73 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         DestroyGadgetTrackedAttributeItem(UsedUp[Index].ItemGuid, UsedUp[Index].Gadget);
     }
 #endif
+}
+
+int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
+{
+    int32_t Applied = 0;
+#if WITH_SERVER_CODE
+    // 9.00 (CL-6337466) Playground's and Food Fight's big team glider (Athena_Glider_Item_BigTeamMode, CoreV2 #672) is
+    // given at BusFlying by the restored give-items mutator, to players still in the aircraft. Its definition's
+    // OnItemInstanceAdded (slot 0x73, 0x1508C00) calls ApplyGadgetData (0x14F62B0), whose ability set
+    // (ApplyGadgetItemAbilitySet 0x17D5490) and attribute set (ApplyGadgetItemAttributeSet 0x17D5620, the glider's
+    // CurrentCharges from AttributeInitKey GliderPack.BigTeamMode) both return without the controller's pawn. Nothing in
+    // the build applies them later (both have ApplyGadgetData as their only caller), so the glider had no charges and no
+    // ability: on its death the server logged "RemoveGadgetItemAbilitySet - Gadget Item [Athena_Glider_Item_BigTeamMode]
+    // has an ability set, but applied ability set handle was invalid!". 🟡 Where Epic's server applied it once the pawn
+    // came isn't in the build; Core applies it as the pawn is possessed. Only where Core restores the give-items
+    // mutators (8.30 to 9.00), the only way the server gives a gadget to a player without a pawn.
+    const ptrdiff_t ItemInstanceIdsOffset = Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds;
+    AFortInventory* Inventory = Role == ROLE_Authority && MyFortPawn ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    static UClass* const InventoryOwnerInterfaceClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInventoryOwnerInterface");
+    if (!Inventory || !Natives::UFortGadgetItemDefinition_ApplyGadgetData || ItemInstanceIdsOffset < 0 || !Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet
+        || !InventoryOwnerInterfaceClass || !Natives::UObject_GetInterfaceAddress || !AFortAthenaMutator_GiveItemsAtGamePhaseStep::AreNativesRestored())
+    {
+        return 0;
+    }
+    void* const InventoryOwner = Natives::UObject_GetInterfaceAddress(this, InventoryOwnerInterfaceClass);
+    if (!InventoryOwner)
+    {
+        return 0;
+    }
+    // The applied items, a sparse array read element by element (a free slot never holds an item's guid).
+    const TArray<FGadgetTrackedAttributeItemGuid>& AppliedItems = *reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(reinterpret_cast<const uint8_t*>(this) + ItemInstanceIdsOffset);
+    const auto IsApplied = [&AppliedItems](const FGuid& ItemGuid)
+    {
+        for (int32_t Index = 0; Index < AppliedItems.Num(); ++Index)
+        {
+            if (AppliedItems[Index].ItemGuid == ItemGuid)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    TArray<UFortWorldItem*> Pending;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        UFortWorldItem* Item = Instances[Index];
+        FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
+        UFortGadgetItemDefinition* Gadget = Entry ? Cast<UFortGadgetItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
+        if (Gadget && Gadget->TrackedAttributes.Num() > 0 && !IsApplied(static_cast<FGuid>(Entry->ItemGuid)))
+        {
+            Pending.Add(Item);
+        }
+    }
+    for (int32_t Index = 0; Index < Pending.Num(); ++Index)
+    {
+        UFortWorldItem* Item = Pending[Index];
+        UObject* Gadget = static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(Item->ItemEntry).ItemDefinition);
+        Natives::UFortGadgetItemDefinition_ApplyGadgetData(Gadget, InventoryOwner, Item, false);
+        ++Applied;
+        Log::Info(L"Gadget: {}'s {} was given without a pawn; its gadget data goes on {} now", GetName().ToStdString(), Gadget->GetName().ToStdString(),
+            reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))->GetName().ToStdString());
+    }
+#endif
+    return Applied;
 }
 
 void AFortPlayerControllerZone::DestroyGadgetTrackedAttributeItem(const FGuid& ItemGuid, const UFortGadgetItemDefinition* GadgetItemDefinition)

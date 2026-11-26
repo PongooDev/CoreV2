@@ -68,6 +68,7 @@ void AFortAthenaMutator_GiveItemsAtGamePhaseStep::HookNatives()
     }
     StepChanged->SetNativeFunc(&execOnGamePhaseStepChanged);
     PhaseChanged->SetNativeFunc(&AFortAthenaMutator_GiveItemsAtGamePhase::execOnGamePhaseChanged);
+    bNativesRestored = true;
     Log::Info(L"Finder: AFortAthenaMutator_GiveItemsAtGamePhaseStep::OnGamePhaseStepChanged and AFortAthenaMutator_GiveItemsAtGamePhase::OnGamePhaseChanged are stripped (shared exec 0x{:X}), restored (natives)",
         reinterpret_cast<uintptr_t>(Exec) - Finder::ImageBase());
 #endif

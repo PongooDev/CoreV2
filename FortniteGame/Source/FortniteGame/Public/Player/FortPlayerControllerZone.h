@@ -58,6 +58,11 @@ public:
     // BindGadgetAttributeChangeDelegate).
     void OnGadgetTrackedAttributeChanged(float NewValue, const void* ModCallbackData);
 
+    // Core's name: on the controller's new pawn, the gadget data of each world inventory gadget with tracked attributes
+    // whose attribute set was never applied (it isn't in the controller's set of applied items), as
+    // UFortGadgetItemDefinition::OnItemInstanceAdded applies it when the item comes with a pawn. Returns how many.
+    int32_t ApplyInventoryGadgetData();
+
 private:
     static inline FWeakObjectPtr SetupTeleportOutCameraGameState;
 

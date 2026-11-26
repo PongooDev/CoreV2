@@ -251,6 +251,11 @@ namespace Natives
     inline ptrdiff_t AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = -1;
     // 7.30+: that member is a TSet<FGuid> of the items (Finder::GadgetTrackedAttributeBind's bItemGuidSet).
     inline bool AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet = false;
+    // UFortGadgetItemDefinition::ApplyGadgetData(InventoryOwner, Item, bArg) (9.00 CL-6337466 0x14F62B0, 8.51 0x144ED60,
+    // 8.50 0x1450510), from Finder::GadgetTrackedAttributeBind. InventoryOwner is the controller's
+    // IFortInventoryOwnerInterface. Its ability set (ApplyGadgetItemAbilitySet, 9.00 0x17D5490) and attribute set
+    // (ApplyGadgetItemAttributeSet, 0x17D5620) each skip a gadget item they applied already; both need the controller's pawn.
+    inline void (*UFortGadgetItemDefinition_ApplyGadgetData)(UObject* This, void* InventoryOwner, UFortWorldItem* Item, bool bArg) = nullptr;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 

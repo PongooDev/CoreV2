@@ -9619,6 +9619,15 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
             DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(Pawn, Pawn->DeathTags, false);
             bStormDeath = DeathInfo.DeathCause == EDeathCause::GetOutsideSafeZone();
         }
+        // From 8.30 the death info carries the killing hit's damage tags, as a player's (the player state's store, 8.30
+        // 0xF9DB30, copies them in). The client's kill feed (9.00 0x10AE940) picks its line from them: the game data's
+        // FortDeathCauseData (/Game/Balance/DeathCauseData) keys each message by a tag (Weapon.Ranged.Massive, Thanos's
+        // beam; Weapon.Ranged.Shotgun; Gameplay.Damage.OutsideSafeZone ...); with none it falls back to
+        // DeathCause.Eliminated's "finally eliminated" (CoreV2 #691).
+        if (Pawn && FDeathInfo::HasDeathTags() && AFortPawn::HasDeathTags())
+        {
+            DeathInfo.DeathTags = Pawn->DeathTags;
+        }
         if (FDeathInfo::HasDistance())
         {
             AFortPlayerPawn* KillerPawn = KillerState && KillerState != PlayerState ? KillerState->GetCurrentPawn() : nullptr;

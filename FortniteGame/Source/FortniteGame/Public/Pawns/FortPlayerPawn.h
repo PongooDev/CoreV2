@@ -166,9 +166,6 @@ public:
     static void HookManualReviveNative();
     // Both DLLs, before the detours are enabled: TryToAutoPickupWeapon's guard where the tick reaches it (7.40, 8.00).
     static void Hook();
-    // TEMPORARY (#688): logs every TeleportTo of a player pawn on the server, 8.00+. Remove once #688 is fixed;
-    // owner-approved diagnostic, 2026-11-26.
-    static void HookTeleportLog();
 
     // The owning client's walk-over pickup (7.40 0x13DF6D0): picks the overlapped pickup up through the local player's
     // interact, which sends ServerHandlePickup. Core's guard returns where there's no local player controller.
@@ -177,8 +174,6 @@ public:
 private:
     static void TryToAutoPickupWeaponHK(AFortPlayerPawn* This, AFortPickup* Pickup);
     static inline void (*TryToAutoPickupWeaponOG)(AFortPlayerPawn* This, AFortPickup* Pickup) = nullptr;
-    static bool TeleportToHK(AFortPlayerPawn* This, const FVector& DestLocation, const FRotator& DestRotation, bool bIsATest, bool bNoCheck);
-    static inline bool (*TeleportToOG)(AFortPlayerPawn* This, const FVector& DestLocation, const FRotator& DestRotation, bool bIsATest, bool bNoCheck) = nullptr;
 
     void ReviveFromDBNO(AController* EventInstigator);
 

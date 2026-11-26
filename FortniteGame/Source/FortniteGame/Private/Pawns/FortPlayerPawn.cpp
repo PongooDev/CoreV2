@@ -7,8 +7,6 @@
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Finder.h"
 #include "FortGameMode.h"
 #include "FortGameState.h"
@@ -32,7 +30,6 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
-#include <intrin.h>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -969,57 +966,4 @@ void AFortPlayerPawn::Hook()
         return;
     }
     Hooks::Detour(L"AFortPlayerPawn::TryToAutoPickupWeapon", reinterpret_cast<void*>(Natives::AFortPlayerPawn_TryToAutoPickupWeapon), &TryToAutoPickupWeaponHK, &TryToAutoPickupWeaponOG);
-}
-
-// TEMPORARY (#688): remove once #688 is fixed; owner-approved diagnostic, 2026-11-26. A logging-only swap of the game's
-// intact AFortPlayerPawn::TeleportTo override (9.00 0x1772550, AActor slot from K2_TeleportTo's wrapper, 9.00 0x98),
-// which sends the pawn's controller ClientSetRotation(DestRotation), roll included, after every real teleport. The
-// original runs unchanged; the log shows whether a teleport hands a player a rolled view after a cannon launch.
-void AFortPlayerPawn::HookTeleportLog()
-{
-    if (!AFortPlayerController::HasZeroingCameraRoll())
-    {
-        return;
-    }
-    UFunction* K2TeleportTo = FindObject<UFunction>(nullptr, L"/Script/Engine.Actor:K2_TeleportTo");
-    const int32_t Index = K2TeleportTo ? Finder::WrappedImplementationIndex(K2TeleportTo) : -1;
-    UObject* PawnDefault = Index >= 0 && StaticClass() ? StaticClass()->GetDefaultObject(false) : nullptr;
-    void** PawnVTable = PawnDefault ? *reinterpret_cast<void***>(PawnDefault) : nullptr;
-    void* const Override = PawnVTable ? PawnVTable[Index] : nullptr;
-    if (!Override || Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Override)))
-    {
-        Log::Error(L"Finder: AFortPlayerPawn::TeleportTo slot not found, #688's teleport log is off");
-        return;
-    }
-    TeleportToOG = reinterpret_cast<decltype(TeleportToOG)>(Override);
-    for (TObjectIterator<UClass> It; It; ++It)
-    {
-        UClass* Class = *It;
-        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
-        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-        if (VTable && VTable[Index] == Override)
-        {
-            Hooks::SwapVTable(L"AFortPlayerPawn::TeleportTo (#688 log)", VTable, Index, reinterpret_cast<void*>(&TeleportToHK));
-        }
-    }
-    AActor::bLogViewRotations = true;
-    UE_LOG(LogFort, Log, TEXT("#688 diagnostic: logging player pawn teleports (TeleportTo slot 0x%X, game 0x%llX)"), Index,
-        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(Override) - Finder::ImageBase()));
-}
-
-bool AFortPlayerPawn::TeleportToHK(AFortPlayerPawn* This, const FVector& DestLocation, const FRotator& DestRotation, bool bIsATest, bool bNoCheck)
-{
-    const uintptr_t Caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
-    const bool bTeleported = TeleportToOG(This, DestLocation, DestRotation, bIsATest, bNoCheck);
-    if (!bIsATest)
-    {
-        ACharacter* const Character = reinterpret_cast<ACharacter*>(This);
-        UCharacterMovementComponent* const Movement = Character->CharacterMovement;
-        AController* const Controller = This->Controller;
-        UE_LOG(LogFort, Log, TEXT("#688 TeleportTo: %s (%s) to (%.0f, %.0f, %.0f) rotation P %.2f Y %.2f R %.2f, movement mode %d, %s, from game 0x%llX"),
-            *GetNameSafe(This), *GetNameSafe(reinterpret_cast<UObject*>(Controller)), DestLocation.X, DestLocation.Y, DestLocation.Z,
-            DestRotation.Pitch, DestRotation.Yaw, DestRotation.Roll, Movement ? static_cast<int32_t>(Movement->MovementMode) : -1,
-            bTeleported ? TEXT("teleported") : TEXT("refused"), static_cast<unsigned long long>(Caller - Finder::ImageBase()));
-    }
-    return bTeleported;
 }

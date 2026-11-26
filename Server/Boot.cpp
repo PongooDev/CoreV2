@@ -431,7 +431,6 @@ static void InstallHooks()
         AFortPlayerPawn::HookVTables();
         AFortPlayerPawn::HookPickupVTables();
         AFortPlayerPawn::HookZiplineVTables();
-        AFortPlayerPawn::HookTeleportLog();
         AFortPlayerPawn::HookNatives();
         AFortPlayerPawn::HookManualReviveNative();
         AFortPawn::HookEmoteNatives();

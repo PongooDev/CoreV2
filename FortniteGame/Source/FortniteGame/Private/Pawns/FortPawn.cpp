@@ -20,6 +20,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Weapons/FortWeapon.h"
+#include "Weapons/FortWeaponRangedMountedCannon.h"
 
 #include <algorithm>
 #include <array>
@@ -305,8 +306,15 @@ void AFortPawn::RemoveAbilityWeapon(AFortWeapon* Weapon, bool bDestroyWeapon)
 
     if (static_cast<AFortWeapon*>(CurrentWeapon) == Weapon)
     {
+        // On a remote player EquipLastWeapon only sends ClientExecuteInventoryItem (9.00 0x176B150 -> 0x178DB00 ->
+        // 0x1BA1810) and returns no result. When the Pirate Cannon fires its passenger (ServerFireActorInCannon's
+        // ServerOnExitVehicle), that RPC reaches a client that is still in the seat, and the client refuses it ("operating
+        // a turret"). Only the server's equip is sent on (EquipWeapon -> ClientInternalEquipWeapon, 0x1743FD0), so the client
+        // otherwise kept the cannon weapon in flight, and AFortWeaponRangedMountedCannon::ProcessViewRotation (0x1995180)
+        // kept turning its view in camera space, rolling it (#688).
         AFortPlayerPawn* PlayerPawn = Cast<AFortPlayerPawn>(this);
-        if (!PlayerPawn || !PlayerPawn->EquipLastWeapon())
+        if (!PlayerPawn || !PlayerPawn->EquipLastWeapon()
+            || (static_cast<AFortWeapon*>(CurrentWeapon) == Weapon && Weapon->IsA(AFortWeaponRangedMountedCannon::StaticClass())))
         {
             EquipDefaultWeapon();
         }

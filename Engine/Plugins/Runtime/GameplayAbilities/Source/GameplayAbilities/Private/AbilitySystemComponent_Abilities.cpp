@@ -378,14 +378,7 @@ void UAbilitySystemComponent::InternalServerTryActiveAbility(FGameplayAbilitySpe
     UGameplayAbility* InstancedAbility = nullptr;
     Spec->InputPressed = true;
 
-    const bool bActivated = InternalTryActivateAbility(Handle, PredictionKey, &InstancedAbility, nullptr, TriggerEventData);
-    // TEMPORARY (#688): the 8.00+ cannon launch's ability is activated twice by the client (its own grant and the
-    // server's ClientTryActivateAbility); log the one the server takes. Remove once #688 is fixed.
-    if (bActivated && GetNameSafe(Spec->Ability).Contains(TEXT("GA_Athena_PushCannon_Launched")))
-    {
-        ABILITY_LOG(Display, TEXT("InternalServerTryActiveAbility. #688 Accepted ClientActivation of %s with PredictionKey %s"), *GetNameSafe(Spec->Ability), *PredictionKey.ToString());
-    }
-    if (!bActivated)
+    if (!InternalTryActivateAbility(Handle, PredictionKey, &InstancedAbility, nullptr, TriggerEventData))
     {
         ABILITY_LOG(Display, TEXT("InternalServerTryActiveAbility. Rejecting ClientActivation of %s with PredictionKey %s. InternalTryActivateAbility failed: %s"), *GetNameSafe(Spec->Ability), *PredictionKey.ToString(), *DescribeActivationFailure(*Spec));
         ClientActivateAbilityFailed(Handle, PredictionKey.Current);

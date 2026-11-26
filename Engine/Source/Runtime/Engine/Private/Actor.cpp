@@ -9,15 +9,7 @@
 #include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
-#include "Logging/LogMacros.h"
 #include "Templates/Casts.h"
-
-#include <intrin.h>
-
-extern "C" IMAGE_DOS_HEADER __ImageBase;
-
-// TEMPORARY (#688), with bLogViewRotations.
-DEFINE_LOG_CATEGORY_STATIC(LogViewRotation, Log, All);
 
 ULevel* AActor::GetLevel() const
 {
@@ -85,12 +77,6 @@ FRotator AActor::GetActorRotation() const
 
 bool AActor::TeleportTo(const FVector& DestLocation, const FRotator& DestRotation)
 {
-    if (bLogViewRotations)
-    {
-        UE_LOG(LogViewRotation, Log, TEXT("#688 Core TeleportTo: %s to (%.0f, %.0f, %.0f) rotation P %.2f Y %.2f R %.2f, from Core 0x%llX"), *GetNameSafe(this),
-            DestLocation.X, DestLocation.Y, DestLocation.Z, DestRotation.Pitch, DestRotation.Yaw, DestRotation.Roll,
-            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(_ReturnAddress()) - reinterpret_cast<uintptr_t>(&__ImageBase)));
-    }
     Reflection::FParams Params(StaticFunction_K2_TeleportTo());
     Params.Set(L"DestLocation", DestLocation);
     Params.Set(L"DestRotation", DestRotation);

@@ -8,18 +8,22 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
+#include "Building/BuildingFoundation.h"
 #include "Building/BuildingSMActor.h"
 #include "Building/BuildingTrap.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
 #include "FortKismetLibrary.h"
 #include "FortMissionTimerComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
@@ -510,6 +514,81 @@ namespace
     // the cheat lets them build up to the level it chose.
     std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, int32_t>> BuildWithLevels;
 
+    // The Blueprint plots ("LF_Athena_POI_80x80": ABuildingFoundation children, a POI's or a mission's plot) sit in these
+    // content folders (9.00 CL-6337466 and 8.51 CL-6165369 paks; Battle Royale's first). There is no asset registry to ask,
+    // so SpawnActor tries each for a short LF_ name. A build without the folder simply loads nothing.
+    constexpr const wchar_t* LayoutFoundationFolders[] = {
+        L"/Game/Athena/Environments/Blueprints", L"/Game/Athena/Prototype/Terrain",
+        L"/Game/WorldTiles/LayoutFoundations/ParentBlueprints", L"/Game/WorldTiles/LayoutFoundations/Temperate",
+        L"/Game/WorldTiles/LayoutFoundations/Temperate/Borders", L"/Game/WorldTiles/LayoutFoundations/Temperate/Forest",
+        L"/Game/WorldTiles/LayoutFoundations/Temperate/Grassland", L"/Game/WorldTiles/LayoutFoundations/Temperate/Industrial",
+        L"/Game/WorldTiles/LayoutFoundations/Temperate/Remote", L"/Game/WorldTiles/LayoutFoundations/Temperate/Suburban",
+        L"/Game/WorldTiles/LayoutFoundations/Temperate/TheMansion", L"/Game/WorldTiles/LayoutFoundations/Temperate/Urban",
+        L"/Game/WorldTiles/LayoutFoundations/Arid/Borders", L"/Game/WorldTiles/LayoutFoundations/Arid/Desert",
+        L"/Game/WorldTiles/LayoutFoundations/Arid/ThunderRoute99", L"/Game/WorldTiles/LayoutFoundations/Arid/Western",
+        L"/Game/WorldTiles/LayoutFoundations/AD/Borders", L"/Game/WorldTiles/LayoutFoundations/AD/Forest",
+        L"/Game/WorldTiles/LayoutFoundations/AD/Lakeside", L"/Game/WorldTiles/LayoutFoundations/Transylvania/HForest",
+        L"/Game/WorldTiles/LayoutFoundations/Transylvania/Swamps", L"/Game/WorldTiles/LayoutFoundations/Missions/BuildRadarGrid",
+        L"/Game/WorldTiles/LayoutFoundations/Missions/BuildRadarTower", L"/Game/WorldTiles/LayoutFoundations/Missions/DeliverBomb",
+        L"/Game/WorldTiles/LayoutFoundations/Missions/ShadowOrb", L"/Game/WorldTiles/LayoutFoundations/Missions/SurvivorHighGround",
+        L"/Game/WorldTiles/LayoutFoundations/Missions/WildRift", L"/Game/WorldTiles/LayoutFoundations/Missions/WoundedSurvivor",
+    };
+
+    // "LF_Athena_POI_80x80" (#677): its Blueprint class, loaded from the first folder that has it.
+    UClass* LoadLayoutFoundationClass(std::wstring Name)
+    {
+        if (!Lower(Name).starts_with(L"lf_"))
+        {
+            return nullptr;
+        }
+        if (Lower(Name).ends_with(L"_c"))
+        {
+            Name.resize(Name.size() - 2);
+        }
+        const FString AssetName(Name.c_str());
+        for (const wchar_t* Folder : LayoutFoundationFolders)
+        {
+            const FString Path = FString::Printf(TEXT("%s/%s.%s_C"), Folder, *AssetName, *AssetName);
+            if (UClass* Class = LoadObject<UClass>(nullptr, *Path, nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet)))
+            {
+                return Class;
+            }
+        }
+        return nullptr;
+    }
+
+    // The static mesh SpawnActor names (#677): a path ("/Game/.../SM_Foo.SM_Foo", or the package alone, which takes
+    // the asset of its name), loaded if it isn't yet, or the name of a mesh that is loaded.
+    UStaticMesh* ResolveStaticMesh(std::wstring Query)
+    {
+        while (!Query.empty() && (Query.front() == L'"' || Query.front() == L'\''))
+        {
+            Query.erase(Query.begin());
+        }
+        while (!Query.empty() && (Query.back() == L'"' || Query.back() == L'\''))
+        {
+            Query.pop_back();
+        }
+        if (Query.empty())
+        {
+            return nullptr;
+        }
+        if (Query.front() != L'/')
+        {
+            return FindObject<UStaticMesh>(ANY_PACKAGE, Query.c_str());
+        }
+        const size_t Slash = Query.rfind(L'/');
+        if (Query.find(L'.', Slash) == std::wstring::npos)
+        {
+            Query += L"." + Query.substr(Slash + 1);
+        }
+        if (UStaticMesh* Mesh = FindObject<UStaticMesh>(nullptr, Query.c_str()))
+        {
+            return Mesh;
+        }
+        return LoadObject<UStaticMesh>(nullptr, Query.c_str(), nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
+    }
+
     // The actor class SpawnActor names, the way the native Summon finds one (1.7.2 0x1FE9A90, FindObject<UClass>), and
     // loading it when it isn't yet:
     // - a path, "/Script/Engine.StaticMeshActor", "/Game/Building/ActorBlueprints/Containers/Tiered_Chest_6_Parent.Tiered_Chest_6_Parent_C",
@@ -578,6 +657,11 @@ namespace
             {
                 return Class;
             }
+        }
+
+        if (UClass* Foundation = LoadLayoutFoundationClass(Name))
+        {
+            return Foundation;
         }
 
         const std::wstring Wanted = Simplified(Name);
@@ -718,7 +802,7 @@ namespace
         { L"Movement", nullptr, L"tpactor <class or name> [n]", L"onto the nearest such actor", ECheatMode::Both },
         { L"Movement", nullptr, L"possessplayer <player>", L"control their pawn (unpossess)", ECheatMode::Both },
         { L"World", L"Summon", L"summon <class>", L"spawn an actor", ECheatMode::Both },
-        { L"World", nullptr, L"spawnactor <class or path> [scale]", L"spawn an actor at a scale", ECheatMode::Both },
+        { L"World", nullptr, L"spawnactor <class | path | LF_name | mesh path> [scale]", L"spawn an actor, an LF_ plot or a static mesh", ECheatMode::Both },
         { L"World", nullptr, L"copytargetpath [class | mesh | name]", L"copy what you look at", ECheatMode::Both },
         { L"World", L"Slomo", L"slomo <speed>", L"game speed, for everyone", ECheatMode::Both },
         { L"World", L"DestroyTarget", L"destroytarget", L"destroy what you look at", ECheatMode::Both },
@@ -1722,7 +1806,7 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
     constexpr float MinScale = 0.01f;
     constexpr float MaxScale = 100.0f;
     const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
-    const FString Usage = TEXT("Usage: spawnactor <class or path> [scale | x y z], a scale from 0.01 to 100 (\"spawnactor Tiered_Chest_6_Parent 3\", \"spawnactor Tiered_Chest_6_Parent 1 1 4\")");
+    const FString Usage = TEXT("Usage: spawnactor <class, path, LF_ plot or mesh path> [scale | x y z], a scale from 0.01 to 100 (\"spawnactor Tiered_Chest_6_Parent 3\", \"spawnactor LF_Athena_POI_80x80\", a static mesh by its path: \"spawnactor /Game/.../SM_Foo.SM_Foo 2\")");
     if (Words.empty() || Words.size() == 3 || Words.size() > 4)
     {
         Reply(Usage);
@@ -1756,9 +1840,16 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
         return;
     }
     UClass* Class = FindActorClass(Words[0]);
+    // Not a class: a static mesh, which goes on an AStaticMeshActor (#677).
+    UStaticMesh* Mesh = nullptr;
+    if (!Class && AStaticMeshActor::StaticClass())
+    {
+        Mesh = ResolveStaticMesh(Words[0]);
+        Class = Mesh ? AStaticMeshActor::StaticClass() : nullptr;
+    }
     if (!Class)
     {
-        Reply(FString::Printf(TEXT("No class called '%s' (give its path, /Game/.../X.X_C, to load one that isn't yet)"), Words[0].c_str()));
+        Reply(FString::Printf(TEXT("No class or static mesh called '%s' (give a class's path, /Game/.../X.X_C, or a mesh's, /Game/.../SM_X.SM_X, to load one that isn't yet)"), Words[0].c_str()));
         return;
     }
     if (!Class->IsChildOf(AActor::StaticClass()))
@@ -1802,6 +1893,23 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
         SpawnTransform.Translation = At;
         SpawnTransform.Scale3D = Scale3D;
         AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Pawn, Class, SpawnTransform, Collision);
+        if (Spawned && Mesh)
+        {
+            // Before the components register: AStaticMeshActor's root is a static mesh component with static mobility,
+            // which couldn't be moved or have its mesh set afterwards. The component replicates, as its mesh does only
+            // then.
+            if (UStaticMeshComponent* MeshComponent = static_cast<AStaticMeshActor*>(Spawned)->StaticMeshComponent)
+            {
+                MeshComponent->Mobility = EComponentMobility::Movable;
+                MeshComponent->StaticMesh = Mesh;
+                if (UFunction* SetIsReplicated = MeshComponent->FindFunction(FName(L"SetIsReplicated", FNAME_Find)))
+                {
+                    Reflection::FParams Params(SetIsReplicated);
+                    Params.Set(L"ShouldReplicate", true);
+                    Params.Call(MeshComponent);
+                }
+            }
+        }
         Spawned = Spawned ? UGameplayStatics::FinishSpawningActor(Spawned, SpawnTransform) : nullptr;
         if (Spawned && Spawned->GetRootComponent())
         {
@@ -1842,6 +1950,20 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
         }
     }
 
+    // A plot (an LF_ Blueprint, #677) streams its level in on its own when the world manager updates the world's building
+    // actors (the plot's PostUpdate); one placed now has missed that, so it picks and streams its level here, where it
+    // finally stands (the clients stream the same level themselves from LevelToStream).
+    FString StreamedLevel;
+    if (ABuildingFoundation::StaticClass() && Actor->IsA(ABuildingFoundation::StaticClass()))
+    {
+        ABuildingFoundation* Foundation = static_cast<ABuildingFoundation*>(Actor);
+        if (!Foundation->bConditionalFoundation && !Foundation->LevelStreamInfo)
+        {
+            Foundation->SelectAndSetupMyBuildingLevel(nullptr);
+        }
+        StreamedLevel = Foundation->LevelStreamInfo ? Foundation->LevelToStream.ToString() : FString();
+    }
+
     // The clients only see an actor that replicates; most objects (a StaticMeshActor, a prop) don't by default.
     const bool bReplicatedByDefault = Actor->bReplicates;
     if (!bReplicatedByDefault)
@@ -1854,8 +1976,9 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
     const FVector Actual = Actor->GetActorScale3D();
     UE_LOG(LogFortCheats, Log, TEXT("SpawnActor: %s spawned %s (%s) at scale %g %g %g, replicates %d (by default %d)"), *GetNameSafe(PlayerController),
         *Actor->GetName(), *Class->GetPathName(), Actual.X, Actual.Y, Actual.Z, bReplicates ? 1 : 0, bReplicatedByDefault ? 1 : 0);
-    Reply(FString::Printf(TEXT("Spawned %s (%s)%s%s"), *Actor->GetName(), *Class->GetPathName(),
+    Reply(FString::Printf(TEXT("Spawned %s (%s%s)%s%s%s"), *Actor->GetName(), *Class->GetPathName(), Mesh ? *FString::Printf(TEXT(" with %s"), *Mesh->GetPathName()) : TEXT(""),
         bScaled ? *FString::Printf(TEXT(" at scale %s"), *ScaleText) : TEXT(", which has no root component to scale"),
+        !StreamedLevel.IsEmpty() ? *FString::Printf(TEXT(", streaming %s"), *StreamedLevel) : TEXT(""),
         !bReplicates ? TEXT("; it doesn't replicate, so only the server has it") : bReplicatedByDefault ? TEXT("") : TEXT("; Core made it replicate, as it didn't")));
 #endif
 }
@@ -4089,6 +4212,8 @@ namespace
         TWeakObjectPtr<AFortPlayerController> Player;
         TWeakObjectPtr<AFortPawn> Pawn;
         float Multiplier = 1.0f;
+        // The speed is Epic's AFortPawn::SetMovementSpeedMultiplier (#677), not the movement set's scaling.
+        bool bNative = false;
     };
     std::vector<FSpeedPlayer> SpeedPlayers;
 
@@ -4096,7 +4221,15 @@ namespace
     {
         AFortPlayerController* PlayerController = Entry.Player.Get();
         AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
-        if (Pawn && Pawn != Entry.Pawn.Get() && !Pawn->IsDead() && Pawn->MovesWithMovementSet())
+        if (Entry.bNative)
+        {
+            if (Pawn && Pawn != Entry.Pawn.Get() && !Pawn->IsDead())
+            {
+                Entry.Pawn = Pawn;
+                Pawn->SetMovementSpeedMultiplier(Entry.Multiplier);
+            }
+        }
+        else if (Pawn && Pawn != Entry.Pawn.Get() && !Pawn->IsDead() && Pawn->MovesWithMovementSet())
         {
             // The set is the player state's, which the old pawn (still dying) scaled: it gives the set back first, so
             // the new pawn scales the player's own speeds and the old one's end doesn't undo them later.
@@ -5459,6 +5592,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
     }
 
     // The last speed goes first.
+    const bool bHadNativeSpeed = SetSpeed && SetSpeed->bNative;
     if (SetSpeed)
     {
         SpeedPlayers.erase(SpeedPlayers.begin() + (SetSpeed - SpeedPlayers.data()));
@@ -5470,9 +5604,27 @@ void UFortCheatManager::Speed(const FString& Arguments)
         std::erase_if(AttributeBoosts, [RowSpeed](const FAttributeBoost& Boost) { return &Boost == RowSpeed; });
     }
     Pawn->SetCheatSpeedMultiplier(1.0f);
+    if (bHadNativeSpeed)
+    {
+        Pawn->SetMovementSpeedMultiplier(1.0f);
+    }
     if (bReset || *Multiplier == 1.0f)
     {
         Reply(TEXT("Speed reset: you move at your own speed again"));
+        return;
+    }
+
+    // Epic's own way to change a pawn's speed (#677), on the builds that have it (6.01 on); the movement set's and the
+    // stats row's scaling below stay for the older ones.
+    if (Pawn->SetMovementSpeedMultiplier(*Multiplier))
+    {
+        FSpeedPlayer& Entry = SpeedPlayers.emplace_back();
+        Entry.Player = PlayerController;
+        Entry.Pawn = Pawn;
+        Entry.Multiplier = *Multiplier;
+        Entry.bNative = true;
+        UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.2fx (AFortPawn::SetMovementSpeedMultiplier)"), *GetNameSafe(PlayerController), *Multiplier);
+        Reply(FString::Printf(TEXT("Speed set to %.2fx (speed reset: your own speed)"), *Multiplier));
         return;
     }
 

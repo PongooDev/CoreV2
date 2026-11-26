@@ -5,6 +5,24 @@
 
 class AActor;
 
+// A node of the graph: the global ones the graph gathers from for every connection, and each connection's own
+// (UNetReplicationGraphConnection::ConnectionGraphNodes).
+class UReplicationGraphNode : public UObject
+{
+    DefineUnrealClass(UReplicationGraphNode, ReplicationGraph)
+};
+
+// The graph's manager of one client connection.
+class UNetReplicationGraphConnection : public UReplicationConnectionDriver
+{
+    DefineUnrealClass(UNetReplicationGraphConnection, ReplicationGraph)
+
+public:
+    // The nodes the graph made for this connection alone (UFortReplicationGraph's always relevant node among them).
+    DefineUProperty(TArray<UReplicationGraphNode*>, ConnectionGraphNodes)
+    static bool HasConnectionGraphNodes() { return StaticClass() && Member_ConnectionGraphNodes.IsAvailable(); }
+};
+
 // UE 4.20's replication graph, the replication driver of Fortnite's Battle Royale from 3.4 (UFortReplicationGraph).
 // The build's own code runs it; Core only declares what it reads.
 class UReplicationGraph : public UReplicationDriver

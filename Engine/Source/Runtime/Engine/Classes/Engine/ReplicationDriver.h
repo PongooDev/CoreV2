@@ -11,3 +11,9 @@ class UReplicationDriver : public UObject
 public:
     int32_t ServerReplicateActors(float DeltaSeconds);
 };
+
+// The replication driver's per-connection part (UReplicationGraph's is UNetReplicationGraphConnection).
+class UReplicationConnectionDriver : public UObject
+{
+    DefineUnrealClass(UReplicationConnectionDriver, Engine)
+};

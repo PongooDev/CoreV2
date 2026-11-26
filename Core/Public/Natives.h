@@ -442,6 +442,9 @@ namespace Natives
     // NotifyActorChannelCleanedUp's iterator makes).
     inline int32_t* (*FPerConnectionActorInfoMap_FindId)(void* Map, int32_t* Result, const void* Key) = nullptr;
     inline void (*FPerConnectionActorInfoMap_RemoveId)(void* Map, int32_t ElementId) = nullptr;
+    // UFortReplicationGraphNode_AlwaysRelevant_ForConnection's PastRelevantActors (Finder::ResolveAlwaysRelevantPastActorsLive;
+    // 9.00 +0x278, -1 elsewhere), for ForgetDestroyedPawn (CoreV2 #671).
+    inline ptrdiff_t UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
     inline int32_t IDelegateInstance_GetHandleIndex = 8;

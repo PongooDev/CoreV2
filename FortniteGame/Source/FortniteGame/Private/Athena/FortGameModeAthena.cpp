@@ -52,6 +52,7 @@
 #include "Math/Transform.h"
 #include "Misc/Guid.h"
 #include "Finder.h"
+#include "FortReplicationGraph.h"
 #include "FortTeamInfo.h"
 #include "FortZoneTheme.h"
 #include "Hooks.h"
@@ -695,7 +696,7 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         }
         else if (Pawn)
         {
-            Log::Info(L"Battle Royale: {} leaves the aircraft as {}", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString());
+            Log::Info(L"Battle Royale: {} leaves the aircraft as {} (0x{:X})", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn));
         }
         else
         {
@@ -3543,6 +3544,14 @@ void AFortGameModeAthena::HandlePawnDestroyed(AActor* DestroyedActor)
     UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
     UReplicationGraph* Graph = Driver && Driver->HasReplicationDriver() ? Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(Driver->ReplicationDriver))) : nullptr;
     const int32_t Removed = Graph ? Graph->RemoveActorInfoFromConnections(Pawn) : -1;
+    // Each connection's always relevant node lets the pawn go as its LastPawn (9.00, #671): a pawn spawned at its address
+    // later, the one a player leaves the bus with, would be taken for it and never sent to them.
+    const int32_t Released = UFortReplicationGraphNode_AlwaysRelevant_ForConnection::ForgetDestroyedPawn(Graph, Pawn);
+    if (Released > 0)
+    {
+        Log::Info(L"Battle Royale: {} (0x{:X}) is destroyed, {} connection{} always relevant node let it go as its last pawn", Pawn->GetName().ToStdString(),
+            reinterpret_cast<uintptr_t>(Pawn), Released, Released == 1 ? L"'s" : L"s'");
+    }
     // A dead pawn's line only: the warmup pawns the aircraft phase destroys, alive, would be a line for every player at once.
     const bool bTornOff = Pawn->bTearOff;
     const bool bDying = Pawn->bIsDying;

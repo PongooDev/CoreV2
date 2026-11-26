@@ -101,6 +101,13 @@ bool UWorld::Listen(FURL& InURL)
         UE_LOG(LogWorld, Log, TEXT("Listen: the replication graph's connections %s (UWorld::OnActorSpawned)"),
             Handle.IsValid() ? TEXT("forget a destroyed actor's info when a new actor is spawned at its address") : TEXT("keep a destroyed actor's info: the world's OnActorSpawned wasn't found"));
     }
+    // CoreV2 #671: where the connections' always relevant nodes keep their LastPawns (9.00), found once the graph is up
+    // so the server log says it before any pawn is destroyed (UFortReplicationGraphNode_AlwaysRelevant_ForConnection::
+    // ForgetDestroyedPawn uses it).
+    if (NetDriver->HasReplicationDriver() && Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(NetDriver->ReplicationDriver))))
+    {
+        Finder::ResolveAlwaysRelevantPastActorsLive();
+    }
 
     NextSwitchCountdown = NetDriver->ServerTravelPause;
     return true;

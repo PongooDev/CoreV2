@@ -20551,6 +20551,113 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     return true;
 }
 
+bool Finder::ResolveAlwaysRelevantPastActorsLive()
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset >= 0)
+    {
+        return Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset >= 0;
+    }
+    bSearched = true;
+
+    // CoreV2 #671. UReplicationGraphNode::GatherActorListsForConnection is PURE_VIRTUAL: its stub (the string's only
+    // function) in the base node's vtable gives the slot, UFortReplicationGraphNode_AlwaysRelevant_ForConnection's
+    // override is at it (9.00 CL-6337466 slot 0x4B, 0x16BB1F0; 8.51 0x160E300). 9.00's walks PastRelevantActors for the
+    // viewer's entry:
+    //   0x16BB624 lea rbx, [rdi+278h]; mov rax, [rbx+40h] (the heap data); movsxd rdx, dword ptr [rbx+48h] (ArrayNum);
+    //     ...; shl rdi, 4 (a 0x10 byte entry); ...; cmp [r15], rax (the entry's Connection)
+    //   0x16BB428 cmp byte ptr [rdi+2C8h], 0: InitializedPlayerState, right after the array
+    // 8.51's keeps one LastPawn there (cmp rsi, [r13+278h]; InitializedPlayerState at +0x280) and has neither.
+    const auto NotFound = [](const wchar_t* Why)
+    {
+        Log::Info(L"Finder: UFortReplicationGraphNode_AlwaysRelevant_ForConnection's PastRelevantActors not found ({}): its LastPawns are left as the build keeps them (#671)", Why);
+        return false;
+    };
+    const std::vector<uintptr_t> StubRefs = Finder::StringRefs(L"UReplicationGraphNode::GatherActorListsForConnection");
+    const uintptr_t Stub = StubRefs.size() == 1 ? Finder::FunctionStart(StubRefs[0]) : 0;
+    void** BaseVTable = CdoVTable(L"/Script/ReplicationGraph.ReplicationGraphNode");
+    void** NodeVTable = CdoVTable(L"/Script/FortniteGame.FortReplicationGraphNode_AlwaysRelevant_ForConnection");
+    const int32_t Index = Stub && BaseVTable ? Finder::VTableIndex(BaseVTable, reinterpret_cast<void*>(Stub), 0x400) : -1;
+    const uintptr_t Gather = NodeVTable && Index >= 0 ? reinterpret_cast<uintptr_t>(NodeVTable[Index]) : 0;
+    if (!Gather || Gather == Stub || !IsInText(Gather) || Finder::FunctionStart(Gather) != Gather)
+    {
+        return NotFound(L"no GatherActorListsForConnection of its own");
+    }
+
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Chunks = Finder::FunctionChunks(Gather);
+    // REX.W [+R] [+B] 8D, mod 10, rm not rsp: lea r64, [r64+disp32].
+    const auto LeaDisp32 = [](uintptr_t Address, uint8_t& OutDest, int32_t& OutDisp)
+    {
+        const uint8_t Rex = Byte(Address);
+        const uint8_t ModRM = Byte(Address + 2);
+        if ((Rex & 0xFA) != 0x48 || Byte(Address + 1) != 0x8D || (ModRM & 0xC0) != 0x80 || (ModRM & 7) == 4)
+        {
+            return false;
+        }
+        OutDest = static_cast<uint8_t>(((Rex & 4) << 1) | ((ModRM >> 3) & 7));
+        OutDisp = *reinterpret_cast<const int32_t*>(Address + 3);
+        return true;
+    };
+    // REX.W with B for Base, Opcode, mod 01 rm Base, disp8.
+    const auto LoadFrom = [](uintptr_t Begin, uintptr_t End, uint8_t Base, uint8_t Opcode, uint8_t Disp)
+    {
+        for (uintptr_t Address = Begin; Address + 4 <= End; ++Address)
+        {
+            const uint8_t Rex = Byte(Address);
+            const uint8_t ModRM = Byte(Address + 2);
+            if ((Rex & 0xF9) == 0x48 && (Rex & 1) == (Base >> 3) && Byte(Address + 1) == Opcode && (ModRM & 0xC7) == (0x40 | (Base & 7)) && Byte(Address + 3) == Disp)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    ptrdiff_t Offset = -1;
+    for (const auto& [Begin, End] : Chunks)
+    {
+        for (uintptr_t Address = Begin; Offset < 0 && Address + 7 <= End; ++Address)
+        {
+            uint8_t Dest = 0;
+            int32_t Disp = 0;
+            if (!LeaDisp32(Address, Dest, Disp) || Disp < 0x50 || Disp > 0x800)
+            {
+                continue;
+            }
+            const uintptr_t Next = Address + 7;
+            const uintptr_t Window = std::min<uintptr_t>(Next + 0x30, End);
+            // shl r64, 4: REX.W C1 /4 ib.
+            const bool bEntryShift = FindInstruction(Next, Window, { -1, 0xC1, -1, 0x04 }) != 0;
+            if (LoadFrom(Next, Window, Dest, 0x8B, 0x40) && LoadFrom(Next, Window, Dest, 0x63, 0x48) && bEntryShift)
+            {
+                Offset = Disp;
+            }
+        }
+    }
+    if (Offset < 0)
+    {
+        return NotFound(L"its GatherActorListsForConnection walks no inline array of 0x10 byte entries (8.51 and earlier keep one LastPawn)");
+    }
+    // cmp byte ptr [r64+Offset+0x50], 0 (80 /7 with disp32): the bool right after the array.
+    bool bFlagAfter = false;
+    const int32_t FlagDisp = static_cast<int32_t>(Offset + 0x50);
+    for (const auto& [Begin, End] : Chunks)
+    {
+        for (uintptr_t Address = Begin; !bFlagAfter && Address + 7 <= End; ++Address)
+        {
+            const uint8_t ModRM = Byte(Address + 1);
+            bFlagAfter = Byte(Address) == 0x80 && (ModRM & 0xF8) == 0xB8 && (ModRM & 7) != 4 && *reinterpret_cast<const int32_t*>(Address + 2) == FlagDisp && Byte(Address + 6) == 0x00;
+        }
+    }
+    if (!bFlagAfter)
+    {
+        return NotFound(L"no InitializedPlayerState right after the array");
+    }
+    Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset = Offset;
+    Log::Info(L"Finder: UFortReplicationGraphNode_AlwaysRelevant_ForConnection's PastRelevantActors +0x{:X} (GatherActorListsForConnection slot 0x{:X}, 0x{:X}): a destroyed pawn stops being an entry's LastPawn (#671)",
+        Offset, Index * 8, Gather - Finder::ImageBase());
+    return true;
+}
+
 namespace
 {
     // BeginSkydiving's server part, on the builds that run it for any controller (Natives::

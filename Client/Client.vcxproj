@@ -348,6 +348,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Camera\PlayerCameraManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Camera\FortPlayerCameraBase.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Camera\FortPlayerCameraZone.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortReplicationGraph.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortVisibilityManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldRecord.h" />
@@ -641,6 +642,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Camera\FortPlayerCameraZone.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortReplicationGraph.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\StatManager.cpp" />

@@ -3,6 +3,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AttributeSet.h"
+#include "Abilities/FortAbilitySet.h"
 #include "Athena/Mutators/FortAthenaMutator_GiveItemsAtGamePhaseStep.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -408,10 +409,12 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
     // mutators (8.30 to 9.00), the only way the server gives a gadget to a player without a pawn.
     //
     // A kept gadget after a respawn (#689, Playground without "Drop items when eliminated"): the player pawn's death
-    // (9.00 0x1752130, 8.51 0x16A04C0) resets the controller's applied ability sets (9.00 +0x2350, 8.51 +0x2168), but the
-    // set of applied items keeps the item, so ApplyGadgetItemAttributeSet skips it and the new pawn's ability system never
-    // gets the glider's FortGliderPackSet. Such an item gets RemoveGadgetData and then ApplyGadgetData, the same pair a
-    // drop and pick-up runs; the charges come back from the item entry's GenericAttributeValues.
+    // (9.00 0x1752130, 8.51 0x16A04C0, 9.10 CL-6573057 0x17D2E10) empties AppliedInGameModifierAbilitySetHandles, and
+    // the ability system (the player state's, which outlives the pawn) loses the ability set's grants: the glider's
+    // AS_Athena_Glider_Item and its GE_Athena_GliderPackEquipped, without which the glider doesn't deploy. Its
+    // FortGliderPackSet stays on that ability system and the item stays in the set of applied items, so nothing applies
+    // it again. An applied item whose gadget has an ability set that isn't in the map gets RemoveGadgetData and then
+    // ApplyGadgetData, the same pair a drop and pick-up runs; the charges come back from the entry's GenericAttributeValues.
     const ptrdiff_t ItemInstanceIdsOffset = Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds;
     AFortPawn* const Pawn = MyFortPawn;
     AFortInventory* Inventory = Role == ROLE_Authority && Pawn ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
@@ -422,7 +425,7 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
         return 0;
     }
     void* const InventoryOwner = Natives::UObject_GetInterfaceAddress(this, InventoryOwnerInterfaceClass);
-    UAbilitySystemComponent* const AbilitySystemComponent = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(Pawn));
+    const bool bCanReapply = Natives::UFortGadgetItemDefinition_RemoveGadgetData && UFortGadgetItemDefinition::HasAbilitySet() && HasAppliedInGameModifierAbilitySetHandles();
     if (!InventoryOwner)
     {
         return 0;
@@ -463,9 +466,8 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
             Pending.Add({ Item, false });
             continue;
         }
-        float Value = 0.0f;
-        if (Natives::UFortGadgetItemDefinition_RemoveGadgetData && AbilitySystemComponent
-            && !GetNumericAttributeBase(AbilitySystemComponent, static_cast<const TArray<FGameplayAttribute>&>(Gadget->TrackedAttributes)[0], Value))
+        const TAssetPtr<UFortAbilitySet>& AbilitySet = Gadget->AbilitySet;
+        if (bCanReapply && AbilitySet.ToStringReference().IsValid() && !HasItemInAppliedInGameModifierAbilitySetHandles(static_cast<FGuid>(Entry->ItemGuid)))
         {
             Pending.Add({ Item, true });
         }
@@ -485,6 +487,25 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
     }
 #endif
     return Applied;
+}
+
+bool AFortPlayerControllerZone::HasItemInAppliedInGameModifierAbilitySetHandles(const FGuid& ItemGuid) const
+{
+    UScriptStruct* const HandleStruct = HasAppliedInGameModifierAbilitySetHandles() ? FFortAbilitySetHandle::StaticStruct() : nullptr;
+    if (!HandleStruct)
+    {
+        return false;
+    }
+    const FScriptMapLayout Layout = FScriptMap::GetScriptLayout(sizeof(FGuid), alignof(FGuid), HandleStruct->GetStructureSize(), HandleStruct->GetMinAlignment());
+    const FScriptMap& Handles = AppliedInGameModifierAbilitySetHandles;
+    for (int32_t Index = 0; Index < Handles.GetMaxIndex(); ++Index)
+    {
+        if (Handles.IsValidIndex(Index) && *reinterpret_cast<const FGuid*>(Handles.GetData(Index, Layout)) == ItemGuid)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void AFortPlayerControllerZone::DestroyGadgetTrackedAttributeItem(const FGuid& ItemGuid, const UFortGadgetItemDefinition* GadgetItemDefinition)

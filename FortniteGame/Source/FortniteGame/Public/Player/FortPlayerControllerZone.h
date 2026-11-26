@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/ScriptMap.h"
 #include "FortGameState.h"
 #include "Player/FortPlayerController.h"
 #include "UObject/WeakObjectPtr.h"
@@ -34,6 +35,11 @@ class AFortPlayerControllerZone : public AFortPlayerController
     DefineUProperty(FGuid, GadgetTrackedAttributeItemInstanceId)
     static bool HasGadgetTrackedAttributeItemInstanceId() { return Member_GadgetTrackedAttributeItemInstanceId.IsAvailable(); }
     static ptrdiff_t GadgetTrackedAttributeItemInstanceIdOffset() { return Member_GadgetTrackedAttributeItemInstanceId.GetOffsetChecked(); }
+    // TMap<FGuid, FFortAbilitySetHandle> (Transient, reflected 7.40 to 9.10): the gadget items whose ability
+    // set ApplyGadgetItemAbilitySet applied, by item guid (9.00 +0x2350, 8.51 +0x2168). The player pawn's death (9.00
+    // 0x1752130) empties it; only RemoveGadgetItemAttributeSet takes an item out of the applied items' set.
+    DefineUProperty(FScriptMap, AppliedInGameModifierAbilitySetHandles)
+    static bool HasAppliedInGameModifierAbilitySetHandles() { return Member_AppliedInGameModifierAbilitySetHandles.IsAvailable(); }
 
 public:
     void ServerTriggerSetupTeleportCameraEvent_Implementation();
@@ -61,8 +67,11 @@ public:
     // Core's name: on the controller's new pawn, the gadget data of each world inventory gadget with tracked attributes
     // whose attribute set was never applied (it isn't in the controller's set of applied items), as
     // UFortGadgetItemDefinition::OnItemInstanceAdded applies it when the item comes with a pawn; after a respawn, the
-    // gadget data of each kept one whose attribute set the new pawn lacks (RemoveGadgetData first). Returns how many.
+    // gadget data of each kept one whose ability set the death took (RemoveGadgetData first). Returns how many.
     int32_t ApplyInventoryGadgetData();
+
+    // Epic's name (21.40's IFortInventoryOwnerInterface virtual): whether the item's ability set is applied.
+    bool HasItemInAppliedInGameModifierAbilitySetHandles(const FGuid& ItemGuid) const;
 
 private:
     static inline FWeakObjectPtr SetupTeleportOutCameraGameState;

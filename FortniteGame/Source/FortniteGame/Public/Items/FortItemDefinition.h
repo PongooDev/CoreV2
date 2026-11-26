@@ -11,6 +11,7 @@
 class AFortPlayerController;
 struct FFortItemEntry;
 class IFortInventoryOwnerInterface;
+class UFortAbilitySet;
 class UFortItem;
 class UFortWorldItem;
 class UGameplayAbility;
@@ -205,6 +206,11 @@ public:
     static ptrdiff_t GadgetPriorityOffset() { return Member_GadgetPriority.GetOffsetChecked(); }
     static ptrdiff_t AnimBPOverrideOffset() { return Member_AnimBPOverride.GetOffsetChecked(); }
     static ptrdiff_t FootstepBankOverrideOffset() { return Member_FootstepBankOverride.GetOffsetChecked(); }
+    // The ability set ApplyGadgetItemAbilitySet (9.00 0x17D5490) gives the holder, recorded by the item's guid in the
+    // controller's AppliedInGameModifierAbilitySetHandles (9.00's Athena_Glider_Item_BigTeamMode: AS_Athena_Glider_Item,
+    // whose only grant is GE_Athena_GliderPackEquipped). Only its path is read.
+    DefineUProperty(TAssetPtr<UFortAbilitySet>, AbilitySet)
+    static bool HasAbilitySet() { return Member_AbilitySet.IsAvailable(); }
     // From 4.0: the attributes of the gadget's AttributeSet that its item keeps (7.20's Athena_Glider_Item: the
     // FortGliderPackSet's CurrentCharges), and whether the item goes when one of them is used up (the constructor sets
     // it, 7.20 0x1115F70). AFortPlayerControllerZone::ApplyGadgetItemAttributeSet restores them from the item's entry

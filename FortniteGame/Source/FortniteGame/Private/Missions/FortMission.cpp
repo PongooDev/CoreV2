@@ -4,6 +4,7 @@
 #include "Creative/FortVolume.h"
 #include "AI/FortAIDirector.h"
 #include "Finder.h"
+#include "FortMissionTimerComponent.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Engine/World.h"
@@ -460,6 +461,68 @@ void AFortMission::HookNatives()
     }
 }
 
+void AFortMission::AddOrRemoveTimerTime_Implementation(float TimeToAdd)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    if (UFortMissionTimerComponent* Timer = TimerComponent)
+    {
+        Timer->AddOrRemoveTime(TimeToAdd);
+    }
+#endif
+}
+
+void AFortMission::AddOrRemoveTimerTimeHK(AFortMission* This, float TimeToAdd)
+{
+    This->AddOrRemoveTimerTime_Implementation(TimeToAdd);
+}
+
+void AFortMission::HookAddOrRemoveTimerTime()
+{
+    // 9.00 (CL-6337466): AddOrRemoveTimerTime_Implementation (0x1561B50, slot 0xC5) keeps the authority check and the
+    // TimerComponent (+0x3D0) load, then jumps to the empty function (0x32B4B0) where it called
+    // TimerComponent->AddOrRemoveTime; 8.51 (0x14BA850, +0x3E0) the same. So a Time Cheat moved the defense objective's
+    // timer but not the mission's (GenMission_TieredWaves' FortMissionTimer, the wave's end on the clients' HUD).
+    UFunction* Function = FindStaticFunction_AddOrRemoveTimerTime();
+    if (!Function || !HasTimerComponent() || !UFortMissionTimerComponent::CanAddOrRemoveTime())
+    {
+        return;
+    }
+    const int32_t Index = Finder::ImplementationIndex(Function);
+    UObject* MissionDefault = Index >= 0 ? StaticClass()->GetDefaultObject(false) : nullptr;
+    void* const Original = MissionDefault ? (*reinterpret_cast<void***>(MissionDefault))[Index] : nullptr;
+    const auto CallsStub = [](uintptr_t Instruction)
+    {
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Instruction);
+        if (Code[0] == 0xE8)
+        {
+            return Finder::IsStubFunction(Finder::RelativeTarget(Instruction, 1, 5));
+        }
+        return Code[0] == 0x0F && (Code[1] & 0xF0) == 0x80 && Finder::IsStubFunction(Finder::RelativeTarget(Instruction, 2, 6));
+    };
+    if (!Original || !Finder::TraceFind(reinterpret_cast<uintptr_t>(Original), 12, CallsStub))
+    {
+        if (Original)
+        {
+            Log::Info(L"Finder: AFortMission::AddOrRemoveTimerTime_Implementation (slot 0x{:X}) isn't stripped in this build", Index);
+        }
+        return;
+    }
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Original)
+        {
+            Hooks::SwapVTable(L"AFortMission::AddOrRemoveTimerTime_Implementation", VTable, Index, reinterpret_cast<void*>(&AddOrRemoveTimerTimeHK));
+        }
+    }
+}
+
 void AFortMission::HookVTables()
 {
     if (Natives::AFortMission_ObjectiveStatusUpdatedIndex < 0)
@@ -470,6 +533,9 @@ void AFortMission::HookVTables()
     {
         Finder::ResolveMissionBadgeLive(AFortMissionManager::EarnedBadgesArrayOffset());
     }
+
+    // After the finders above, which read AFortMission's vtable and stop at a slot outside the game's code.
+    HookAddOrRemoveTimerTime();
 
     if (Natives::AFortMission_CustomHandleMissionEventIndex < 0 && !Finder::ResolveMissionEventLive())
     {

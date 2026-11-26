@@ -47,6 +47,7 @@ class AFortMission : public AActor
     DefineUFunction(GetDaysRemainingBeforeOverPar)
     DefineUFunction(InitializeActorsForMission)
     DefineUFunction(SpawnAtPlacementActorsAsArray)
+    DefineUFunction(AddOrRemoveTimerTime)
 
 public:
     DefineUProperty(UFortMissionInfo*, MissionInfo)
@@ -82,6 +83,9 @@ public:
     void HandleDeferredMissionEvent(const FFortMissionEvent& MissionEvent);
     int32_t GetDaysRemainingBeforeOverPar();
     bool IsUnderPar();
+    // 8.20+: moves the mission's own timer (TimerComponent) by TimeToAdd seconds; Wargames' Time Cheats call it with the
+    // wave's WaveTimeToAdd. A BlueprintNativeEvent.
+    void AddOrRemoveTimerTime_Implementation(float TimeToAdd);
 
     DECLARE_FUNCTION(execGetAdditionalMissionSuccessBadges);
     DECLARE_FUNCTION(execGetAdditionalMissionCompletionMissionPoints);
@@ -96,6 +100,8 @@ private:
     static void CustomHandleMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
     static inline void (*HandleDeferredMissionEventOG)(AFortMission* This, const FFortMissionEvent& MissionEvent) = nullptr;
     static void HandleDeferredMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
+    static void AddOrRemoveTimerTimeHK(AFortMission* This, float TimeToAdd);
+    static void HookAddOrRemoveTimerTime();
 };
 
 class AFortAIPawn;

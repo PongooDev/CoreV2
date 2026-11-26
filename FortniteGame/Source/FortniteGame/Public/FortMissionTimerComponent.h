@@ -63,6 +63,8 @@ public:
     // defense timer). Stripped from the build's server code (the exec calls an empty function).
     void AddOrRemoveTime(float TimeToAdd);
     DECLARE_FUNCTION(execAddOrRemoveTime);
+    // Whether Core's AddOrRemoveTime can run in this build (8.20+, with 9.00's TimerData layout).
+    static bool CanAddOrRemoveTime();
 
     static void HookNatives();
 };

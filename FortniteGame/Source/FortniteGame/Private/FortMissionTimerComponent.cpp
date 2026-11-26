@@ -132,14 +132,20 @@ DEFINE_FUNCTION(UFortMissionTimerComponent::execAddOrRemoveTime)
     P_NATIVE_END;
 }
 
+bool UFortMissionTimerComponent::CanAddOrRemoveTime()
+{
+    return FindStaticFunction_AddOrRemoveTime() && Member_OnMissionTimerTimeAddedOrRemoved.IsAvailable() && Member_TimerData.IsAvailable()
+        && FMissionTimerData::HasLayout() && UKismetSystemLibrary::FindStaticFunction_K2_SetTimerDelegate()
+        && UKismetSystemLibrary::FindStaticFunction_K2_PauseTimerHandle();
+}
+
 void UFortMissionTimerComponent::HookNatives()
 {
     // 9.00 (CL-6337466): AddOrRemoveTime's exec (0x1A68420, folded with UFortCheatManager::execEncounterSetDifficultyLevel)
     // steps the float and calls an empty function (0x32B4B0), so Wargames' Time Cheats (TimeCollectible_C) took no time
     // off the wave's defense timer.
     UFunction* Function = FindStaticFunction_AddOrRemoveTime();
-    if (!Function || !Member_OnMissionTimerTimeAddedOrRemoved.IsAvailable() || !Member_TimerData.IsAvailable() || !FMissionTimerData::HasLayout()
-        || !UKismetSystemLibrary::FindStaticFunction_K2_SetTimerDelegate() || !UKismetSystemLibrary::FindStaticFunction_K2_PauseTimerHandle())
+    if (!Function || !CanAddOrRemoveTime())
     {
         return;
     }

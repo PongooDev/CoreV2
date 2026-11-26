@@ -3,9 +3,11 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "Configuration.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/Mutators/FortAthenaMutator.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameMode.h"
@@ -925,6 +927,60 @@ void AFortPlayerPawn::HookManualReviveNative()
     }
     Function->SetNativeFunc(&execManualReviveFromDBNO);
     Log::Info(L"Hook AFortPlayerPawn::ManualReviveFromDBNO: native (the build's exec +0x{:X} calls the stub +0x{:X})", Exec - Finder::ImageBase(), ExecNative - Finder::ImageBase());
+}
+
+void AFortPlayerPawn::UpdateGameStateModifiedGravity(float GravityMultiplier)
+{
+#if WITH_SERVER_CODE
+    // 🟡 The body is inferred from its name and its caller: the gravity the game state gives a pawn (9.00 CL-6337466
+    // 0x1013770 asks the game state's mutators, 0x1048C80, then calls SetGravityJumpMultipliers), 1.0 without a gravity
+    // mutator, times GravityMultiplier, set as the leap's SetGravityMultiplier sets it. Core's game state answer reads
+    // the playlist's gravity mutator only, not AFortAthenaMutator_TeamSettings' per-team GravityData.
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    float GravityZScale = 1.0f;
+    UWorld* const World = static_cast<const UObject*>(this)->GetWorld();
+    const AFortGameStateAthena* const GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    FGravityMovementData Gravity;
+    if (GameState && GameState->GetMutatorGravityData(Gravity))
+    {
+        GravityZScale = Gravity.GravityZScale;
+    }
+    SetGravityMultiplier(GravityZScale * GravityMultiplier);
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execUpdateGameStateModifiedGravity)
+{
+    P_GET_PROPERTY(UFloatProperty, Z_Param_GravityMultiplier);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->UpdateGameStateModifiedGravity(Z_Param_GravityMultiplier);
+    P_NATIVE_END;
+}
+
+void AFortPlayerPawn::HookGameStateModifiedGravityNative()
+{
+    // 8.20 on. 9.00 (CL-6337466): the exec (0x1A68420, folded with UFortCheatManager::execEncounterSetDifficultyLevel)
+    // steps the float and calls the empty function; 9.10 (CL-6573057 0x1B00840) the same. AFortPawn::SetGravityMultiplier
+    // is intact, so the leap's down slash left the wielder's GravityZScale raised until a respawn (CoreV2 #695). Builds
+    // without it, or that keep it, are left alone.
+    UFunction* const Function = FindStaticFunction_UpdateGameStateModifiedGravity();
+    if (!Function || !FindStaticFunction_SetGravityMultiplier() || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        return;
+    }
+    const uint8_t* const NativeCall = Finder::ImplementationCall(Function);
+    const uintptr_t Native = NativeCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5) : 0;
+    if (!Finder::IsStubFunction(Native))
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::UpdateGameStateModifiedGravity is native in this build");
+        return;
+    }
+    Function->SetNativeFunc(&execUpdateGameStateModifiedGravity);
+    Log::Info(L"Hook AFortPlayerPawn::UpdateGameStateModifiedGravity: native (the build's exec calls the stub +0x{:X})", Native - Finder::ImageBase());
 }
 
 void AFortPlayerPawn::HookNatives()

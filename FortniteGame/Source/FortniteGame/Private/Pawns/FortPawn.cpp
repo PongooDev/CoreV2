@@ -164,6 +164,17 @@ bool AFortPawn::SetGravityJumpMultipliers(float NewGravityVal, float NewVehicleG
         && Params.Set(L"NewJumpHorizontalAcceleration", NewJumpHorizontalAcceleration) && Params.Set(L"NewJumpHorizontalVelocity", NewJumpHorizontalVelocity) && Params.Call(this);
 }
 
+bool AFortPawn::SetGravityMultiplier(float NewGravityVal)
+{
+    UFunction* const Function = FindStaticFunction_SetGravityMultiplier();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    return Params.Set(L"NewGravityVal", NewGravityVal) && Params.Call(this);
+}
+
 bool AFortPawn::SetMovementSpeedMultiplier(float NewMovementSpeedVal)
 {
     UFunction* const Function = FindStaticFunction_SetMovementSpeedMultiplier();

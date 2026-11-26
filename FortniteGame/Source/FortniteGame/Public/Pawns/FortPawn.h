@@ -57,6 +57,7 @@ class AFortPawn : public APawn
     DefineUFunction(SetHealth)
     DefineUFunction(SetMaxHealth)
     DefineUFunction(SetGravityJumpMultipliers)
+    DefineUFunction(SetGravityMultiplier)
     DefineUFunction(SetMovementSpeedMultiplier)
     DefineUFunction(MovingEmoteStopped)
 
@@ -155,6 +156,9 @@ public:
     // CL-4834550 native 0x139B190), as AFortGameModeAthena::FinishRestartPlayer (0xD1A0B0) gives a restarted player's
     // pawn the game state's gravity mutator's values. False when this build has no such UFunction.
     bool SetGravityJumpMultipliers(float NewGravityVal, float NewVehicleGravityVal, float NewJumpZ, float NewJumpHorizontalAcceleration, float NewJumpHorizontalVelocity);
+    // 6.01 on: Epic's AFortPawn::SetGravityMultiplier(NewGravityVal), the base of the pawn's FortMovementSet GravityZScale
+    // on its +0xC70 ability system (9.00 CL-6337466 native 0x176D1C0). False when this build has no such UFunction.
+    bool SetGravityMultiplier(float NewGravityVal);
     // Server (6.01 on): Epic's AFortPawn::SetMovementSpeedMultiplier(NewMovementSpeedVal), the pawn's movement speed
     // multiplier (9.00 CL-6337466 native 0xffff800825bc0490 execs it: its +0xC70 ability system takes the value).
     // "cheat speed" (#677) uses it where it exists. False when this build has no such UFunction.

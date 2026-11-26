@@ -59,6 +59,8 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(PopFootstepBankOverride)
     DefineUFunction(OnRep_AnimBPOverride)
     DefineUFunction(OnRep_FootstepBankOverride)
+    // 8.20 on.
+    DefineUFunction(UpdateGameStateModifiedGravity)
 
 public:
     DefineUProperty(FGuid, LastEquippedWeaponGUID)
@@ -171,6 +173,13 @@ public:
     void ManualReviveFromDBNO();
     DECLARE_FUNCTION(execManualReviveFromDBNO);
     static void HookManualReviveNative();
+
+    // 8.20+: the pawn's gravity, the game state's gravity times GravityMultiplier. GAB_Melee_Tool_LeapAttack_Athena (the
+    // Infinity Blade's leap) raises it with SetGravityMultiplier for its down slash and puts it back with this (1.0).
+    // Stripped from the build's server code.
+    void UpdateGameStateModifiedGravity(float GravityMultiplier);
+    DECLARE_FUNCTION(execUpdateGameStateModifiedGravity);
+    static void HookGameStateModifiedGravityNative();
     // Both DLLs, before the detours are enabled: TryToAutoPickupWeapon's guard where the tick reaches it (7.40, 8.00).
     static void Hook();
 

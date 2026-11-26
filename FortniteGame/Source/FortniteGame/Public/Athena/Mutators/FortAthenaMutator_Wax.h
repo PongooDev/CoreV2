@@ -30,4 +30,12 @@ class AFortAthenaMutator_Wax : public AFortAthenaMutator
 
 public:
     static AFortAthenaMutator_Wax* GetCurrent(UWorld* World);
+
+    // The game state's ask of each mutator once a client says its pawn has loaded (ServerClientPawnLoaded). Core's: a
+    // player bot has no client, so its new pawn is told here (FCoreAthenaBotController::SpawnPawnAt); the mutator reads
+    // only the controller's Pawn and its team's controllers.
+    void FortGameStateAthena_OnClientPawnLoaded(AController* Controller);
+
+    // From 9.01: the slot of FortGameStateAthena_OnClientPawnLoaded. Nothing on builds without the mutator.
+    static void HookNatives();
 };

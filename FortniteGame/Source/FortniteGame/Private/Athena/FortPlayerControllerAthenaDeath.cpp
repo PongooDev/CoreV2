@@ -598,6 +598,23 @@ void AFortPlayerControllerAthena::OnPawnDied(AFortPlayerPawn* DiedPawn, float Da
         {
             DeathInfo.FinisherOrDowner = AthenaState;
         }
+        // The downer (from 9.00), which only the knock stores (9.01's DBNO handling, 0x10BA540: the downer's player state, as
+        // FinisherOrDowner). Wick's Bounty's CommonDeadPawn pays the dead player's tokens to it as the pawn's death is
+        // broadcast, after this handler (0x10A9E30); without one it drops them as a pickup. Core's: an elimination stores
+        // its eliminator there as the knock stores its downer (a knocked player's, the knock's), and a death nobody caused
+        // none.
+        if (FDeathInfo::HasDowner())
+        {
+            AController* const Eliminator = Downer ? Downer : Instigator;
+            if (Eliminator)
+            {
+                DeathInfo.Downer = reinterpret_cast<AActor*>(AthenaStateOf(Eliminator));
+            }
+            else if (!DeadPawn || !DeadPawn->bIsDBNO)
+            {
+                DeathInfo.Downer = nullptr;
+            }
+        }
         if (FDeathInfo::HasDeathLocation() && DeadPawn)
         {
             DeathInfo.DeathLocation = DeadPawn->GetTransform().GetLocation();

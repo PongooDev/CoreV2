@@ -1086,6 +1086,8 @@ namespace Natives
     // 8.50: AFortGameModeAthena's (0xFA3A20, slot 0x190): StartingItems, then each mutator's
     // FortGameModeAthena_GetInventoryOverride. Finder::ResolveGetStartingItemsLive.
     inline int32_t AFortGameModeZone_GetStartingItemsIndex = -1;
+    // 9.01: Wick's Bounty's FortGameStateAthena_OnClientPawnLoaded (slot 0x116, 0x110ABF0). Finder::ResolveWaxOnClientPawnLoadedLive.
+    inline int32_t AFortAthenaMutator_Wax_OnClientPawnLoadedIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
     inline int32_t UNetConnection_TickIndex = -1;

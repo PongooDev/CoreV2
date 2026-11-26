@@ -2,6 +2,10 @@
 #include "Athena/Mutators/FortAthenaMutator_Wax.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Engine/World.h"
+#include "Finder.h"
+#include "Log.h"
+#include "Natives.h"
+#include "ObjectLayout.h"
 #include "Templates/Casts.h"
 
 AFortAthenaMutator_Wax* AFortAthenaMutator_Wax::GetCurrent(UWorld* World)
@@ -21,4 +25,25 @@ AFortAthenaMutator_Wax* AFortAthenaMutator_Wax::GetCurrent(UWorld* World)
         }
     }
     return nullptr;
+}
+
+void AFortAthenaMutator_Wax::FortGameStateAthena_OnClientPawnLoaded(AController* Controller)
+{
+#if WITH_SERVER_CODE
+    if (Controller && Natives::AFortAthenaMutator_Wax_OnClientPawnLoadedIndex >= 0)
+    {
+        CallVirtual<uint8_t>(this, Natives::AFortAthenaMutator_Wax_OnClientPawnLoadedIndex, Controller);
+    }
+#endif
+}
+
+void AFortAthenaMutator_Wax::HookNatives()
+{
+#if WITH_SERVER_CODE
+    if (!StaticClass())
+    {
+        return;
+    }
+    Finder::ResolveWaxOnClientPawnLoadedLive();
+#endif
 }

@@ -10343,6 +10343,36 @@ bool Finder::ResolvePickupGivenLive()
     return true;
 }
 
+bool Finder::ResolveWaxOnClientPawnLoadedLive()
+{
+    // 9.01 (CL-6428087): Wick's Bounty's override of FortGameStateAthena_OnClientPawnLoaded (slot 0x116, 0x110ABF0), which
+    // the game state asks of each mutator (slot 0x123, 0x105E520) from AFortPlayerController::ServerClientPawnLoaded_
+    // Implementation (0x17BC580). It is the only reference to "&AFortAthenaMutator_Wax::CommonDeadPawn" (AddDynamic's
+    // name for the pawn's OnFortPlayerDied).
+    if (Natives::AFortAthenaMutator_Wax_OnClientPawnLoadedIndex >= 0)
+    {
+        return true;
+    }
+    void** WaxVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_Wax");
+    if (!WaxVTable)
+    {
+        return false;
+    }
+    for (const uintptr_t Ref : Finder::StringRefs(L"&AFortAthenaMutator_Wax::CommonDeadPawn"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const int32_t Index = FirstVTableIndex(WaxVTable, Function);
+        if (Index >= 0)
+        {
+            Natives::AFortAthenaMutator_Wax_OnClientPawnLoadedIndex = Index;
+            Log::Info(L"Finder: AFortAthenaMutator_Wax::FortGameStateAthena_OnClientPawnLoaded is slot 0x{:X} (0x{:X}, binds CommonDeadPawn)", Index, Function - Finder::ImageBase());
+            return true;
+        }
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_Wax::FortGameStateAthena_OnClientPawnLoaded not found (no vtable function binds CommonDeadPawn)");
+    return false;
+}
+
 bool Finder::ResolveGetStartingItemsLive(ptrdiff_t StartingItemsOffset)
 {
     // AFortGameModeAthena::GetStartingItems (8.50 0xFA3A20, slot 0x190; 21.40's AFortGameModeZone virtual

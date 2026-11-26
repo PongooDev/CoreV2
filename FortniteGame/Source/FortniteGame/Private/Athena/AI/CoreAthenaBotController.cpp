@@ -1854,6 +1854,12 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     // The playlist's items, as a player's new pawn comes with them (CoreV2 #638).
     GiveStartingItems(!bGivenFirstSpawnItems);
     bGivenFirstSpawnItems = true;
+    // 9.01's Wick's Bounty binds the token payout (CommonDeadPawn) to a new pawn when its client says the pawn has loaded
+    // (ServerClientPawnLoaded, through the game state's FortGameStateAthena_OnClientPawnLoaded); a bot has no client.
+    if (AFortAthenaMutator_Wax* Wax = AFortAthenaMutator_Wax::GetCurrent(World))
+    {
+        Wax->FortGameStateAthena_OnClientPawnLoaded(reinterpret_cast<AController*>(AIController));
+    }
 
     // The harvesting tool first (Core-held, 8.30's weapon list keeps the bot's weapons on its controller).
     bPickaxeEquipped = false;

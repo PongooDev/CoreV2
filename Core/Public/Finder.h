@@ -632,6 +632,9 @@ namespace Finder
     // AFortGameModeZone::GetStartingItems' slot (Natives::AFortGameModeZone_GetStartingItemsIndex): Battle Royale's game mode's
     // override, the one virtual that copies StartingItems.
     bool ResolveGetStartingItemsLive(ptrdiff_t StartingItemsOffset);
+    // AFortAthenaMutator_Wax's FortGameStateAthena_OnClientPawnLoaded (Natives::AFortAthenaMutator_Wax_OnClientPawnLoadedIndex):
+    // the slot of the one function binding CommonDeadPawn. False on builds without Wick's Bounty.
+    bool ResolveWaxOnClientPawnLoadedLive();
     // AFortPlayerState's home actor setter (Natives::AFortPlayerState_SetHomeActor), the call in
     // AFortGameMode::SpawnDefaultPawnFor_Implementation that both reads and writes the player state's HomeActor.
     bool ResolveSetHomeActorLive(ptrdiff_t HomeActorOffset);

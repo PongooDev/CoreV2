@@ -44,6 +44,10 @@ struct FDeathInfo
 {
     DefineUnrealStruct(FDeathInfo, FortniteGame)
     DefineUProperty(AActor*, FinisherOrDowner)
+    // Who downed the player (from 9.00): the knock (9.01's DBNO handling 0x10BA540) stores the downer's player state as
+    // FinisherOrDowner and Downer both. Wick's Bounty's CommonDeadPawn (9.01 0x10FED40) pays the dead player's tokens to
+    // it, and clears it on the other player states naming the dead one (0x10B7610).
+    DefineUProperty(AActor*, Downer)
     DefineUProperty(bool, bDBNO)
     // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
     DefineUProperty(uint8_t, DeathCause)
@@ -68,6 +72,7 @@ struct FDeathInfo
     DefineUProperty(FGameplayTagContainer, DeathTags)
 
 public:
+    static bool HasDowner() { return Member_Downer.IsAvailable(); }
     static bool HasDistance() { return Member_Distance.IsAvailable(); }
     static bool HasDeathLocation() { return Member_DeathLocation.IsAvailable(); }
     static bool HasInitialized() { return Member_bInitialized.IsAvailable(); }

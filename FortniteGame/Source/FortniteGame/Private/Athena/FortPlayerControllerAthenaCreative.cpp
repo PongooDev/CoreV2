@@ -1014,6 +1014,19 @@ DEFINE_FUNCTION(AFortPlayerControllerAthena::execMoveToolRemoved)
 namespace
 {
     UFunction* CreativeModeEnabledChangedHandler = nullptr;
+
+    // TSoftObjectPtr::Get as Epic's: the weak pointer, else the object the path names if it is in memory. Core's
+    // TAssetPtr::Get reads only the weak pointer, which nothing in 9.00 fills for CreativeMoveToolItemDefinition (#683:
+    // the grant and the removal found no phone and did nothing).
+    UFortWorldItemDefinition* GetCreativeMoveToolItemDefinition(const TAssetPtr<UFortWorldItemDefinition>& Reference)
+    {
+        if (UFortWorldItemDefinition* Loaded = Reference.Get())
+        {
+            return Loaded;
+        }
+        const FStringAssetReference& Path = Reference.ToStringReference();
+        return Path.IsValid() ? FindObject<UFortWorldItemDefinition>(nullptr, *Path.ToString()) : nullptr;
+    }
 }
 
 void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
@@ -1022,7 +1035,7 @@ void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
     // Core's (no build has the body): the phone once its definition is in, given as 8.51's Athena_PlayerController's
     // GrantItem gives it (GiveItemToInventoryOwner, one, notified, level -1), unless the player has it already, then put
     // in its slot by the owning client.
-    UFortWorldItemDefinition* Phone = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(CreativeMoveToolItemDefinition).Get();
+    UFortWorldItemDefinition* Phone = GetCreativeMoveToolItemDefinition(CreativeMoveToolItemDefinition);
     Reflection::FParams Enabled(FindStaticFunction_IsCreativeModeEnabled(), true);
     if (Role != ROLE_Authority || !Phone || !Enabled.Call(this) || !Enabled.Take<bool>(L"ReturnValue"))
     {
@@ -1042,6 +1055,7 @@ void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
     {
         UFortKismetLibrary::K2_GiveItemToPlayer(this, Phone, 1, true, -1);
     }
+    Log::Info(L"Creative: {} may edit their island: {} the Creative phone ({})", PlayerNameOf(this), bHasPhone ? L"keeps" : L"gets", Phone->GetName().ToStdString());
     Reflection::FParams Slot(FindStaticFunction_ClientEnsureCreativePhoneIsInProperSlot(), true);
     Slot.Call(this);
 #endif
@@ -1066,9 +1080,10 @@ void AFortPlayerControllerAthena::HandleCreativeModeEnabledChanged(bool bIsEnabl
     if (!bIsEnabled)
     {
         // As 8.51's RevokeItem (K2_RemoveItemFromPlayer, all of them, forced).
-        if (UFortWorldItemDefinition* Phone = PhoneReference.Get())
+        if (UFortWorldItemDefinition* Phone = GetCreativeMoveToolItemDefinition(PhoneReference))
         {
             UFortKismetLibrary::K2_RemoveItemFromPlayer(this, Phone, -1, true);
+            Log::Info(L"Creative: {} may no longer edit here: the Creative phone ({}) is taken if they have it", PlayerNameOf(this), Phone->GetName().ToStdString());
         }
         return;
     }

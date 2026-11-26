@@ -301,7 +301,12 @@ namespace
 
 void UObjectInteractionBehavior::StartCreativeInteractionOnServer()
 {
-    Reflection::FParams Params(FindStaticFunction_StartCreativeInteractionOnServer(), true);
+    // A BlueprintNativeEvent: the UHT thunk calls the object's own version (FindFunctionChecked by name), as 8.51's
+    // StartInteracting did (0x19B8D10). 9.00's CreativeInteraction_MoveObjectsFreely overrides it to spawn the selection's
+    // previews (B_CreativeMoveTool_Athena's ServerSpawnPreview), what shows the copied props blue (#681).
+    UFunction* Base = FindStaticFunction_StartCreativeInteractionOnServer();
+    UFunction* Own = Base ? FindFunction(Base->GetFName()) : nullptr;
+    Reflection::FParams Params(Own ? Own : Base, true);
     Params.Call(this);
 }
 

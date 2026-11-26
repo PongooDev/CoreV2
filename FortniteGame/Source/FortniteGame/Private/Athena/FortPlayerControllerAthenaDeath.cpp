@@ -230,6 +230,41 @@ void AFortGameModeAthena::SendOutliveStatEvents(AFortPawn* DeadPawn)
     }
 }
 
+// 7.00+ Creative's "Start or join a Creative server" (7.10's quest_br_fdf_play_creative_mode) counts
+// complete_athena_creative_mode: an AthenaRank row whose context is Athena.Creative, Playlist_PlaygroundV2's
+// GameplayTagContainer. AthenaRank is the event of a player's finished match, and 7.10 keeps no sender of it: none of
+// its 16 SendStatEventWithTags call sites (each a call of the stripped nullsub) passes AthenaRank (0x1A). Battle
+// Royale's are counted by Core-Backend from the match's results, which a Creative match never has (no place), so the
+// event is sent here, as the player's match ends by their leaving the server, flushed while their controller is still
+// there (AController::Destroyed's CleanupPlayerState destroys the player state before the controller goes).
+void AFortGameModeAthena::SendCreativeRankStatEvent(AFortPlayerStateAthena* PlayerState)
+{
+#if WITH_SERVER_CODE
+    if (!PlayerState || !AFortPlayerControllerAthena::IsCreativeMatch(this))
+    {
+        return;
+    }
+    const EFortQuestObjectiveStatEvent AthenaRank{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"AthenaRank") };
+    if (static_cast<uint8_t>(AthenaRank) == Reflection::InvalidEnumValue)
+    {
+        return;
+    }
+    AFortPlayerController* Controller = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(PlayerState->GetOwner()));
+    UFortRegisteredPlayerInfo* PlayerInfo = Controller ? static_cast<UFortRegisteredPlayerInfo*>(Controller->MyPlayerInfo) : nullptr;
+    UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
+    if (!QuestManager)
+    {
+        Log::Info(L"Quests: a player left Creative without a quest manager, no AthenaRank event");
+        return;
+    }
+    const FGameplayTagContainer NoTargetTags;
+    FGameplayTagContainer SourceTags;
+    FGameplayTagContainer ContextTags;
+    QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
+    QuestManager->SendStatEvent(AthenaRank, nullptr, NoTargetTags, SourceTags, ContextTags, 1, true);
+#endif
+}
+
 void AFortPlayerControllerAthena::HookVTables()
 {
 #if WITH_SERVER_CODE

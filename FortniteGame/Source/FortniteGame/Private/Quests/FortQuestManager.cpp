@@ -962,7 +962,10 @@ namespace
             const bool bPlayerTarget = Targets.size() == 1 && Targets[0] == FName(L"Homebase.Class", FNAME_Find);
             return SourceTags.ToStdString() == L"Homebase.Class" && bPlayerTarget && Condition.Len() == 0;
         }
-        return EFortQuestObjectiveStatEvent{ Type }.ToString().ends_with(L"AthenaRank");
+        // A Creative match has no results (no place), so its AthenaRank (context Athena.Creative) is the quest manager's
+        // (AFortGameModeAthena::SendCreativeRankStatEvent, #676).
+        const FString& ContextTags = Row->ContextTags;
+        return EFortQuestObjectiveStatEvent{ Type }.ToString().ends_with(L"AthenaRank") && !EqualsIgnoreCase(ContextTags.ToStdString(), L"Athena.Creative");
     }
 
     // The pending progress of the objectives Core-Backend counts from the match's results is held back, not sent, and
@@ -1655,7 +1658,13 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         return;
     }
     // Playground (bIgnoreDefaultQuests): the match advances no challenge, so nothing reaches the profile (CoreV2 #344).
-    if (IgnoresDefaultQuests(GameMode))
+    // Creative (Playlist_PlaygroundV2) sets it too, yet has challenges of its own (#676): 7.10's
+    // AFortGameStateAthena::GetAthenaPlaylistContextTags (0xC6A870) gives an ignoring playlist its GameplayTagContainer
+    // (Athena.Creative) and removes the four team size tags (0xF36970's +0x1028, +0x1030, +0x1038, +0x1050), so the
+    // battle pass's Athena.Playlist objectives don't match there while complete_athena_creative_mode and
+    // use_tool_creative_mode (context Athena.Creative) do. Creative's events go through with those tags alone.
+    const bool bIgnoresDefaultQuests = IgnoresDefaultQuests(GameMode);
+    if (bIgnoresDefaultQuests && !AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
     {
         static bool bLoggedIgnored = false;
         if (!bLoggedIgnored)
@@ -1694,9 +1703,12 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         }
         return;
     }
-    GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;
-    GameMode->AddPlaylistContextTag(EventContextTags);
+    if (!bIgnoresDefaultQuests)
+    {
+        GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
+        GameMode->AddPlaylistContextTag(EventContextTags);
+    }
     bLastEventFlushed = false;
     SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, EventTargetTags, EventSourceTags, EventContextTags, Count, bFlush);
 

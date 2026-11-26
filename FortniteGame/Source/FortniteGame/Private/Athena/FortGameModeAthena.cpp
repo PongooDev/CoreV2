@@ -13,6 +13,7 @@
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
+#include "Athena/Mutators/FortAthenaMutator_Wax.h"
 #include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
@@ -726,10 +727,14 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // (GiveStartingItems). The same answer comes from every inventory override mutator with a loadout (CoreV2 #643):
     // Slide's grappler, Blades' sword, Close Encounters' jetpack (InventoryUpdateOverride Always). Only in a match with
     // one; the slot is found from 8.50 (AFortAthenaMutator_Ashton::HookNatives).
+    // 9.01's Wick's Bounty answers it too (AFortAthenaMutator_Wax's, 0x11095A0): the answer adds the player to the
+    // mutator's PlayerData with LivesToStartPlayerWith lives and gives them TokensToStartWith tokens (4 in squads); it
+    // adds no item. Without it a player had no lives (one death took them out) and no tokens to carry or win with.
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
     UWorld* World = GetWorld();
     AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-    if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !AFortAthenaMutator_InventoryOverride::HasActiveLoadouts(GameState))
+    const bool bWax = AFortAthenaMutator_Wax::GetCurrent(World) != nullptr;
+    if (!PlayerController || !AFortGameModeZone::HasGetStartingItems() || !(bWax || AFortAthenaMutator_InventoryOverride::HasActiveLoadouts(GameState)))
     {
         return;
     }
@@ -737,7 +742,8 @@ void AFortGameModeAthena::GiveMutatorStartingItems(AController* NewPlayer, bool 
     // Core's: bInitialSpawn true at the aircraft's exit, the match's first spawn after the warmup.
     GetStartingItems(Items, bInitialSpawn, NewPlayer);
     PlayerController->GiveStartingItems(Items);
-    Log::Info(L"Battle Royale: {} takes the playlist's loadout with its new pawn ({} starting items{})", NewPlayer->GetName().ToStdString(), Items.Num(), bInitialSpawn ? L", leaving the aircraft" : L"");
+    Log::Info(L"Battle Royale: {} takes the playlist's {} with its new pawn ({} starting items{})", NewPlayer->GetName().ToStdString(), bWax ? L"tokens and lives" : L"loadout",
+        Items.Num(), bInitialSpawn ? L", leaving the aircraft" : L"");
     Items.Empty();
 #endif
 }

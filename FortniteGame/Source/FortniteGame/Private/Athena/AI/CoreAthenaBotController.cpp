@@ -32,6 +32,7 @@
 #include "Athena/Mutators/FortAthenaMutator.h"
 #include "Athena/Mutators/FortAthenaMutator_Ashton.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
+#include "Athena/Mutators/FortAthenaMutator_Wax.h"
 #include "Engine/AssetManager.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
@@ -5476,6 +5477,17 @@ void FCoreAthenaBotController::GiveStartingItems(bool bInitialSpawn)
     if (!GameState)
     {
         return;
+    }
+    // 9.01's Wick's Bounty: the mutator's answer adds the bot to its PlayerData (its lives) and gives it TokensToStartWith
+    // tokens, as for a player (AFortGameModeAthena::GiveMutatorStartingItems); the answer reads only the controller's
+    // player state and adds no item. Asked through the game mode's own GetStartingItems: in 9.01 only Wick's Bounty and
+    // the loadout mutators (handled below) answer it, so not with a loadout up.
+    if (AAIController* AIController = Controller.Get(); AIController && AFortAthenaMutator_Wax::GetCurrent(World) && AFortGameModeZone::HasGetStartingItems()
+        && !AFortAthenaMutator_InventoryOverride::HasActiveLoadouts(GameState))
+    {
+        TStructArray<FItemAndCount> StartingItems;
+        GameMode->GetStartingItems(StartingItems, bInitialSpawn, reinterpret_cast<AController*>(AIController));
+        StartingItems.Empty();
     }
     TArray<const FItemAndCount*> Items;
     UClass* const OverrideClass = AFortAthenaMutator_InventoryOverride::StaticClass();

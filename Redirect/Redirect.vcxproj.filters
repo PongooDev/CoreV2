@@ -1522,6 +1522,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Goose.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Wax.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_SpecialEvent.h">
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_GiveItemsAtGamePhase.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
@@ -2362,6 +2365,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Goose.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Wax.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_SpecialEvent.cpp">

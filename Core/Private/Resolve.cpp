@@ -20600,6 +20600,10 @@ bool Finder::ResolveAlwaysRelevantPastActorsLive()
     //   0x16BB624 lea rbx, [rdi+278h]; mov rax, [rbx+40h] (the heap data); movsxd rdx, dword ptr [rbx+48h] (ArrayNum);
     //     ...; shl rdi, 4 (a 0x10 byte entry); ...; cmp [r15], rax (the entry's Connection)
     //   0x16BB428 cmp byte ptr [rdi+2C8h], 0: InitializedPlayerState, right after the array
+    // 9.01 (CL-6428087, 0x16BECE0) makes it a plain TArray, as 21.40 has it, and takes the node in r12:
+    //   0x16BF122 lea rbx, [r12+278h]; mov r15, [rbx] (the data); movsxd rdx, dword ptr [rbx+8] (ArrayNum); ...;
+    //     shl rdi, 4; ...; cmp [r15], rcx
+    //   0x16BEF27 cmp byte ptr [r12+288h], 0: InitializedPlayerState, right after the array
     // 8.51's keeps one LastPawn there (cmp rsi, [r13+278h]; InitializedPlayerState at +0x280) and has neither.
     const auto NotFound = [](const wchar_t* Why)
     {
@@ -20618,17 +20622,23 @@ bool Finder::ResolveAlwaysRelevantPastActorsLive()
     }
 
     const std::vector<std::pair<uintptr_t, uintptr_t>> Chunks = Finder::FunctionChunks(Gather);
-    // REX.W [+R] [+B] 8D, mod 10, rm not rsp: lea r64, [r64+disp32].
-    const auto LeaDisp32 = [](uintptr_t Address, uint8_t& OutDest, int32_t& OutDisp)
+    // REX.W [+R] [+B] 8D, mod 10: lea r64, [r64+disp32]; rm 100 only as the SIB 24 of a base without an index (r12).
+    const auto LeaDisp32 = [](uintptr_t Address, uint8_t& OutDest, int32_t& OutDisp, uintptr_t& OutNext)
     {
         const uint8_t Rex = Byte(Address);
         const uint8_t ModRM = Byte(Address + 2);
-        if ((Rex & 0xFA) != 0x48 || Byte(Address + 1) != 0x8D || (ModRM & 0xC0) != 0x80 || (ModRM & 7) == 4)
+        if ((Rex & 0xFA) != 0x48 || Byte(Address + 1) != 0x8D || (ModRM & 0xC0) != 0x80)
+        {
+            return false;
+        }
+        const bool bSib = (ModRM & 7) == 4;
+        if (bSib && Byte(Address + 3) != 0x24)
         {
             return false;
         }
         OutDest = static_cast<uint8_t>(((Rex & 4) << 1) | ((ModRM >> 3) & 7));
-        OutDisp = *reinterpret_cast<const int32_t*>(Address + 3);
+        OutDisp = *reinterpret_cast<const int32_t*>(Address + (bSib ? 4 : 3));
+        OutNext = Address + (bSib ? 8 : 7);
         return true;
     };
     // REX.W with B for Base, Opcode, mod 01 rm Base, disp8.
@@ -20645,22 +20655,49 @@ bool Finder::ResolveAlwaysRelevantPastActorsLive()
         }
         return false;
     };
+    // REX.W with B for Base, Opcode, mod 00 rm Base (not rsp, rbp, r12 or r13): mov r64, [Base].
+    const auto LoadFromBase = [](uintptr_t Begin, uintptr_t End, uint8_t Base, uint8_t Opcode)
+    {
+        if ((Base & 7) == 4 || (Base & 7) == 5)
+        {
+            return false;
+        }
+        for (uintptr_t Address = Begin; Address + 3 <= End; ++Address)
+        {
+            const uint8_t Rex = Byte(Address);
+            const uint8_t ModRM = Byte(Address + 2);
+            if ((Rex & 0xF9) == 0x48 && (Rex & 1) == (Base >> 3) && Byte(Address + 1) == Opcode && (ModRM & 0xC7) == (Base & 7))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
     ptrdiff_t Offset = -1;
+    bool bInline = false;
     for (const auto& [Begin, End] : Chunks)
     {
-        for (uintptr_t Address = Begin; Offset < 0 && Address + 7 <= End; ++Address)
+        for (uintptr_t Address = Begin; Offset < 0 && Address + 8 <= End; ++Address)
         {
             uint8_t Dest = 0;
             int32_t Disp = 0;
-            if (!LeaDisp32(Address, Dest, Disp) || Disp < 0x50 || Disp > 0x800)
+            uintptr_t Next = 0;
+            if (!LeaDisp32(Address, Dest, Disp, Next) || Disp < 0x50 || Disp > 0x800)
             {
                 continue;
             }
-            const uintptr_t Next = Address + 7;
             const uintptr_t Window = std::min<uintptr_t>(Next + 0x30, End);
             // shl r64, 4: REX.W C1 /4 ib.
-            const bool bEntryShift = FindInstruction(Next, Window, { -1, 0xC1, -1, 0x04 }) != 0;
-            if (LoadFrom(Next, Window, Dest, 0x8B, 0x40) && LoadFrom(Next, Window, Dest, 0x63, 0x48) && bEntryShift)
+            if (!FindInstruction(Next, Window, { -1, 0xC1, -1, 0x04 }))
+            {
+                continue;
+            }
+            if (LoadFrom(Next, Window, Dest, 0x8B, 0x40) && LoadFrom(Next, Window, Dest, 0x63, 0x48))
+            {
+                Offset = Disp;
+                bInline = true;
+            }
+            else if (LoadFromBase(Next, Window, Dest, 0x8B) && LoadFrom(Next, Window, Dest, 0x63, 0x08))
             {
                 Offset = Disp;
             }
@@ -20670,15 +20707,18 @@ bool Finder::ResolveAlwaysRelevantPastActorsLive()
     {
         return NotFound(L"its GatherActorListsForConnection walks no inline array of 0x10 byte entries (8.51 and earlier keep one LastPawn)");
     }
-    // cmp byte ptr [r64+Offset+0x50], 0 (80 /7 with disp32): the bool right after the array.
+    // cmp byte ptr [r64+Offset+size], 0 (80 /7 with disp32, SIB 24 for r12): the bool right after the array.
     bool bFlagAfter = false;
-    const int32_t FlagDisp = static_cast<int32_t>(Offset + 0x50);
+    const int32_t FlagDisp = static_cast<int32_t>(Offset + (bInline ? 0x50 : 0x10));
     for (const auto& [Begin, End] : Chunks)
     {
-        for (uintptr_t Address = Begin; !bFlagAfter && Address + 7 <= End; ++Address)
+        for (uintptr_t Address = Begin; !bFlagAfter && Address + 8 <= End; ++Address)
         {
             const uint8_t ModRM = Byte(Address + 1);
-            bFlagAfter = Byte(Address) == 0x80 && (ModRM & 0xF8) == 0xB8 && (ModRM & 7) != 4 && *reinterpret_cast<const int32_t*>(Address + 2) == FlagDisp && Byte(Address + 6) == 0x00;
+            const bool bSib = (ModRM & 7) == 4;
+            const uintptr_t DispAt = Address + (bSib ? 3 : 2);
+            bFlagAfter = Byte(Address) == 0x80 && (ModRM & 0xF8) == 0xB8 && (!bSib || Byte(Address + 2) == 0x24)
+                && *reinterpret_cast<const int32_t*>(DispAt) == FlagDisp && Byte(DispAt + 4) == 0x00;
         }
     }
     if (!bFlagAfter)
@@ -20686,8 +20726,9 @@ bool Finder::ResolveAlwaysRelevantPastActorsLive()
         return NotFound(L"no InitializedPlayerState right after the array");
     }
     Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset = Offset;
-    Log::Info(L"Finder: UFortReplicationGraphNode_AlwaysRelevant_ForConnection's PastRelevantActors +0x{:X} (GatherActorListsForConnection slot 0x{:X}, 0x{:X}): a destroyed pawn stops being an entry's LastPawn (#671)",
-        Offset, Index * 8, Gather - Finder::ImageBase());
+    Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_bPastRelevantActorsInline = bInline;
+    Log::Info(L"Finder: UFortReplicationGraphNode_AlwaysRelevant_ForConnection's PastRelevantActors +0x{:X} ({}, GatherActorListsForConnection slot 0x{:X}, 0x{:X}): a destroyed pawn stops being an entry's LastPawn (#671)",
+        Offset, bInline ? L"inline allocator" : L"TArray", Index * 8, Gather - Finder::ImageBase());
     return true;
 }
 

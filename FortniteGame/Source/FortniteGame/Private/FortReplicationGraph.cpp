@@ -21,6 +21,8 @@ namespace
     };
     static_assert(sizeof(FPastRelevantActorsView) == 0x50);
 }
+// 9.01 (CL-6428087, GatherActorListsForConnection 0x16BECE0) and 21.40 have PastRelevantActors as a plain
+// TArray<FFortAlwaysRelevantActorInfo>.
 
 int32_t UFortReplicationGraphNode_AlwaysRelevant_ForConnection::ForgetDestroyedPawn(UReplicationGraph* Graph, AActor* Pawn)
 {
@@ -44,9 +46,22 @@ int32_t UFortReplicationGraphNode_AlwaysRelevant_ForConnection::ForgetDestroyedP
             {
                 continue;
             }
-            FPastRelevantActorsView& PastRelevantActors = *reinterpret_cast<FPastRelevantActorsView*>(reinterpret_cast<uint8_t*>(Node) + Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset);
-            FFortAlwaysRelevantActorInfo* Infos = PastRelevantActors.GetData();
-            for (int32_t Index = 0; Index < PastRelevantActors.ArrayNum; ++Index)
+            uint8_t* const PastRelevantActorsAddress = reinterpret_cast<uint8_t*>(Node) + Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset;
+            FFortAlwaysRelevantActorInfo* Infos = nullptr;
+            int32_t Num = 0;
+            if (Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_bPastRelevantActorsInline)
+            {
+                FPastRelevantActorsView& PastRelevantActors = *reinterpret_cast<FPastRelevantActorsView*>(PastRelevantActorsAddress);
+                Infos = PastRelevantActors.GetData();
+                Num = PastRelevantActors.ArrayNum;
+            }
+            else
+            {
+                TArray<FFortAlwaysRelevantActorInfo>& PastRelevantActors = *reinterpret_cast<TArray<FFortAlwaysRelevantActorInfo>*>(PastRelevantActorsAddress);
+                Infos = PastRelevantActors.GetData();
+                Num = PastRelevantActors.Num();
+            }
+            for (int32_t Index = 0; Infos && Index < Num; ++Index)
             {
                 if (Infos[Index].LastPawn == Pawn)
                 {

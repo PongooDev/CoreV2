@@ -5,7 +5,7 @@
 class AActor;
 class UNetConnection;
 
-// One viewer's entry in the node's PastRelevantActors (9.00; 21.40 has the same struct with LastTetherPawn after it).
+// One viewer's entry in the node's PastRelevantActors (9.00, 9.01; 21.40 has the same struct with LastTetherPawn after it).
 struct FFortAlwaysRelevantActorInfo
 {
     UNetConnection* Connection;
@@ -31,7 +31,7 @@ public:
     // FFortAlwaysRelevantActorInfo is a struct whose pointers are reported to the garbage collector
     // (TStructOpsTypeTraits AddStructReferencedObjects), which nulls them once the pawn is destroyed. Called when a match
     // pawn is destroyed (AFortGameModeAthena::HandlePawnDestroyed), this does the same for each connection's node.
-    // Returns how many entries let the pawn go, or -1 where the build's node isn't 9.00's
+    // Returns how many entries let the pawn go, or -1 where the build's node isn't 9.00's or 9.01's
     // (Finder::ResolveAlwaysRelevantPastActorsLive).
     static int32_t ForgetDestroyedPawn(UReplicationGraph* Graph, AActor* Pawn);
 };

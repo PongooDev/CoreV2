@@ -579,9 +579,10 @@ namespace Finder
     // NotifyActorTearOff make in the connection's map, and the removal UNetReplicationGraphConnection::
     // NotifyActorChannelCleanedUp makes from it. Anything else leaves the build as it is and says so once.
     bool ResolveReplicationGraphActorInfoLive(void** GraphVTable);
-    // Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset: the inline TArray of
-    // {Connection, LastPawn} the node's GatherActorListsForConnection walks, where 9.00 (CL-6337466) has it. 8.51 and
-    // earlier keep one LastPawn instead (8.51 +0x278) and are left as they are.
+    // Natives::UFortReplicationGraphNode_AlwaysRelevant_ForConnection_PastRelevantActorsOffset: the TArray of
+    // {Connection, LastPawn} the node's GatherActorListsForConnection walks, where 9.00 (CL-6337466, inline allocator)
+    // and 9.01 (CL-6428087, plain TArray) have it. 8.51 and earlier keep one LastPawn instead (8.51 +0x278) and are
+    // left as they are.
     bool ResolveAlwaysRelevantPastActorsLive();
     bool ResolveDecoSpawnedLive();
     bool ResolveCreateBuildingAndSpawnDecoLive();

@@ -1648,9 +1648,17 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         const uintptr_t Setter = *LinkSetters.begin();
         for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Setter))
         {
+            // One readability check per callee, not one VirtualQuery per byte: on the packed 9.10 image (CL-6639283) the
+            // per-byte queries held the game thread here for 15.7 s (12 ms this way). A game thread with no heartbeat
+            // for [Core.System] HangDuration (default 25 s, HangsAreFatal) is ended by FThreadHeartBeat::OnHang through
+            // FPlatformMisc::RequestExit(true)'s TerminateProcess (CL-6573057 +0x1D84B60 -> +0x1E6C630), with nothing
+            // in Core's log: a slower PC's 9.10 server died here (CoreV2 #690).
             const auto* Code = reinterpret_cast<const uint8_t*>(Target);
+            constexpr int32_t ScanBytes = 0x800;
+            const int32_t InFirstPage = 0x1000 - static_cast<int32_t>(Target & 0xFFF);
+            const int32_t Readable = Finder::IsReadable(Code, ScanBytes) ? ScanBytes : Finder::IsReadable(Code, 1) ? (std::min)(ScanBytes, InFirstPage) : 0;
             bool bClearsPopulation = false;
-            for (int32_t At = 0; At + 7 <= 0x800 && !bClearsPopulation && Finder::IsReadable(Code + At, 7); ++At)
+            for (int32_t At = 0; At + 7 <= Readable && !bClearsPopulation; ++At)
             {
                 bClearsPopulation = Code[At] == 0xC6 && (Code[At + 1] & 0xF8) == 0x80 && (Code[At + 1] & 0x07) != 0x04
                     && *reinterpret_cast<const int32_t*>(Code + At + 2) == PopulationOffset && Code[At + 6] == 0x00;

@@ -123,6 +123,9 @@ public:
     bool SetActorLocationAndRotation(const FVector& NewLocation, const FRotator& NewRotation, bool bSweep = false, bool bTeleport = false);
     FRotator GetActorRotation() const;
     bool TeleportTo(const FVector& DestLocation, const FRotator& DestRotation);
+    // TEMPORARY (#688): set on 8.00+ by AFortPlayerPawn::HookTeleportLog; Core's TeleportTo and
+    // AController::ClientSetRotation then log their rotation and caller. Remove once #688 is fixed.
+    static inline bool bLogViewRotations = false;
     void SetActorScale3D(const FVector& NewScale3D);
     FVector GetActorScale3D() const;
     // Server: replicates from now on (an actor that didn't joins the net driver's list), or stops.

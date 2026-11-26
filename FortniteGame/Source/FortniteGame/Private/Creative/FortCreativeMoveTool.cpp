@@ -943,6 +943,19 @@ void AFortCreativeMoveTool::ServerAddToQuickBar_Implementation(const TArray<AAct
     }
 }
 
+void AFortCreativeMoveTool::ServerClearQuickBarSlot_Implementation(int32_t DesiredSlotIndex)
+{
+    // Core's (no build has the body). 9.10 (CL-6639283) adds the RPC with its server half stripped (slot 0x15E, the shared
+    // empty function): the client's HandleClearFocusedQuickbarSlotPressed asks for the focused creative quickbar slot and
+    // waits for ClientClearQuickBarSlotComplete. The prefab item is the profile's (MCP), as for ServerAddToQuickBar, so
+    // the server answers with the slot it was asked to clear.
+    Reflection::FParams Params(FindStaticFunction_ClientClearQuickBarSlotComplete(), true);
+    if (Params.Set(L"SlotCleared", DesiredSlotIndex))
+    {
+        Params.Call(this);
+    }
+}
+
 void AFortCreativeMoveTool::ServerStartInteracting_ImplementationHK(AFortCreativeMoveTool* This, const TArray<AActor*>& Actors, const FTransform& DragStart)
 {
     This->ServerStartInteracting_Implementation(Actors, DragStart);
@@ -968,6 +981,11 @@ void AFortCreativeMoveTool::ServerSpawnSelectedActorsWithTransform_Implementatio
 void AFortCreativeMoveTool::ServerAddToQuickBar_ImplementationHK(AFortCreativeMoveTool* This, const TArray<AActor*>& Actors, int32_t DesiredSlotIndex)
 {
     This->ServerAddToQuickBar_Implementation(Actors, DesiredSlotIndex);
+}
+
+void AFortCreativeMoveTool::ServerClearQuickBarSlot_ImplementationHK(AFortCreativeMoveTool* This, int32_t DesiredSlotIndex)
+{
+    This->ServerClearQuickBarSlot_Implementation(DesiredSlotIndex);
 }
 
 void AFortCreativeMoveTool::RestoreStrippedServerFunctions()
@@ -1018,5 +1036,9 @@ void AFortCreativeMoveTool::RestoreStrippedServerFunctions()
     SwapStubInSubclasses(FindStaticFunction_ServerSpawnSelectedActorsWithTransform(), reinterpret_cast<void*>(&ServerSpawnSelectedActorsWithTransform_ImplementationHK),
         L"ServerSpawnSelectedActorsWithTransform");
     SwapStubInSubclasses(FindStaticFunction_ServerAddToQuickBar(), reinterpret_cast<void*>(&ServerAddToQuickBar_ImplementationHK), L"ServerAddToQuickBar");
+    if (UFunction* ClearQuickBarSlot = FindStaticFunction_ServerClearQuickBarSlot(); ClearQuickBarSlot && FindStaticFunction_ClientClearQuickBarSlotComplete())
+    {
+        SwapStubInSubclasses(ClearQuickBarSlot, reinterpret_cast<void*>(&ServerClearQuickBarSlot_ImplementationHK), L"ServerClearQuickBarSlot");
+    }
 #endif
 }

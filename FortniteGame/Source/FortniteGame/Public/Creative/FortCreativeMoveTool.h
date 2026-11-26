@@ -127,6 +127,8 @@ class AFortCreativeMoveTool : public AFortWeapon
     DefineUFunction(ServerClearMovementMode)
     DefineUFunction(ClientStartInteracting)
     DefineUFunction(ClientAddToQuickBarComplete)
+    DefineUFunction(ServerClearQuickBarSlot)
+    DefineUFunction(ClientClearQuickBarSlotComplete)
     DefineUFunction(RemoteClientsUpdateSelectedActors)
     DefineUFunction(MulticastSetCollisionForActor)
     DefineUFunction(HandleCopyPickupPressed)
@@ -165,6 +167,8 @@ public:
         bool bIgnoreStructuralIssues, bool bForPreviewing);
     void ServerSpawnSelectedActorsWithTransform_Implementation(bool bAllowOverlap, bool bAllowGravity, bool bIgnoreStructuralIssues, bool bForPreviewing);
     void ServerAddToQuickBar_Implementation(const TArray<AActor*>& Actors, int32_t DesiredSlotIndex);
+    // 9.10+.
+    void ServerClearQuickBarSlot_Implementation(int32_t DesiredSlotIndex);
 
     // 9.00: swaps the stubs for the restored bodies. Nothing happens on builds without ServerSpawnSelectedActorsWithTransform.
     static void RestoreStrippedServerFunctions();
@@ -196,4 +200,5 @@ private:
     static void ServerSpawnSelectedActorsWithTransform_ImplementationHK(AFortCreativeMoveTool* This, bool bAllowOverlap, bool bAllowGravity, bool bIgnoreStructuralIssues,
         bool bForPreviewing);
     static void ServerAddToQuickBar_ImplementationHK(AFortCreativeMoveTool* This, const TArray<AActor*>& Actors, int32_t DesiredSlotIndex);
+    static void ServerClearQuickBarSlot_ImplementationHK(AFortCreativeMoveTool* This, int32_t DesiredSlotIndex);
 };

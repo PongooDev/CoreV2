@@ -123,6 +123,15 @@ void AFortVolumeManager::ResaveActor(AActor* Actor)
     }
 }
 
+void AFortVolumeManager::ResaveActorWithVolume(AActor* Actor, AFortVolume* Volume)
+{
+    Reflection::FParams Params(FindStaticFunction_ResaveActorWithVolume(), true);
+    if (Params.Set(L"Actor", Actor) && Params.Set(L"Volume", Volume))
+    {
+        Params.Call(this);
+    }
+}
+
 TArray<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume* Volume)
 {
     TArray<AController*> Players;

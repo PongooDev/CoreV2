@@ -836,6 +836,12 @@ namespace Natives
     inline uintptr_t FFortCreativeBudgetTracker_CanAddActors = 0;
     // The global table of asset costs FFortCreativeBudgetTracker reads (TMap<FCreativeActorId, FCreativeAssetCost>).
     inline void* FortCreativeAssetCosts = nullptr;
+    // 9.10 (CL-6573057, CL-6639283), UFortActorOptionsComponent::HookCallSites: the intact code the restored
+    // SetPropertyOverrides/SetPropertyOverrideValues call. FPropertyOverrideData::SetPropertyOverrides(NewOptions,
+    // bReplaceExisting: an override already set takes the new value)
+    // (CL-6573057 0x14B1290) and UPlaylistUserOptionBase::GetOptionValueFromName (0x149ECA0).
+    inline bool (*FPropertyOverrideData_SetPropertyOverrides)(void* This, const void* NewOptions, bool bReplaceExisting) = nullptr;
+    inline void* (*UPlaylistUserOptionBase_GetOptionValueFromName)(const void* This, void* Result, const void* OptionName) = nullptr;
     inline uintptr_t LevelSave_CreateTemplate = 0;
     inline uintptr_t LevelSave_ApplyTemplate = 0;
     inline uintptr_t KismetSystemLibrary_ConfigureCollisionParams = 0;

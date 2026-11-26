@@ -31,3 +31,15 @@ uint32_t FCrc::MemCrc_DEPRECATED(const void* Data, int32_t Length, uint32_t CRC)
     }
     return ~CRC;
 }
+
+uint32_t FCrc::Strihash_DEPRECATED(const wchar_t* Data)
+{
+    uint32_t Hash = 0;
+    for (; Data && *Data; ++Data)
+    {
+        const uint16_t Ch = static_cast<uint16_t>(*Data >= L'a' && *Data <= L'z' ? *Data - (L'a' - L'A') : *Data);
+        Hash = ((Hash >> 8) & 0x00FFFFFF) ^ CRCTable_DEPRECATED[(Hash ^ (Ch & 0xFF)) & 0xFF];
+        Hash = ((Hash >> 8) & 0x00FFFFFF) ^ CRCTable_DEPRECATED[(Hash ^ (Ch >> 8)) & 0xFF];
+    }
+    return Hash;
+}

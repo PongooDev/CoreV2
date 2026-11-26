@@ -54,6 +54,7 @@
 #include "Building/BuildingPropMusicPlayer.h"
 #include "Building/BuildingProp_DeimosSpawner.h"
 #include "Building/BuildingRift.h"
+#include "Creative/FortActorOptionsComponent.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortLevelSaveComponent.h"
 #include "Creative/FortMinigameSettingsBuilding.h"
@@ -515,6 +516,8 @@ static void InstallHooks()
             ABuildingProp_DeimosSpawner::HookVTables();
             // 7.40+ Creative: the radio's track and playback options (StartSongForOptionsChange, stripped).
             ABuildingPropMusicPlayer::HookNatives();
+            // 9.10 Creative: device and prop options (SetPropertyOverrideValues, stripped).
+            UFortActorOptionsComponent::HookCallSites();
             AAthenaCreativeRift::HookVTables();
             // 8.00+ Creative (#596): an island's Time of Day setting, its own time of day manager.
             UFortVolumeTimeOfDayComponent::HookVTables();

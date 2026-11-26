@@ -89,6 +89,8 @@ class AFortVolume : public ABuildingActor
 public:
     DefineUProperty(UFortPlaysetItemDefinition*, CurrentPlayset)
     DefineUProperty(uint8_t, VolumeState)
+    DefineBitfieldUProperty(bNeverAllowSaving)
+    static bool HasNeverAllowSaving() { return Member_bNeverAllowSaving.IsAvailable(); }
     DefineUProperty(UAsyncTaskQueue*, TaskQueue)
     DefineUProperty(FMulticastScriptDelegate, OnFinishVolumeClear)
     // The hub's rifts linked to the island (each rift's LinkedVolume registers it here).
@@ -139,6 +141,7 @@ class AFortVolumeManager : public AInfo
     DefineUFunction(ResetVolumeAndLevelRecord)
     DefineUFunction(GetVolumeForLocation)
     DefineUFunction(ResaveActor)
+    DefineUFunction(ResaveActorWithVolume)
 
 public:
     // Broadcast by HandleVolumeStateChanged (8.00 0xEF5E70) with each registered volume's new EVolumeState (the volume's
@@ -158,6 +161,8 @@ public:
     // The game's own UFunctions (STAT_Find_Volume's lookup; the level save's update of an actor that changed).
     AFortVolume* GetVolumeForLocation(const FVector& Location);
     void ResaveActor(AActor* Actor);
+    // The island's level record takes the actor's current state (9.00 0x1249F40). Nothing where the build lacks it.
+    void ResaveActorWithVolume(AActor* Actor, AFortVolume* Volume);
 };
 
 // A player start of Creative's (from 7.00): the hub's, by each rift (PortalIndex), and the islands' own, by their tags:

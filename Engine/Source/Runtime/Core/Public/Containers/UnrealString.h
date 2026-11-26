@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "Misc/CString.h"
+#include "Misc/Crc.h"
 
 #include <string>
 #include <climits>
@@ -292,5 +293,21 @@ public:
         FString Result(Left);
         Result += Right;
         return Result;
+    }
+
+    // UE's: FString's == ignores case, and its hash (what a TMap<FString, ...> the game made is keyed by) does too.
+    friend bool operator==(const FString& Left, const FString& Right)
+    {
+        return _wcsicmp(*Left, *Right) == 0;
+    }
+
+    friend bool operator!=(const FString& Left, const FString& Right)
+    {
+        return !(Left == Right);
+    }
+
+    friend uint32_t GetTypeHash(const FString& String)
+    {
+        return FCrc::Strihash_DEPRECATED(*String);
     }
 };

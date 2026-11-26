@@ -1861,6 +1861,12 @@ void AFortMinigame::HookNatives()
             Log::Info(L"Finder: AFortMinigame's player buckets restored (AssignPlayersToBuckets 0x{:X} {}, FindOrAddBucket 0x{:X} {})", Assign - Finder::ImageBase(),
                 bAssign ? L"redirected" : L"not redirected", FindOrAdd - Finder::ImageBase(), bJoin ? L"redirected" : L"not redirected");
         }
+        else if (Assign && !bAssignStripped)
+        {
+            // 9.10 (CL-6639283 0x15A2180) ships AssignPlayersToBuckets whole again (its Custom, Random and Separate
+            // Teams adds), and AddMinigamePlayer's bucket pick (0x15A1D90) with it, while the stat adds stay stripped.
+            Log::Info(L"Finder: AFortMinigame's player buckets are native in this build (AssignPlayersToBuckets 0x{:X} adds to PlayerBuckets)", Assign - Finder::ImageBase());
+        }
         else if (NotifyStatEventOG && Member_PlayerBuckets.IsAvailable())
         {
             Log::Error(L"Finder: AFortMinigame's player buckets not restored (AssignPlayersToBuckets {}, {} calls; FindOrAddBucket {} matches), so per-team stats and Team end conditions count nothing",

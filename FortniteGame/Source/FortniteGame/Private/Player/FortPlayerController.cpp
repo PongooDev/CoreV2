@@ -2824,11 +2824,11 @@ UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDe
     return Natives::AFortPlayerController_GetSchematicForItem(this, ItemDefinition);
 }
 
-void AFortPlayerController::ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot)
+void AFortPlayerController::ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot, bool bForceExecution)
 {
     if (AFortQuickBars* Bars = QuickBars)
     {
-        Bars->ServerActivateSlotInternal(InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot);
+        Bars->ServerActivateSlotInternal(InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot, bForceExecution);
     }
 }
 
@@ -2838,9 +2838,21 @@ DEFINE_FUNCTION(AFortPlayerController::execActivateSlot)
     P_GET_PROPERTY(UIntProperty, Z_Param_Slot);
     P_GET_PROPERTY(UFloatProperty, Z_Param_ActivateDelay);
     P_GET_UBOOL(Z_Param_bUpdatePreviousFocusedSlot);
+    // 7.20 and 7.30 add bForceExecution (7.20 exec 0x174D210 steps all five and passes it to 0x1397820, which hands
+    // everything to the quickbars' ServerActivateSlotInternal). Left unread, P_FINISH skips its one-byte literal and
+    // the caller's script resumes on EX_EndFunctionParms, whose handler (0x1AFB460) only steps Code back: the server's
+    // game thread spun there forever. Mission_FarmsteadFort's Delay(5) resume calls ActivateSlot, so the STW
+    // tutorial froze 5 s after the intro (#439, #511).
+    static UFunction* const Function = StaticFunction_ActivateSlot();
+    static const bool bHasForceExecution = Function && Function->FindPropertyByName(FName(L"bForceExecution", FNAME_Find));
+    uint32_t Z_Param_bForceExecution = 0;
+    if (bHasForceExecution)
+    {
+        P_STACK.StepCompiledIn<UBoolProperty>(&Z_Param_bForceExecution);
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortPlayerController*>(Context)->ActivateSlot(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot);
+    static_cast<AFortPlayerController*>(Context)->ActivateSlot(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot, !!Z_Param_bForceExecution);
     P_NATIVE_END;
 }
 

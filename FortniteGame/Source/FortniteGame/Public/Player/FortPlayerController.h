@@ -226,7 +226,7 @@ public:
     DefineUFunction(GetQuestManager)
 
     bool InitializeMcpProfile(const void* OnComplete);
-    void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
+    void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot, bool bForceExecution = false);
     void GivePlayerAmmo(int32_t AmmoCount);
     void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride = -1, bool bForceExecution = false);
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);

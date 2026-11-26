@@ -749,7 +749,8 @@ namespace
         { L"Items", L"GiveTrap", L"givetrap <name> [level] [count]", L"a trap", ECheatMode::Both },
         { L"Items", L"GiveGadget", L"givegadget <name> [level]", L"a gadget", ECheatMode::Both },
         { L"Items", L"GiveSpecificItem", L"givespecificitem <path or name> [count] [level]", L"any item (giveitem)", ECheatMode::Both },
-        { L"Items", nullptr, L"spawnpickup <path or name> [count]", L"drop an item in front of you", ECheatMode::Both },
+        { L"Items", nullptr, L"spawnpickup <path or name> [count] [level]", L"drop an item as if from your inventory", ECheatMode::Both },
+        { L"Items", nullptr, L"forcedrop [slot | name | all]", L"drop the held item (or that one), even undroppable ones", ECheatMode::Both },
         { L"Items", L"GiveResources", L"giveresources [amount]", L"wood, stone, metal (givewood...)", ECheatMode::Both },
         { L"Items", L"GiveAllWeapons", L"giveallweapons", L"every weapon (giveallrifles...)", ECheatMode::Both },
         { L"Items", L"GiveAllTraps", L"givealltraps [count]", L"every trap", ECheatMode::Both },
@@ -1021,7 +1022,7 @@ void UFortCheatManager::SpawnPickup(const FString& Arguments)
     const auto [Name, Count, Level] = ParseItemArguments(Arguments);
     if (Name.empty())
     {
-        Reply(TEXT("Usage: spawnpickup <name or path> [count], one without a count"));
+        Reply(TEXT("Usage: spawnpickup <name or path> [count] [level], one without a count; dropped as if by you, the item never enters your inventory"));
         return;
     }
     AFortPlayerController* PlayerController = GetPlayerController();
@@ -1038,6 +1039,32 @@ void UFortCheatManager::SpawnPickup(const FString& Arguments)
         return;
     }
     const int32_t NumberToSpawn = Count > 0 ? Count : 1;
+    // #692: dropped as the player's own drop is (AFortPlayerController::TossDropPickup: SpawnDropPickup at the pawn,
+    // PawnWhoDroppedPickup, the toss from the pawn), so Creative's Item Spawner and the other devices that only take a
+    // player's drop take it. The item never enters the inventory, so items that can't be dropped spawn too. Builds where
+    // SpawnDropPickup isn't found keep the plain pickup in front of the player.
+    if (Natives::AFortPlayerController_SpawnDropPickupIndex >= 0 || Finder::ResolvePlayerDropPickupLive())
+    {
+        UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+        TArray<uint8_t> EntryStorage;
+        EntryStorage.AddZeroed(EntryStruct->GetStructureSize());
+        FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.GetData());
+        FFortItemEntry::Construct(DropEntry, ItemDefinition, NumberToSpawn, std::max(Level, 0));
+        // Loaded, as the weapon a player is given and then drops is.
+        if (AFortGameModeAthena::GetCurrent(PlayerController))
+        {
+            DropEntry->LoadFullClip();
+        }
+        AFortPickup* Pickup = PlayerController->TossDropPickup(*DropEntry);
+        EntryStruct->DestroyStruct(DropEntry);
+        if (!Pickup)
+        {
+            Reply(FString::Printf(TEXT("Couldn't spawn %s"), *ItemDefinition->GetName()));
+            return;
+        }
+        Reply(FString::Printf(TEXT("Dropped %d %s"), NumberToSpawn, *ItemDefinition->GetName()));
+        return;
+    }
     const FVector Location = InFrontOf(Pawn, 200.0f);
     const FVector Direction = Location - Pawn->GetTransform().GetLocation();
     if (!UFortKismetLibrary::K2_SpawnPickupInWorld(PlayerController, ItemDefinition, NumberToSpawn, Location, Direction, -1, true))
@@ -1046,6 +1073,124 @@ void UFortCheatManager::SpawnPickup(const FString& Arguments)
         return;
     }
     Reply(FString::Printf(TEXT("Spawned %d %s"), NumberToSpawn, *ItemDefinition->GetName()));
+#endif
+}
+
+void UFortCheatManager::ForceDrop(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // Core's (#692): items leave the inventory through the player's own drop (AFortPlayerController::DropInventoryItem,
+    // the stripped ServerAttemptInventoryDrop's body) with only its bCanBeDropped check skipped. No argument is the held
+    // item, a number a primary quickbar slot (only where the server has the quickbar: up to 7.30), "all" everything
+    // but the building pieces and the edit tool, anything else an item of the inventory by name.
+    const FString Argument = Arguments.TrimStartAndEnd();
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    if (!Pawn || !Inventory)
+    {
+        Reply(TEXT("You have no pawn to drop from"));
+        return;
+    }
+    if (Natives::AFortPlayerController_SpawnDropPickupIndex < 0 && !Finder::ResolvePlayerDropPickupLive())
+    {
+        Reply(TEXT("forcedrop isn't available on this build (its drop wasn't found)"));
+        return;
+    }
+
+    TArray<FGuid> Drops;
+    TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+    wchar_t* NumberEnd = nullptr;
+    const long Slot = Argument.IsEmpty() ? 0 : std::wcstol(*Argument, &NumberEnd, 10);
+    if (Argument.IsEmpty())
+    {
+        AFortWeapon* Weapon = static_cast<AFortWeapon*>(Pawn->CurrentWeapon);
+        if (!Weapon || !Inventory->FindWorldItem(Weapon->ItemEntryGuid))
+        {
+            Reply(TEXT("You aren't holding an item (usage: forcedrop [slot | name | all])"));
+            return;
+        }
+        Drops.Add(Weapon->ItemEntryGuid);
+    }
+    else if (NumberEnd && NumberEnd != *Argument && *NumberEnd == 0)
+    {
+        AFortQuickBars* Bars = AFortPlayerController::HasQuickBars() ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
+        if (!Bars)
+        {
+            Reply(TEXT("This build's quickbar is the client's, so slots aren't known here: forcedrop the held item or an item by name"));
+            return;
+        }
+        FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
+        TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
+        if (Slot < 1 || Slot > Slots.Num() || Bars->GetSlot(EFortQuickBars::GetPrimary(), Slot - 1).Items.Num() == 0)
+        {
+            Reply(FString::Printf(TEXT("Slot %ld has no item (slots 1 to %d)"), Slot, Slots.Num()));
+            return;
+        }
+        Drops.Add(Bars->GetSlot(EFortQuickBars::GetPrimary(), Slot - 1).Items[0]);
+    }
+    else
+    {
+        const bool bAll = _wcsicmp(*Argument, L"all") == 0;
+        static UClass* const BuildingItemClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortBuildingItemDefinition");
+        static UClass* const EditToolClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortEditToolItemDefinition");
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+            const UFortItemDefinition* ItemDefinition = ItemEntry ? static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition) : nullptr;
+            if (!ItemDefinition || ItemEntry->Count <= 0)
+            {
+                continue;
+            }
+            if (bAll)
+            {
+                if (!(BuildingItemClass && ItemDefinition->IsA(BuildingItemClass)) && !(EditToolClass && ItemDefinition->IsA(EditToolClass)))
+                {
+                    Drops.Add(ItemEntry->ItemGuid);
+                }
+            }
+            else if (_wcsicmp(*ItemDefinition->GetName(), *Argument) == 0 || (Drops.Num() == 0 && ItemDefinition->GetName().Contains(Argument)))
+            {
+                Drops.Empty();
+                Drops.Add(ItemEntry->ItemGuid);
+                if (_wcsicmp(*ItemDefinition->GetName(), *Argument) == 0)
+                {
+                    break;
+                }
+            }
+        }
+        if (Drops.Num() == 0)
+        {
+            Reply(bAll ? FString(TEXT("You have nothing to drop")) : FString::Printf(TEXT("You have no item called '%s'"), *Argument));
+            return;
+        }
+    }
+
+    // Each drop changes the inventory's list, so the drops go by guid.
+    int32_t Dropped = 0;
+    FString LastName;
+    for (const FGuid& ItemGuid : Drops)
+    {
+        UFortWorldItem* WorldItem = Inventory->FindWorldItem(ItemGuid);
+        if (!WorldItem)
+        {
+            continue;
+        }
+        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+        const FString ItemName = GetNameSafe(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+        if (PlayerController->DropInventoryItem(ItemGuid, static_cast<int32_t>(ItemEntry.Count), true))
+        {
+            ++Dropped;
+            LastName = ItemName;
+        }
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("ForceDrop: %s dropped %d of %d items"), *GetNameSafe(PlayerController), Dropped, Drops.Num());
+    if (Dropped == 0)
+    {
+        Reply(TEXT("Couldn't drop it"));
+        return;
+    }
+    Reply(Dropped == 1 ? FString::Printf(TEXT("Dropped %s"), *LastName) : FString::Printf(TEXT("Dropped %d items"), Dropped));
 #endif
 }
 

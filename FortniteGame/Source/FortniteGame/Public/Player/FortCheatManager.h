@@ -208,9 +208,12 @@ public:
     void SetShield(const FString& Arguments);
     void SetMaxShield(const FString& Arguments);
     // Core's own commands (#169): "cheat giveitem <name or path> [count] [level]" is GiveSpecificItem, and "cheat
-    // spawnpickup <name or path> [count]" (PongooDev/Core's) puts the item on the ground in front of the player.
+    // spawnpickup <name or path> [count] [level]" (PongooDev/Core's) drops the item as the player's drop would, without
+    // it entering the inventory (#692).
     void GiveItem(const FString& Arguments);
     void SpawnPickup(const FString& Arguments);
+    // Core's own command, "cheat forcedrop [slot | name | all]" (#692): the player's drop, bCanBeDropped skipped.
+    void ForceDrop(const FString& Arguments);
     // Core's own command, "cheat clearequippeditem" (#155): the item the player holds leaves their inventory.
     void ClearEquippedItem(const FString& Arguments);
     // Core's own command, "cheat setscale <x> [y z] | reset" (#155): the player's pawn at that scale, collision included,

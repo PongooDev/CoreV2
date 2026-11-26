@@ -1838,61 +1838,95 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
 void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count)
 {
 #if WITH_SERVER_CODE
+    DropInventoryItem(ItemGuid, Count, false);
+#endif
+}
+
+bool AFortPlayerController::DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped)
+{
+#if WITH_SERVER_CODE
     AFortInventory* Inventory = WorldInventory;
     UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
     AFortPawn* Pawn = MyFortPawn;
     if (!WorldItem || !Pawn || Count <= 0)
     {
-        return;
+        return false;
     }
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
-    if (!ItemDefinition || !ItemDefinition->bCanBeDropped)
+    if (!ItemDefinition || (!bIgnoreCanBeDropped && !ItemDefinition->bCanBeDropped))
     {
-        return;
+        return false;
     }
 
     const int32_t DropCount = std::min(Count, static_cast<int32_t>(ItemEntry.Count));
     WorldItem->SetDurability(ItemEntry.Durability);
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
-    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
-    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    TArray<uint8_t> EntryStorage;
+    EntryStorage.AddZeroed(EntryStruct->GetStructureSize());
+    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.GetData());
     EntryStruct->InitializeStruct(DropEntry);
     EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
     DropEntry->Count = DropCount;
 
     // A drop takes the item even where its definition would keep it at 0 (3.3's Remote Explosives): the player drops
     // the whole stack.
+    bool bDropped = false;
     if (RemoveInventoryItem(ItemGuid, DropCount, false, true))
     {
-        const FTransform PawnTransform = Pawn->GetTransform();
-        const FVector Location = PawnTransform.GetLocation();
-        if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &Location, nullptr))
-        {
-            Pickup->PawnWhoDroppedPickup = Pawn;
-            Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
-            // Said, so a drop the player didn't make (#344: ammo "appearing" at a player) shows in the server log.
-            Log::Info(L"Drop: {} drops {} {} as {}", GetName().ToStdString(), DropCount, ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
-            // 8.20 (CL-5625478) registers Athena.NotifyPickupSpawned as a native tag (FFortGameplayTags +0x1718, set up
-            // at 0x11A30AF) that no code left reads, and nothing broadcasts OnItemDropSpawned (+0x24E0; only the
-            // constructor 0x113B6E7 touches it): the stripped drop told the controller's listeners here.
-            AFortPlayerControllerAthena* AthenaController = AFortPlayerControllerAthena::HasItemDropSpawned() ? Cast<AFortPlayerControllerAthena>(this) : nullptr;
-            const FGameplayTagContainer& ItemTags = ItemDefinition->GameplayTags;
-            if (AthenaController && ItemTags.HasTag(FGameplayTag{ FName(L"Athena.NotifyPickupSpawned") }))
-            {
-                struct
-                {
-                    AFortPickup* Pickup;
-                    UFortItemDefinition* ItemDef;
-                    FGameplayTagContainer ItemTags;
-                } Parms{ Pickup, ItemDefinition, ItemTags };
-                const FMulticastScriptDelegate& ItemDropSpawned = AthenaController->OnItemDropSpawned;
-                ItemDropSpawned.ProcessMulticastDelegate(&Parms);
-            }
-        }
+        bDropped = TossDropPickup(*DropEntry) != nullptr;
     }
     EntryStruct->DestroyStruct(DropEntry);
+    return bDropped;
+#else
+    return false;
+#endif
+}
+
+AFortPickup* AFortPlayerController::TossDropPickup(const FFortItemEntry& DropEntry)
+{
+#if WITH_SERVER_CODE
+    AFortPawn* Pawn = MyFortPawn;
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(DropEntry.ItemDefinition));
+    if (!Pawn || !ItemDefinition)
+    {
+        return nullptr;
+    }
+
+    const FTransform PawnTransform = Pawn->GetTransform();
+    const FVector Location = PawnTransform.GetLocation();
+    AFortPickup* Pickup = SpawnDropPickup(DropEntry, &Location, nullptr);
+    if (!Pickup)
+    {
+        return nullptr;
+    }
+    // 9.00's SpawnDropPickup (CL-6337466 0x17C3D60) hands CreateFromData no pawn and no source flags, so the dropper is
+    // set here. Creative's Item Spawner (Trap_Floor_Minigame_Spawner) only takes a pickup that lands in its DropBox
+    // when BlueprintCanInteract(GetPawnWhoDroppedPickup()) passes.
+    Pickup->PawnWhoDroppedPickup = Pawn;
+    Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
+    // Said, so a drop the player didn't make (#344: ammo "appearing" at a player) shows in the server log.
+    Log::Info(L"Drop: {} drops {} {} as {}", GetName().ToStdString(), static_cast<int32_t>(DropEntry.Count), ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
+    // 8.20 (CL-5625478) registers Athena.NotifyPickupSpawned as a native tag (FFortGameplayTags +0x1718, set up
+    // at 0x11A30AF) that no code left reads, and nothing broadcasts OnItemDropSpawned (+0x24E0; only the
+    // constructor 0x113B6E7 touches it): the stripped drop told the controller's listeners here.
+    AFortPlayerControllerAthena* AthenaController = AFortPlayerControllerAthena::HasItemDropSpawned() ? Cast<AFortPlayerControllerAthena>(this) : nullptr;
+    const FGameplayTagContainer& ItemTags = ItemDefinition->GameplayTags;
+    if (AthenaController && ItemTags.HasTag(FGameplayTag{ FName(L"Athena.NotifyPickupSpawned") }))
+    {
+        struct
+        {
+            AFortPickup* Pickup;
+            UFortItemDefinition* ItemDef;
+            FGameplayTagContainer ItemTags;
+        } Parms{ Pickup, ItemDefinition, ItemTags };
+        const FMulticastScriptDelegate& ItemDropSpawned = AthenaController->OnItemDropSpawned;
+        ItemDropSpawned.ProcessMulticastDelegate(&Parms);
+    }
+    return Pickup;
+#else
+    return nullptr;
 #endif
 }
 
@@ -3154,6 +3188,7 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"clearequippeditem", &UFortCheatManager::ClearEquippedItem },
         { L"giveitem", &UFortCheatManager::GiveItem },
         { L"spawnpickup", &UFortCheatManager::SpawnPickup },
+        { L"forcedrop", &UFortCheatManager::ForceDrop },
         { L"setscale", &UFortCheatManager::SetScale },
         { L"progressquest", &UFortCheatManager::ProgressQuest },
         { L"unlimitedhealth", &UFortCheatManager::UnlimitedHealth },

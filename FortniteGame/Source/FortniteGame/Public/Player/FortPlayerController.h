@@ -275,6 +275,12 @@ public:
     bool ApplyHeroLoadoutGadgetsAndItems();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
+    // The stripped drop's body, Core's split of it: DropInventoryItem takes Count of the item out of the inventory and
+    // tosses it, bIgnoreCanBeDropped skipping the definition's bCanBeDropped (cheat forcedrop); TossDropPickup is the
+    // part after the item has left the inventory, a pickup of DropEntry tossed from the pawn as the player's drop
+    // (cheat spawnpickup, which never puts the item in the inventory).
+    bool DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped);
+    AFortPickup* TossDropPickup(const FFortItemEntry& DropEntry);
     // A gadget with bDropAllOnEquip (4.1's Infinity Gauntlet) makes its taker drop everything else (#297): the pickup's
     // LocalOnAttemptInteract sends ServerDropAllItems(the gadget) before ServerHandlePickup, and the gadget's
     // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.

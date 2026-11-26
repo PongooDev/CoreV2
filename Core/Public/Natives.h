@@ -491,6 +491,8 @@ namespace Natives
     inline int32_t AFortPickup_GivePickupToIndex = -1;
     // What the build left of GivePickupTo: the shared empty function, or (1.10) its authority check and Destroy.
     inline void* AFortPickup_GivePickupToStripped = nullptr;
+    // 9.10+: GivePickupTo(InventoryOwner, bDestroyPickup), the body Destroys only when its third argument is set.
+    inline bool AFortPickup_GivePickupToTakesDestroyPickup = false;
     inline int32_t AFortPlayerController_SpawnDropPickupIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     // The pickup's IFortInteractInterface::CanInteract(const FInteractionType&) slot, in the interface's own vtable.

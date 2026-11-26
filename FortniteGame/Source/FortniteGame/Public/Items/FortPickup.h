@@ -160,7 +160,9 @@ public:
     // The pickup's own IFortInteractInterface::CanInteract for a simple interaction (a press, or walking over it) by
     // RequestingPawn: false once it is picked up or flying into another pickup, and whatever its class adds.
     bool CanInteract(AFortPlayerPawn* RequestingPawn);
-    void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
+    // bDestroyPickup (9.10+): false keeps the pickup in the world, as AFortPickupCreative::GivePickupToPawn(Pawn, false)
+    // asks. Earlier builds' give has no such parameter and always destroys it.
+    void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner, bool bDestroyPickup = true);
     void SetOptionalMissionGuid(const FGuid& InMissionGuid);
     void OnRep_PickupLocationData();
 
@@ -227,5 +229,5 @@ private:
     static inline UFunction* OnServerBounceCallbackFunction = nullptr;
     static inline UFunction* HandleCombineTargetPickupAttemptedFunction = nullptr;
 
-    static void GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner);
+    static void GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner, bool bDestroyPickup);
 };

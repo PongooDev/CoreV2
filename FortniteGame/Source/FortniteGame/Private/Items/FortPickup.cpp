@@ -1198,7 +1198,7 @@ void AFortPickup::WatchTossedPickups()
 #endif
 }
 
-void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
+void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner, bool bDestroyPickup)
 {
 #if WITH_SERVER_CODE
     UObject* OwnerObject = InventoryOwner ? InventoryOwner->_getUObject() : nullptr;
@@ -1254,7 +1254,10 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     // pawn's IncomingPickups and removes its effect before calling this) destroys it, and Core's give never did, so every
     // pickup stayed on the list and the next came in 20 degrees further round, up to 90. Pickups taken together still
     // fan out, as they do natively.
-    K2_DestroyActor();
+    if (bDestroyPickup)
+    {
+        K2_DestroyActor();
+    }
 #endif
 }
 
@@ -1684,7 +1687,8 @@ void AFortPickup::HookVTables()
     }
 }
 
-void AFortPickup::GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner)
+void AFortPickup::GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner, bool bDestroyPickup)
 {
-    This->GivePickupTo(InventoryOwner);
+    // r8 is only an argument where the build's give takes it (9.10+); before that it holds whatever the caller left there.
+    This->GivePickupTo(InventoryOwner, Natives::AFortPickup_GivePickupToTakesDestroyPickup ? bDestroyPickup : true);
 }

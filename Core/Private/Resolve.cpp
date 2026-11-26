@@ -7665,12 +7665,27 @@ bool Finder::ResolvePickupGiveLive()
                 const uintptr_t Destroy = FindInstruction(Function + 23, Function + 0x50, { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xCB, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xE9 });
                 return Destroy && FindRawCall(Function + 23, Destroy) != 0;
             };
+            // 9.10 (CL-6639283 0x1582CE0) gives the give a third parameter and Destroys only when it is set: "mov [rsp+8],
+            // rbx; push rdi; sub rsp, 20h; cmp byte [rcx+Role], 3; movzx edi, r8b; mov rbx, rcx; jnz; test rdx, rdx; jz;
+            // ...; call; test dil, dil; jz; mov r8b, 1; xor edx, edx; mov rcx, rbx; call AActor::Destroy".
+            const auto IsDestroyPickupGive = [](uintptr_t Function)
+            {
+                if (FindInstruction(Function, Function + 31, { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03,
+                    0x41, 0x0F, 0xB6, 0xF8, 0x48, 0x8B, 0xD9, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1 }) != Function)
+                {
+                    return false;
+                }
+                const uintptr_t Destroy = FindInstruction(Function + 31, Function + 0x50, { 0x40, 0x84, 0xFF, 0x74, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xCB, 0xE8 });
+                return Destroy && FindRawCall(Function + 31, Destroy) != 0;
+            };
+            const bool bDestroyPickupGive = Give && IsDestroyPickupGive(Give);
             if (Give && (reinterpret_cast<void*>(Give) == Natives::SharedEmptyFunction
                 || FindInstruction(Give, Give + 25, { 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE9, -1, -1, -1, -1, 0xC3 }) == Give
-                || IsReportingGive(Give)))
+                || IsReportingGive(Give) || bDestroyPickupGive))
             {
                 GiveIndex = Slot;
                 Natives::AFortPickup_GivePickupToStripped = reinterpret_cast<void*>(Give);
+                Natives::AFortPickup_GivePickupToTakesDestroyPickup = bDestroyPickupGive;
             }
         }
     }
@@ -7682,7 +7697,8 @@ bool Finder::ResolvePickupGiveLive()
     }
     Natives::AFortPickup_GivePickupToIndex = GiveIndex;
     Natives::AFortPickup_SetPickupTarget = reinterpret_cast<decltype(Natives::AFortPickup_SetPickupTarget)>(SetPickupTarget);
-    Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}, SetPickupTarget +0x{:X}", GiveIndex, SetPickupTarget - Finder::ImageBase());
+    Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}{}, SetPickupTarget +0x{:X}", GiveIndex,
+        Natives::AFortPickup_GivePickupToTakesDestroyPickup ? L" (takes bDestroyPickup)" : L"", SetPickupTarget - Finder::ImageBase());
     return true;
 }
 

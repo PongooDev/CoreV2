@@ -136,6 +136,10 @@ public:
     // compiled out). "cheat nocooldown" sets it along with clearing the cooldowns itself.
     DefineBitfieldUProperty(bNoCoolDown)
     static bool HasNoCoolDownFlag() { return Member_bNoCoolDown.IsAvailable(); }
+    // 8.00+: while set, the owning client's UpdateRotation (9.00 0x17CCBA0) eases the control rotation's roll back to 0
+    // (InitializeZeroingCameraRoll 0x179B040 -> timer -> StartZeroingCameraRoll 0x17C4F00, from the camera modes that roll).
+    DefineBitfieldUProperty(bZeroingCameraRoll)
+    static bool HasZeroingCameraRoll() { return Member_bZeroingCameraRoll.IsAvailable(); }
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     // The player's profile0 (the server queries it for each player as the dedicated server).

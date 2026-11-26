@@ -13,6 +13,7 @@
 #include "AttributeSet.h"
 #include "AbilitySystemInterface.h"
 #include "BackendRequest.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Configuration.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
@@ -505,6 +506,26 @@ void AFortPlayerController::Possess(APawn* InPawn)
         {
             Log::Info(L"Voice chat: {}'s voice handshake wasn't completed; Core completes it so they hear voice", GetName().ToStdString());
             bHandshakeCompleted = 1;
+        }
+    }
+
+    // CoreV2 #688 (owner-approved): the server's camera manager has no roll. Each ServerMove (9.00 0x2BB4C50) sets the
+    // control rotation to the client's view, roll included (ClientRoll), then runs UpdateRotation (0x17CCBA0), whose
+    // ProcessViewRotation (0x1244980 -> 0x2F2E370) clamps it with this camera's LimitViewRoll. Epic's limits are the
+    // engine's +-89.9 (MainPlayerCamera_C and the Fort camera classes keep them), so a roll the 8.00+ camera modes left
+    // on the client stays in the server's control rotation, and Epic's server code sends that rotation back to the
+    // client: the guided missile's StoredControlRotation (SetupRemoteControlPawn 0x1877120, whose OnRep 0x186B3B0 sets
+    // the client's control rotation), Core's death view (ClientSetSpectatorCamera). The client's own roll easing
+    // (bZeroingCameraRoll) runs only while its camera mode asks for it. Builds without it have no rolling camera.
+    if (Role == ROLE_Authority && HasZeroingCameraRoll() && APlayerCameraManager::HasViewRollLimits())
+    {
+        APlayerCameraManager* const CameraManager = PlayerCameraManager;
+        if (CameraManager && (CameraManager->ViewRollMin != 0.f || CameraManager->ViewRollMax != 0.f))
+        {
+            UE_LOG(LogFort, Log, TEXT("Possess: %s's server camera %s had roll limits %f..%f, now 0"), *GetNameSafe(this),
+                *GetNameSafe(reinterpret_cast<UObject*>(CameraManager)), CameraManager->ViewRollMin, CameraManager->ViewRollMax);
+            CameraManager->ViewRollMin = 0.f;
+            CameraManager->ViewRollMax = 0.f;
         }
     }
 

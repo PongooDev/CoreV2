@@ -13616,7 +13616,14 @@ bool Finder::ResolvePoiVolumeLive()
     }
     const auto IsDirectCall = [](uintptr_t Instruction) { return Byte(Instruction) == 0xE8; };
     const uintptr_t GetBodySetupCall = Finder::TraceFind(Ref, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0xFF && Byte(Instruction + 1) == 0x90; });
-    const uintptr_t ParamsCall = GetBodySetupCall ? Finder::TraceFind(GetBodySetupCall + 6, 24, IsDirectCall) : 0;
+    uintptr_t ParamsCall = GetBodySetupCall ? Finder::TraceFind(GetBodySetupCall + 6, 24, IsDirectCall) : 0;
+    // 9.10 (CL-6639283 0x1159215) calls that helper (0x111B760) with the component and the body setup and jumps on
+    // past it: the two calls are the helper's.
+    if (ParamsCall && (Byte(ParamsCall + 5) == 0xE9 || Byte(ParamsCall + 5) == 0xEB))
+    {
+        const uintptr_t Helper = Finder::RelativeTarget(ParamsCall, 1, 5);
+        ParamsCall = IsInText(Helper) ? Finder::TraceFind(Helper, 24, IsDirectCall) : 0;
+    }
     const uintptr_t InitBodyCall = ParamsCall ? Finder::TraceFind(ParamsCall + 5, 24, IsDirectCall) : 0;
     const uintptr_t Params = ParamsCall ? Finder::RelativeTarget(ParamsCall, 1, 5) : 0;
     const uintptr_t InitBody = InitBodyCall ? Finder::RelativeTarget(InitBodyCall, 1, 5) : 0;

@@ -98,6 +98,51 @@ These protect the owner's machine, builds and live setup. They apply to every ag
 - Report honestly: what was checked live (a boot, a log line) and what was only checked statically.
 - Close an issue only with a comment that names the fixing commit (section 7).
 
+## 2a. Coordinating work: when to use subagents
+
+One session acts as the **coordinator**: it runs the issue watch, talks to the owner, hands work to subagents and
+finishes their work. If your tool can start subagents (Claude Code's Agent tool, Codex agents, Freebuff), split the
+work as below. If it can't, do the same steps yourself, one task at a time, in the same order.
+
+**Use a subagent for:**
+- **Each real issue:** one subagent per issue, in its own worktree under `D:\CoreWork`. Related reports, such as two
+  9.00 Creative phone bugs, can share one subagent. Give it the reporter's logs (downloaded to
+  `D:\CoreWork\logs<issue>`), the issue number, what is already known, and the rules it must follow.
+- **A new build ("let's support X"):** start three subagents at once:
+  1. the **promotion**: the launcher's `KnownBuilds.cs`, its tests and tag, the three READMEs and the issue
+     templates;
+  2. the **gameserver bring-up**: SDK and strip diffs, boots, fixes, and the patch-note sweep on the server side;
+  3. the **backend game data**: the `add-build-gamedata` skill.
+  They touch different files, so they don't block each other. Don't use one agent for all three.
+- **A long investigation** that would otherwise fill the coordinator's context, such as decoding saves or tracing
+  a crash.
+
+**Don't use a subagent for:**
+- Small checks: one grep, reading an issue, a single `gh` call, downloading logs.
+- Replying to or closing issues.
+- Deploying the main build and restarting the 5595 backend. **Those are the coordinator's job** (section 7). Subagents
+  never deploy to the main checkout's `x64\Release`, never restart 5595, and never comment on or close issues; they
+  report back instead.
+
+**What every subagent brief must say:**
+- **The rules:** the project rules (CLAUDE.md, section 1), the worktree location (`D:\CoreWork`, never H:), test
+  servers only through the boot-test-server skill's manual path, never port 5595, and never wait on the owner's
+  game.
+- **What to report:** the cause with evidence, the commits, the boot or test results, and what was only checked
+  statically.
+- **What not to do:** don't comment on or close the issue, and don't deploy.
+
+**When a subagent finishes, the coordinator:**
+1. Reviews its report.
+2. Pulls main and builds it into `D:\CoreWork\mainbuild` (delete that folder's PDBs first).
+3. Copies the DLLs into the main checkout only after a clean build: 3 DLLs, 0 errors.
+4. Copies the PDBs only while no `FortniteClient` is running.
+5. Restarts 5595 if Core-Backend changed, and tags a launcher release if Core-Launcher changed.
+6. Comments on and closes the issue, saying what was checked live and what only statically.
+
+If a subagent stops without an answer, decide the next step: ask the reporter for logs, add a diagnostic, or close
+the issue as the build's own behaviour. Don't leave the issue unanswered.
+
 ## 3. Repo map
 
 All three DLLs compile the same shared tree, the way Epic builds one source tree as several targets. Each target

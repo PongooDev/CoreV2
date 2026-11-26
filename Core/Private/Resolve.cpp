@@ -11899,9 +11899,16 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
     // (mov rax, [rcx+1880h]; ...; mov rax, [rax+0F0h]), and there is no inlined one to find: every stack's limit read 1
     // (#659). When the pick is such a getter, GetMaxStackSize is the one shared callee that makes a virtual call (the item
     // definition's, call [rax+348h] at 0x14FFC56).
+    // Live, 0x1799630 and 0x17957B0 (the same getter for +0F8h) are leaf functions with no .pdata entry, so the shared
+    // callee picked above is AFortPlayerController::StaticClass (0x1BA2DB0, the controller cast at 0x1502442):
+    // GetMaxStackSize returned a UClass*'s low half, clamped to 1, and a second BluGlo or quest item never fit (#678).
+    // A lazy StaticClass (mov rax, [rip+...]; test rax, rax near its start) is never GetMaxStackSize either.
     const uintptr_t PickedMaxStackSizeEnd = MaxStackSize ? Finder::FunctionEnd(MaxStackSize) : 0;
-    if (bControllerLimits && PickedMaxStackSizeEnd > MaxStackSize && Finder::BodyIs(MaxStackSize, { 0x48, 0x8B, 0x81 })
-        && !FindVirtualCall(MaxStackSize, PickedMaxStackSizeEnd) && !FindRawCall(MaxStackSize, PickedMaxStackSizeEnd))
+    const bool bPickedGetter = Finder::BodyIs(MaxStackSize, { 0x48, 0x8B, 0x81 }) && !FindRawCall(MaxStackSize, PickedMaxStackSizeEnd);
+    const bool bPickedStaticClass = PickedMaxStackSizeEnd > MaxStackSize
+        && FindInstruction(MaxStackSize, std::min(MaxStackSize + 0x18, PickedMaxStackSizeEnd), { 0x48, 0x8B, 0x05, -1, -1, -1, -1, 0x48, 0x85, 0xC0 });
+    if (bControllerLimits && PickedMaxStackSizeEnd > MaxStackSize && (bPickedGetter || bPickedStaticClass)
+        && !FindVirtualCall(MaxStackSize, PickedMaxStackSizeEnd))
     {
         uintptr_t Virtual = 0;
         bool bVirtualAmbiguous = false;

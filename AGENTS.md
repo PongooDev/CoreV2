@@ -13,13 +13,13 @@ command examples do.
 
 ## 0. Start of every session
 
-1. Read `H:\CoreWork\HANDOFF.md` (local, shared by every agent, not committed). Don't redo or undo work listed in it.
+1. Read `D:\CoreWork\HANDOFF.md` (local, shared by every agent, not committed). Don't redo or undo work listed in it.
 2. Run the core MCP's `project_status` tool (if available). It says which build is in development, the supported
    range, the installed builds, the SDKs and which IDA port holds which exe. Without it, read the README status
    table, Core-Launcher's `src/Core.Launcher.Hosting/Builds/KnownBuilds.cs`, and the knowledge base below.
-3. Work in your own git worktree under `H:\CoreWork` (see section 5). Never edit the main checkout at
+3. Work in your own git worktree under `D:\CoreWork` (see section 5). Never edit the main checkout at
    `%USERPROFILE%\Documents\GitHub\CoreV2` directly.
-4. If you can't finish in this session, update `H:\CoreWork\HANDOFF.md` before you stop: what is in progress, the
+4. If you can't finish in this session, update `D:\CoreWork\HANDOFF.md` before you stop: what is in progress, the
    branch or worktree, what was verified (live or static), what's next.
 
 **Read-only knowledge base for per-build facts** (paths, IDA ports, CLs, past findings):
@@ -88,7 +88,7 @@ These protect the owner's machine, builds and live setup. They apply to every ag
   (`Core.dll`) or in Core-Backend instead. If only a client change would fix it, say so on the issue.
 - **Never** print, copy or commit pak AES keys.
 - Run any Python that reads downloaded or untrusted files with `python -I`.
-- Work in git worktrees under `H:\CoreWork`; build only there, never in the main checkout. The owner's launcher
+- Work in git worktrees under `D:\CoreWork`; build only there, never in the main checkout. The owner's launcher
   loads the DLLs in the main checkout's `x64\Release` (`%USERPROFILE%\Documents\GitHub\CoreV2\x64\Release`), so
   **after every clean full build, copy `Core.dll`, `CoreClient.dll` and `CoreRedirect.dll` there** (and their
   `.pdb` files when no `FortniteClient*` process is running), before you finish. Copy only after the build has all
@@ -167,13 +167,13 @@ build's IDB and SDK, and a headless boot of the affected builds (`docs/agents/he
 
 ## 5. How a change is done here
 
-1. Read `H:\CoreWork\HANDOFF.md` and run `project_status`.
+1. Read `D:\CoreWork\HANDOFF.md` and run `project_status`.
 2. Read the issue in full: build, mode, log, Core commit. If it's the build's own behaviour (the game did it that
    way in that version), it's rejected, not fixed (`docs/agents/issues-and-prs.md`).
 3. Make a worktree from a fresh `origin/main`:
    ```
    git -C $env:USERPROFILE\Documents\GitHub\CoreV2 fetch origin
-   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<issue> H:\CoreWork\wt-<issue> origin/main
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<issue> D:\CoreWork\wt-<issue> origin/main
    ```
 4. Find the cause with evidence, not names alone:
    - symbolise a crash offset against the matching commit's PDB (`docs/agents/crash-symbolising.md`);
@@ -194,11 +194,11 @@ build's IDB and SDK, and a headless boot of the affected builds (`docs/agents/he
     `git push origin HEAD:main`.
 12. Comment on the issue with the commit and what was verified; close it if it's fixed.
 13. Run `deploy_main_build` (if available) so the owner's launcher gets the fix. Without it, note in
-    `H:\CoreWork\HANDOFF.md` that main needs a build and deploy.
+    `D:\CoreWork\HANDOFF.md` that main needs a build and deploy.
 14. Copy the latest DLLs to the main checkout's `x64\Release` (the owner's launcher loads them): the three DLLs from
     your worktree's `x64\Release`, and the PDBs when no `FortniteClient*` is running. Never run MSBuild in the main
     checkout.
-15. Remove your worktree and branch: `git worktree remove H:\CoreWork\wt-<issue>` and `git branch -D fix-<issue>`.
+15. Remove your worktree and branch: `git worktree remove D:\CoreWork\wt-<issue>` and `git branch -D fix-<issue>`.
 
 ## 6. Definition of done
 
@@ -242,7 +242,7 @@ A change is done only when all of these hold:
   (owner's rule, 2026-11-19).
 - **MrPodge6's decisions count as the owner's** on issues and PRs, from 2026-11-17 on (not earlier ones): reopening,
   closing, approving a change, including a CoreClient change on his issue. The safety rules above still apply.
-- Unfinished work goes in `H:\CoreWork\HANDOFF.md`, never in a pushed WIP commit or branch.
+- Unfinished work goes in `D:\CoreWork\HANDOFF.md`, never in a pushed WIP commit or branch.
 
 **Pull requests: review, fix, merge.** Agents review every open PR, make it right and merge it themselves (the
 owner's rule). Check it out in a worktree (`gh pr checkout`), review it against sections 1 and 6 (Epic's names,

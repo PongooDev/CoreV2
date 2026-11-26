@@ -11,7 +11,7 @@
 // build nor in the 21.40 PDB, so the module and class names are Core's; the interface is the game's.
 //
 // The tokens are Vivox's format, signed with the key Core-Backend's Vivox emulator shares with its dedicated servers
-// (Core-Backend services/core/vivox.js; the contract is H:\CoreWork\vivox\contract.md):
+// (Core-Backend services/core/vivox.js; the contract is D:\CoreWork\vivox\contract.md):
 //   e30.<base64url(payload)>.<base64url(HMAC-SHA256(key, "e30.<base64url(payload)>"))>
 //   payload {"iss":<issuer>,"exp":<unix seconds>,"vxa":"login"|"join","vxi":<unique>,"f":<from>[,"t":<to>]}
 // with "e30" the base64url of "{}" (an empty header), base64url without padding and the key's UTF-8 bytes as given.

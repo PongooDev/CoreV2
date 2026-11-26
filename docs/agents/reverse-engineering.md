@@ -51,17 +51,17 @@ python -I $env:USERPROFILE\Documents\Core-Docs\Tools\ida.py --port=<port> call <
 
 Keep snippets bounded (each call has a time limit) and write them in your own scratch folder, not in `Core-Docs\Tools`.
 
-**When no instance has the build:** older builds have IDB copies in `H:\CoreWork\idb\<build>\` (about 1.2 GB
-each). Serve one headless on a free port (13350 and up) and stop it when you are done; keep the copy:
+**When no instance has the build:** serve the original `H:\IDA Dumps\<build>` IDB with idaserve.py; never copy
+IDBs. Serve it headless on a free port (13350 and up) and stop it when you are done:
 
 ```
-cd H:\CoreWork
-python -I $env:USERPROFILE\Documents\Core-Docs\Tools\idaserve.py H:\CoreWork\idb\6.21\<file>.i64 13350
+cd D:\CoreWork
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\idaserve.py "H:\IDA Dumps\6.21\<file>.i64" 13350
 ```
 
 Run it from outside `Core-Docs\Tools` (a `dis.py` there breaks IDA's Python). Run at most two IDA instances of
-your own at a time; the PC has 16 GB of RAM. The owner's own IDB folders (`H:\IDA Dumps\<version>`) are never
-opened for writing; serve a copy instead.
+your own at a time; the PC has 16 GB of RAM. idaserve.py closes the database without saving, so the original
+stays as it was. Don't serve an IDB that one of the owner's IDA instances (`project_status`) has open.
 
 ## 3. Types and members: Dumper-7 SDKs
 

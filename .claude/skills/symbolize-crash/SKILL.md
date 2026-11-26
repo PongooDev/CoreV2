@@ -15,21 +15,21 @@ Depth: `docs/agents/crash-symbolising.md`.
    in age). Else:
 4. Build that commit in a detached worktree:
    ```
-   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
-   git -C H:\CoreWork\sym-<commit> submodule update --init
-   cd H:\CoreWork\sym-<commit>
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach D:\CoreWork\sym-<commit> <commit>
+   git -C D:\CoreWork\sym-<commit> submodule update --init
+   cd D:\CoreWork\sym-<commit>
    "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo
    ```
 5. Check `x64\Release\Core.dll`'s size equals the release's `Core.dll`. Different size: wrong commit, stop.
 6. Symbolise (PowerShell; image base + offset, Core.dll's base is 0x180000000):
    ```
    $B = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"
-   & "$B\dumpbin.exe" /nologo /headers H:\CoreWork\sym-<commit>\x64\Release\Core.dll | Select-String "image base"
-   & "$B\llvm-symbolizer.exe" --obj=H:\CoreWork\sym-<commit>\x64\Release\Core.dll --inlines --pretty-print 0x1800DE172
+   & "$B\dumpbin.exe" /nologo /headers D:\CoreWork\sym-<commit>\x64\Release\Core.dll | Select-String "image base"
+   & "$B\llvm-symbolizer.exe" --obj=D:\CoreWork\sym-<commit>\x64\Release\Core.dll --inlines --pretty-print 0x1800DE172
    ```
 7. Check the frames form one call path and the faulting instruction matches the log
    (`dumpbin /disasm /range:<va>,<va+0x40>`).
-8. Remove the worktree: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.
+8. Remove the worktree: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove D:\CoreWork\sym-<commit>`.
 
 Done when: every Core frame has a name and line on one consistent path. Then diagnose from the build's code; don't
 call it a missing member without a `[Fatal]` line naming it.

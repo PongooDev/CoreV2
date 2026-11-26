@@ -10,7 +10,7 @@ until fixed or explained in the message. Rules: AGENTS.md sections 1, 2 and 8.
 
 **Scope**
 1. Does the diff contain only this change's files? (No `git add -A`; no other agent's files; no `.claude/settings.local.json`, `.freebuff/`, logs or scratch.)
-2. Was `H:\CoreWork\HANDOFF.md` read, and does this commit not undo work listed there?
+2. Was `D:\CoreWork\HANDOFF.md` read, and does this commit not undo work listed there?
 
 **Evidence**
 3. Was the cause proven from this build's code, log or symbolised crash, with addresses and the CL in the message?

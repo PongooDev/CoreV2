@@ -21,7 +21,7 @@ another agent's test server (`-nullrhi`, not 5595) blocks a boot; keep doing sta
 3. Build your worktree (`<worktree>\x64\Release\Core.dll` and `CoreRedirect.dll`).
 4. Start a test backend in the background from a Core-Backend checkout and wait for `Listening on port 5711`
    (another free port if 5711 is taken):
-   `node src/main.js --port 5711 --data H:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0`
+   `node src/main.js --port 5711 --data D:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0`
 5. Boot, gated, in one PowerShell command (`--backend-port` = the test backend's port; default 5711):
    ```
    if (Get-CimInstance Win32_Process -Filter "Name LIKE 'FortniteClient%'" | Where-Object { $_.CommandLine -match '-nullrhi' -and $_.CommandLine -notmatch '5595' }) { "Another test server is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --backend-port 5711 --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }

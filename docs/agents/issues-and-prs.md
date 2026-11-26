@@ -61,11 +61,11 @@ The owner's rule: agents review every open PR, make it right, and merge it thems
 "changes requested". The `review-and-merge-pr` skill has the same steps.
 
 1. List open PRs: `gh pr list -R PongooDev/CoreV2 --state open`. Read each: `gh pr view <n> -R PongooDev/CoreV2 --comments`,
-   `gh pr diff <n> -R PongooDev/CoreV2`. Check `H:\CoreWork\HANDOFF.md` that nobody is already on it.
-2. Check it out in a worktree under `H:\CoreWork`:
+   `gh pr diff <n> -R PongooDev/CoreV2`. Check `D:\CoreWork\HANDOFF.md` that nobody is already on it.
+2. Check it out in a worktree under `D:\CoreWork`:
    ```
-   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\pr-<n> origin/main
-   cd H:\CoreWork\pr-<n>
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach D:\CoreWork\pr-<n> origin/main
+   cd D:\CoreWork\pr-<n>
    gh pr checkout <n> -R PongooDev/CoreV2
    git submodule update --init
    ```

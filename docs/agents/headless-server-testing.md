@@ -35,7 +35,7 @@ just that `job_id` until it reports the result. Then `server_log_summary` (log p
 2. Build your worktree (`build_corev2`, or MSBuild `-t:Server`). Your DLLs are in `<worktree>\x64\Release`.
 3. Start a test backend from a Core-Backend checkout, in the background, with its own data folder:
    ```
-   node src/main.js --port 5711 --data H:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0
+   node src/main.js --port 5711 --data D:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0
    ```
    Wait for `Listening on port 5711`. If 5711 is taken by another agent's backend, pick another free port and pass it
    to the script as `--backend-port <port>`.

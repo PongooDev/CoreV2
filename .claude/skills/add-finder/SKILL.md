@@ -9,7 +9,7 @@ Depth: `docs/agents/finders.md`. Rules: AGENTS.md sections 1 and 2.
 
 1. Name the target with the 21.40 PDB (`pdb2140_find`, else grep `D:\ResortWork\IDA\21.40\symbols_21.40.txt`).
 2. Locate it read-only in the IDB of: the new build, the previous build, and the oldest build that has it
-   (`project_status` gives the IDA ports; older builds: `H:\CoreWork\idb\<build>` via `idaserve.py`).
+   (`project_status` gives the IDA ports; older builds: serve the original `H:\IDA Dumps\<build>` IDB with `idaserve.py`; never copy IDBs).
 3. Write down the anchor that holds on all of them (a log string, a neighbouring vtable slot, a reflected exec's
    call). Note what differs.
 4. Code it in the existing `Finder::Resolve*` group:

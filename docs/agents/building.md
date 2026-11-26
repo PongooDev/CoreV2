@@ -45,13 +45,13 @@ Preferred: the core MCP's `deploy_main_build` (it returns a `job_id` to poll lik
 slot). Fallback, only after your commit is on `origin/main`:
 
 1. `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 pull --ff-only`. If it fails (local changes, diverged), stop and
-   write it in `H:\CoreWork\HANDOFF.md`.
+   write it in `D:\CoreWork\HANDOFF.md`.
 2. Build the main checkout into a separate folder:
    ```
    cd $env:USERPROFILE\Documents\GitHub\CoreV2
-   "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo -nodeReuse:false -p:OutDir=H:\CoreWork\mainbuild\
+   "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo -nodeReuse:false -p:OutDir=D:\CoreWork\mainbuild\
    ```
-3. Copy `Core.dll`, `CoreClient.dll` and `CoreRedirect.dll` from `H:\CoreWork\mainbuild\` into
+3. Copy `Core.dll`, `CoreClient.dll` and `CoreRedirect.dll` from `D:\CoreWork\mainbuild\` into
    `%USERPROFILE%\Documents\GitHub\CoreV2\x64\Release\`.
 4. Copy the PDBs only when no `FortniteClient*` process is running; otherwise note in `HANDOFF.md` that the PDBs
    are stale.

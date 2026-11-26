@@ -8,15 +8,15 @@ description: Use for every open CoreV2 pull request - check it out in a worktree
 The owner's rule: agents review every open PR, make it right and merge it themselves. Depth:
 `docs/agents/issues-and-prs.md`. Rules: AGENTS.md sections 1, 2, 6 and 8.
 
-1. Read `H:\CoreWork\HANDOFF.md` (skip PRs someone is already on). `gh pr list -R PongooDev/CoreV2 --state open`.
+1. Read `D:\CoreWork\HANDOFF.md` (skip PRs someone is already on). `gh pr list -R PongooDev/CoreV2 --state open`.
 2. Read the PR: `gh pr view <n> -R PongooDev/CoreV2 --comments`, `gh pr diff <n> -R PongooDev/CoreV2`.
 3. Reject only if it adds something ruled out (player-bot features beyond the Phoebe scope, CoreClient changes
    without the owner's OK): `gh pr close <n> -R PongooDev/CoreV2 --comment "<why>"`. Stop.
 4. Worktree and checkout:
    ```
    git -C $env:USERPROFILE\Documents\GitHub\CoreV2 fetch origin
-   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\pr-<n> origin/main
-   cd H:\CoreWork\pr-<n>
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach D:\CoreWork\pr-<n> origin/main
+   cd D:\CoreWork\pr-<n>
    gh pr checkout <n> -R PongooDev/CoreV2
    git submodule update --init
    ```
@@ -34,7 +34,7 @@ The owner's rule: agents review every open PR, make it right and merge it themse
 8. Merge: `gh pr merge <n> -R PongooDev/CoreV2 --merge`.
 9. Comment on the PR: what you changed and why (with the evidence), what was verified live and what statically.
 10. Fixes still due on main: make them now (`fix-gameserver-issue` steps from 5 on). Then `deploy_main_build`.
-11. Remove the worktree (`git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\pr-<n>`).
+11. Remove the worktree (`git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove D:\CoreWork\pr-<n>`).
     Write anything unfinished in `HANDOFF.md`.
 
 Done when: the PR is merged (or rejected with a reason), every rework is on main, the build is clean, boots where

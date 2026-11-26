@@ -19,8 +19,8 @@ name, pending kill). Read that first: it often answers the question without symb
 ## 2. Build that commit's PDB (in a worktree, never in the main checkout)
 
 ```
-git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
-cd H:\CoreWork\sym-<commit>
+git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach D:\CoreWork\sym-<commit> <commit>
+cd D:\CoreWork\sym-<commit>
 git submodule update --init
 "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo
 ```
@@ -38,8 +38,8 @@ downloaded release DLL, which has no PDB of its own. Fallback: the tools in the 
 
 ```
 $B = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"
-& "$B\dumpbin.exe" /nologo /headers H:\CoreWork\sym-<commit>\x64\Release\Core.dll | Select-String "image base"
-& "$B\llvm-symbolizer.exe" --obj=H:\CoreWork\sym-<commit>\x64\Release\Core.dll --inlines --pretty-print 0x1800DE172 0x180012345
+& "$B\dumpbin.exe" /nologo /headers D:\CoreWork\sym-<commit>\x64\Release\Core.dll | Select-String "image base"
+& "$B\llvm-symbolizer.exe" --obj=D:\CoreWork\sym-<commit>\x64\Release\Core.dll --inlines --pretty-print 0x1800DE172 0x180012345
 ```
 
 - `llvm-symbolizer` takes **virtual addresses**: image base (`0x180000000` for Core.dll; check with dumpbin) plus the
@@ -63,4 +63,4 @@ member unless the log has a `[Fatal]` line naming it.
 Frames in the game's exe (`FortniteClient-Win64-Shipping.exe+0x...`) are read in that build's IDB at
 image base + offset (the IDB's base is shown by `project_status` or IDA).
 
-Remove the worktree when done: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.
+Remove the worktree when done: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove D:\CoreWork\sym-<commit>`.

@@ -8,7 +8,7 @@ description: Use when the owner says "start supporting <Fortnite version>" (or "
 Depth: `docs/agents/new-build-bringup.md`. Rules: AGENTS.md sections 1 and 2 (one server at a time, test ports,
 no clients, no full matches, never copy builds).
 
-1. Read `H:\CoreWork\HANDOFF.md`. Run `project_status` (core MCP, if available) for the new build's folder, SDK,
+1. Read `D:\CoreWork\HANDOFF.md`. Run `project_status` (core MCP, if available) for the new build's folder, SDK,
    IDA port and CL. Else find them by hand (doc section 1).
 2. Promotion (one commit per repo, each rebased and pushed):
    - Core-Launcher: `KnownBuilds.cs` const + `Builds` entry `InProgress` (BattleRoyale, Creative from 7.00); the
@@ -24,7 +24,7 @@ no clients, no full matches, never copy builds).
    commands and routes for the backend; patch-note features to server code and data; the first-match path.
 7. Backend data: Core-Backend's `add-build-gamedata` skill.
 8. Each fix: its own commit with the build's addresses and what was verified live vs statically.
-9. Write the follow-ups you found but didn't build into `H:\CoreWork\HANDOFF.md` (or issues), and report: commits,
+9. Write the follow-ups you found but didn't build into `D:\CoreWork\HANDOFF.md` (or issues), and report: commits,
    boots with key lines, static-only checks, what a live match must confirm.
 
 Done when: the new build boots STW and BR with 0 missing and loot lines passing, the previous build still does, all

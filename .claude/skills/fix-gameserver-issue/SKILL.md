@@ -7,7 +7,7 @@ description: Use when fixing a CoreV2 gameserver (Core.dll) GitHub issue or a re
 
 Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
 
-1. Read `H:\CoreWork\HANDOFF.md`. If the issue is listed there, continue from it; don't redo or undo listed work.
+1. Read `D:\CoreWork\HANDOFF.md`. If the issue is listed there, continue from it; don't redo or undo listed work.
 2. Run the core MCP's `project_status` (if available) to learn the build in development and the IDA ports.
 3. Read the issue and every comment: `gh issue view <n> -R PongooDev/CoreV2 --comments`. Note build, CL, mode,
    Core commit, log.
@@ -16,8 +16,8 @@ Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
 5. Make a worktree:
    ```
    git -C $env:USERPROFILE\Documents\GitHub\CoreV2 fetch origin
-   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<n> H:\CoreWork\wt-<n> origin/main
-   git -C H:\CoreWork\wt-<n> submodule update --init
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<n> D:\CoreWork\wt-<n> origin/main
+   git -C D:\CoreWork\wt-<n> submodule update --init
    ```
 6. Find the cause with evidence:
    - crash offsets: the `symbolize-crash` skill;
@@ -39,7 +39,7 @@ Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
 13. `git fetch origin`, `git rebase origin/main`, rebuild if the rebase brought changes, `git push origin HEAD:main`.
 14. Comment and close: `gh issue close <n> -R PongooDev/CoreV2 --comment "Fixed in <commit>: <cause, fix, verified live/static>"`.
 15. Deploy for the owner: `deploy_main_build` (if available), else note it in `HANDOFF.md`.
-16. Clean up: stop your processes, `git worktree remove H:\CoreWork\wt-<n>`, `git branch -D fix-<n>`.
-    If anything is unfinished, write it in `H:\CoreWork\HANDOFF.md` (what, branch/worktree, verified, next).
+16. Clean up: stop your processes, `git worktree remove D:\CoreWork\wt-<n>`, `git branch -D fix-<n>`.
+    If anything is unfinished, write it in `D:\CoreWork\HANDOFF.md` (what, branch/worktree, verified, next).
 
 Done when: AGENTS.md section 6 (definition of done) is all ticked.

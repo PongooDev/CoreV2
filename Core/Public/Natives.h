@@ -909,6 +909,9 @@ namespace Natives
     // IsRespawningAllowed (slot 0x124), then the controller's respawn invalidation timer (0xF97C10). -1 / null before.
     inline int32_t AFortGameStateZone_IsRespawningAllowedIndex = -1;
     inline void (*AFortPlayerControllerAthena_StartRespawnInvalidationTimer)(AFortPlayerControllerAthena* This) = nullptr;
+    // 9.10+: the unreflected flag (after bLeaveDisconnectedPawnsInGame) of a controller that stands in for a disconnected
+    // player; the pawn-death handler destroys such a controller last.
+    inline ptrdiff_t AFortPlayerControllerAthena_DestroyOnPawnDiedOffset = -1;
     // 9.00 (CL-6337466): the handler takes the dead pawn first (21.40's OnPawnDied(AFortPlayerPawn*, float, ...); the
     // pawn's calls, 0x1771477 and 0x10A8DF3, pass it in rdx and Damage in xmm2), and Zone's the same. Its stripped body
     // (0x1085440) first clears a timer of the pawn's (an unreflected FTimerHandle, +0xC40 in 9.00, that 0x176CEC0 sets

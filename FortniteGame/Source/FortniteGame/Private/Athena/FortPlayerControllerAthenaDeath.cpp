@@ -491,6 +491,19 @@ bool AFortPlayerControllerAthena::IsTeamOut()
 
 void AFortPlayerControllerAthena::OnPawnDied(AFortPlayerPawn* DiedPawn, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer)
 {
+    // 9.10 (0x10F49EE) ends every death with it: a controller standing in for a disconnected player goes with its pawn.
+    struct FDestroyStandInController
+    {
+        AFortPlayerControllerAthena* Controller;
+        ~FDestroyStandInController()
+        {
+            const ptrdiff_t Offset = Natives::AFortPlayerControllerAthena_DestroyOnPawnDiedOffset;
+            if (Offset >= 0 && Natives::AActor_Destroy && *(reinterpret_cast<const uint8_t*>(Controller) + Offset) != 0)
+            {
+                Natives::AActor_Destroy(reinterpret_cast<AActor*>(Controller), false, true);
+            }
+        }
+    } DestroyStandInController{ this };
     // 9.00 (0x1085440) first clears the dead pawn's timer (+0xC40) on the world's timer manager.
     if (UWorld* TimerWorld = DiedPawn && Natives::AFortPlayerPawn_PawnDiedTimerHandleOffset >= 0 ? GetWorld() : nullptr)
     {

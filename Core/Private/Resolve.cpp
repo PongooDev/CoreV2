@@ -19373,7 +19373,11 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
     // taken for the build's own handler, so nobody who died was out of the match: no place, no stats, and the results
     // screen waited on "Team Still Alive" (CoreV2 #660).
     ptrdiff_t PawnTimerHandleOffset = -1;
-    if (!MapCursorRemoval && !ServerRemoveMapCursor && MarkerComponentOffset > 0 && AthenaEnd > Athena && AthenaEnd - Athena <= 0x1A0)
+    // 9.10 (CL-6639283, slot 0x3C0, 0x10F4870, 0x1AC bytes) ends the 9.00 body with "cmp byte ptr [rbx + 27C2h], 0; ...;
+    // mov r8b, 1; xor edx, edx; mov rcx, rbx; ...; jmp AActor::Destroy": a stand-in controller that kept a disconnected
+    // player's pawn in the game (bLeaveDisconnectedPawnsInGame, 0x10F9210 sets the flag) goes with that pawn's death.
+    ptrdiff_t DestroyOnPawnDiedOffset = -1;
+    if (!MapCursorRemoval && !ServerRemoveMapCursor && MarkerComponentOffset > 0 && AthenaEnd > Athena && AthenaEnd - Athena <= 0x1C0)
     {
         std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
         // lea rdx, [reg + disp32] (REX.W 8D, mod 10, reg rdx) and mov rcx, reg (3 bytes) right before the call.
@@ -19386,7 +19390,19 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
             }
             return { Byte(Lea + 2) & 0x07, *reinterpret_cast<const int32_t*>(Lea + 3) };
         };
-        if (Calls.size() == 8 && Calls[3].second == Zone && Calls[2].second != Zone)
+        if (Calls.size() == 8 && AthenaEnd - Athena > 0x1A0)
+        {
+            const uintptr_t Flag = FindInstruction(Calls.back().first + 5, AthenaEnd, { 0x80, -1, -1, -1, 0x00, 0x00, 0x00 });
+            const uintptr_t Tail = Flag ? FindInstruction(Flag + 7, AthenaEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2 }) : 0;
+            const uintptr_t Jump = Tail ? FindInstruction(Tail + 5, std::min(Tail + 0x20, AthenaEnd), { 0xE9 }) : 0;
+            const uintptr_t Destroy = Jump ? Finder::RelativeTarget(Jump, 1, 5) : 0;
+            if (Destroy && (Byte(Flag + 1) & 0xF8) == 0xB8 && (Byte(Flag + 1) & 0x07) != 0x04 && (Natives::AActor_Destroy || Finder::ResolveActorDestroyLive())
+                && Destroy == reinterpret_cast<uintptr_t>(Natives::AActor_Destroy))
+            {
+                DestroyOnPawnDiedOffset = *reinterpret_cast<const int32_t*>(Flag + 2);
+            }
+        }
+        if (Calls.size() == 8 && Calls[3].second == Zone && Calls[2].second != Zone && (AthenaEnd - Athena <= 0x1A0 || DestroyOnPawnDiedOffset > 0))
         {
             const auto [FindRegister, FindOffset] = PawnHandleLea(Calls[0].first);
             const auto [ClearRegister, ClearOffset] = PawnHandleLea(Calls[1].first);
@@ -19478,6 +19494,7 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
     Natives::UAthenaMarkerComponent_LocalRemoveMapMarker = reinterpret_cast<decltype(Natives::UAthenaMarkerComponent_LocalRemoveMapMarker)>(MarkerRemoval);
     Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_StartRespawnInvalidationTimer)>(RespawnInvalidationTimer);
     Natives::AFortGameStateZone_IsRespawningAllowedIndex = GameStateIsRespawningAllowedIndex;
+    Natives::AFortPlayerControllerAthena_DestroyOnPawnDiedOffset = MarkerRemoval ? DestroyOnPawnDiedOffset : -1;
     StrippedIndex = Index;
     Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}{}), which never calls RemoveFromAlivePlayers",
         Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : (MapCursorRemoval || ServerRemoveMapCursor || MarkerRemoval) ? L"a call to " : L"a stub, not ", Zone - Finder::ImageBase(),
@@ -19486,6 +19503,7 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
         : MarkerRemoval ? std::format(L" and the MarkerComponent's (+0x{:X}) LocalRemoveMapMarker 0x{:X}{}{}", MarkerComponentOffset, MarkerRemoval - Finder::ImageBase(),
             RespawnInvalidationTimer ? std::format(L", then the game state's IsRespawningAllowed (slot 0x{:X}) and the respawn invalidation timer 0x{:X}", GameStateIsRespawningAllowedIndex, RespawnInvalidationTimer - Finder::ImageBase()) : std::wstring(),
             PawnTimerHandleOffset >= 0 ? std::format(L"; it takes the dead pawn and first clears the pawn's timer at +0x{:X}", PawnTimerHandleOffset) : std::wstring())
+            + (Natives::AFortPlayerControllerAthena_DestroyOnPawnDiedOffset >= 0 ? std::format(L"; a stand-in controller (+0x{:X}) is destroyed last", Natives::AFortPlayerControllerAthena_DestroyOnPawnDiedOffset) : std::wstring())
         : std::wstring());
     return StrippedIndex;
 }

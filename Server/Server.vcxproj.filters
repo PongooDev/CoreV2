@@ -1589,6 +1589,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolumeTimeOfDayComponent.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortMinigameSettingsBuilding.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Customization</Filter>
     </ClInclude>
@@ -2435,6 +2438,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolumeTimeOfDayComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortMinigameSettingsBuilding.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortMutatorListComponent.cpp">

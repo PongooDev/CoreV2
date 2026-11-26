@@ -53,6 +53,7 @@
 #include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortLevelSaveComponent.h"
+#include "Creative/FortMinigameSettingsBuilding.h"
 #include "Creative/FortVolumeTimeOfDayComponent.h"
 #include "Minigame/FortMinigame.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
@@ -500,6 +501,8 @@ static void InstallHooks()
             AAthenaCreativeRift::HookVTables();
             // 8.00+ Creative (#596): an island's Time of Day setting, its own time of day manager.
             UFortVolumeTimeOfDayComponent::HookVTables();
+            // 9.00+ Creative (#684): the machine's SettingsVolume, which links it to its volume on the clients (the GAME tab).
+            AFortMinigameSettingsBuilding::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameStateAthena::HookCallSites();

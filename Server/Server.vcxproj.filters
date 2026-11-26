@@ -475,6 +475,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\UI">
       <UniqueIdentifier>{3986b140-8ca9-4033-aeb8-9262907404ee}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\Vehicles">
+      <UniqueIdentifier>{5d0c7e2a-3b41-4f6e-9a8c-1e2f3a4b5c6d}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Weapons">
       <UniqueIdentifier>{a60b78ef-8e6d-4ffa-94f0-fe242f844d74}</UniqueIdentifier>
     </Filter>
@@ -555,6 +558,9 @@
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\UI\FrontEnd">
       <UniqueIdentifier>{f2dad15e-c4ae-4c8c-8497-ca25487a5dd8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Vehicles">
+      <UniqueIdentifier>{7e1d8f3b-4c52-4a7f-8b9d-2f3a4b5c6d7e}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Weapons">
       <UniqueIdentifier>{cb878146-92e5-43ff-894f-2ae885105912}</UniqueIdentifier>
@@ -1829,6 +1835,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortProjectileAthena.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Vehicles\FortVehicleSeatWeaponComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Vehicles</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeaponRangedMountedCannon.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
     </ClInclude>
@@ -2661,6 +2670,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortProjectileAthena.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Vehicles\FortVehicleSeatWeaponComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Vehicles</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeaponRangedMountedCannon.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>

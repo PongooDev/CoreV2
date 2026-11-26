@@ -108,6 +108,7 @@
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "VivoxVoiceChatToken.h"
+#include "Vehicles/FortVehicleSeatWeaponComponent.h"
 #include "Weapons/FortWeaponRangedMountedCannon.h"
 
 #include <chrono>
@@ -496,6 +497,8 @@ static void InstallHooks()
             AAthenaFillFloor::HasSetCapHeight();
             // 8.30's Pirate Cannon: firing the passenger (ServerFireActorInCannon_Implementation, stripped).
             AFortWeaponRangedMountedCannon::HookVTables();
+            // 9.10's vehicle seat weapons (the Pirate Cannon's): EquipVehicleWeapon, stripped, after OnPawnEnterSeat (#693).
+            UFortVehicleSeatWeaponComponent::HookVTables();
             AFortOctopusVehicle::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();

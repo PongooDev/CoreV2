@@ -258,6 +258,9 @@ namespace Finder
     // 9.10+: AFortPlayerPawn::SetLastEquippedWeaponOrGadget(const UFortItem*, const UFortWorldItemDefinition*)'s slot,
     // where a weapon definition's ServerExecute calls it and the build left it stripped. -1 elsewhere.
     int32_t SetLastEquippedWeaponOrGadgetSlot();
+    // 9.10+: UFortVehicleSeatWeaponComponent::OnPawnEnterSeat's slot, the one short function that walks WeaponSeatDefinitions and
+    // stores ActiveSeatIdx. -1 when none or several do.
+    int32_t VehicleSeatWeaponOnPawnEnterSeatSlot(ptrdiff_t WeaponSeatDefinitionsOffset, ptrdiff_t ActiveSeatIdxOffset);
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
     // The call or tail jump to the stripped AFortPickup::GivePickupTo in a class's own native override of it

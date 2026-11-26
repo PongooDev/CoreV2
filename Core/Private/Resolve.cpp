@@ -15927,6 +15927,20 @@ namespace
     }
 }
 
+int32_t Finder::VehicleSeatWeaponOnPawnEnterSeatSlot(ptrdiff_t WeaponSeatDefinitionsOffset, ptrdiff_t ActiveSeatIdxOffset)
+{
+    // UFortVehicleSeatWeaponComponent::OnPawnEnterSeat (9.10 CL-6573057 slot 0x7A, 0x1155000): the one short slot that walks
+    // WeaponSeatDefinitions and stores ActiveSeatIdx. OnPawnExitSeat (0x7B) and InitializeComponent (0x5E) walk the
+    // definitions without the store; GetShootingConeTM (0x79) is longer than 0x100.
+    void** const VTable = CdoVTable(L"/Script/FortniteGame.FortVehicleSeatWeaponComponent");
+    const int32_t Index = UniqueSlotReferencing(VTable, 0x100, { WeaponSeatDefinitionsOffset, ActiveSeatIdxOffset }, false);
+    if (Index >= 0)
+    {
+        Log::Info(L"Finder: UFortVehicleSeatWeaponComponent::OnPawnEnterSeat is slot 0x{:X}", Index);
+    }
+    return Index;
+}
+
 uint8_t* Finder::AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset)
 {
     const uintptr_t EndAbility = Finder::FunctionStart(OnlyRef(L"%s EndAbility"));

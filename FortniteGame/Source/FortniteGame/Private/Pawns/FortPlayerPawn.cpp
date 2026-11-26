@@ -12,6 +12,7 @@
 #include "FortGameState.h"
 #include "GameFramework/Controller.h"
 #include "Hooks.h"
+#include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
@@ -470,6 +471,54 @@ void AFortPlayerPawn::ServerReviveFromDBNO_Implementation(AController* EventInst
     }
     AthenaPawn->DBNORevivalStacking = 1;
     CallVirtual<void>(AthenaController, Natives::AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex, AthenaPawn);
+}
+
+void AFortPlayerPawn::SetLastEquippedWeaponOrGadget(const UFortItem* Item, const UFortWorldItemDefinition* ItemDefinition)
+{
+#if WITH_SERVER_CODE
+    // 9.01's body (CL-6428087 0x1771560: on the server, a valid GUID replaces LastEquippedWeaponOrGadgetGUID), given the
+    // item instead of its GUID as 9.10 passes it. 9.10's EquipLastWeapon (0x17C44F0) first tries the new TempWeaponsStack,
+    // which no code left in the build fills, then this GUID.
+    (void)ItemDefinition;
+    const UFortWorldItem* WorldItem = Cast<UFortWorldItem>(const_cast<UFortItem*>(Item));
+    if (Role != ROLE_Authority || !WorldItem)
+    {
+        return;
+    }
+    const FFortItemEntry& Entry = WorldItem->ItemEntry;
+    const FGuid Guid = Entry.ItemGuid;
+    if (Guid.IsValid())
+    {
+        *reinterpret_cast<FGuid*>(reinterpret_cast<uint8_t*>(this) + LastEquippedWeaponGUIDOffset()) = Guid;
+    }
+#endif
+}
+
+void AFortPlayerPawn::SetLastEquippedWeaponOrGadgetHK(AFortPlayerPawn* This, const UFortItem* Item, const UFortWorldItemDefinition* ItemDefinition)
+{
+    This->SetLastEquippedWeaponOrGadget(Item, ItemDefinition);
+}
+
+void AFortPlayerPawn::HookLastEquippedWeaponVTables()
+{
+    // 9.10 (CL-6639283): slot 0x1E2. Builds that keep it (9.01 and earlier take the GUID) are left alone.
+    const int32_t Index = Finder::SetLastEquippedWeaponOrGadgetSlot();
+    if (Index < 0)
+    {
+        return;
+    }
+    UObject* PawnDefault = StaticClass()->GetDefaultObject(false);
+    void* const Stub = PawnDefault ? (*reinterpret_cast<void***>(PawnDefault))[Index] : nullptr;
+    for (TObjectIterator<UClass> It; It && Stub; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Stub)
+        {
+            Hooks::SwapVTable(L"AFortPlayerPawn::SetLastEquippedWeaponOrGadget", VTable, Index, reinterpret_cast<void*>(&SetLastEquippedWeaponOrGadgetHK));
+        }
+    }
 }
 
 void AFortPlayerPawn::HookVTables()

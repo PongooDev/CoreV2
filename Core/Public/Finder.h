@@ -252,6 +252,9 @@ namespace Finder
     // test al, al), before ImplementationIndex's. -1 when the exec has none.
     int32_t ValidateIndex(UFunction* Function);
     bool ResolveWorldItemDefinitionLive();
+    // 9.10+: AFortPlayerPawn::SetLastEquippedWeaponOrGadget(const UFortItem*, const UFortWorldItemDefinition*)'s slot,
+    // where a weapon definition's ServerExecute calls it and the build left it stripped. -1 elsewhere.
+    int32_t SetLastEquippedWeaponOrGadgetSlot();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
     // The call or tail jump to the stripped AFortPickup::GivePickupTo in a class's own native override of it

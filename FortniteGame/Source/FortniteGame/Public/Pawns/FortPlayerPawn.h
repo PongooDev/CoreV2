@@ -9,6 +9,8 @@
 class AController;
 class AFortPickup;
 class UFortHero;
+class UFortItem;
+class UFortWorldItemDefinition;
 
 // From 6.00: what AFortPlayerPawn::SetInVortex gives a pawn in a vortex (FVortexParams, the same 16 bytes on 6.00 to
 // 6.20). In a vortex the skydive's and the glider's gravity (UFortMovementComp_Character, 6.10 0x10431D0) is the vortex's
@@ -114,6 +116,9 @@ public:
     void StopItemInteractionAbility();
     // 1.8's revive (0x7FF160), restored where the build strips ServerReviveFromDBNO_Implementation (1.8.1).
     void ServerReviveFromDBNO_Implementation(AController* EventInstigator);
+    // 9.10+ (21.40's signature): the weapon or gadget EquipLastWeapon goes back to. A definition's ServerExecute calls it
+    // when one is equipped; 9.10 strips it.
+    void SetLastEquippedWeaponOrGadget(const UFortItem* Item, const UFortWorldItemDefinition* ItemDefinition);
     // The pickup RPC, called as the game calls it (through ProcessEvent, which runs it in place on the server).
     void ServerHandlePickup(AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
     // 1.8.1's pickup RPC (0x80A2C0, with AFortPlayerPawnAthena's 0x4349E0), restored where the build strips
@@ -156,6 +161,8 @@ public:
     static void HookPickupVTables();
     // ServerSendZiplineState_Implementation where the build strips it (7.20).
     static void HookZiplineVTables();
+    // 9.10+: SetLastEquippedWeaponOrGadget, where the build strips it.
+    static void HookLastEquippedWeaponVTables();
     // The four override natives and the gadget data's calls to them, where the build strips them.
     static void HookNatives();
 
@@ -178,6 +185,7 @@ private:
     void ReviveFromDBNO(AController* EventInstigator);
 
     static void ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator);
+    static void SetLastEquippedWeaponOrGadgetHK(AFortPlayerPawn* This, const UFortItem* Item, const UFortWorldItemDefinition* ItemDefinition);
     static void ServerSendZiplineState_ImplementationHK(AFortPlayerPawn* This, const FZiplinePawnState& InZiplineState);
     DECLARE_FUNCTION(execPushAnimBPOverride);
     DECLARE_FUNCTION(execPopAnimBPOverride);

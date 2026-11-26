@@ -10935,6 +10935,40 @@ bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
     return true;
 }
 
+int32_t Finder::SetLastEquippedWeaponOrGadgetSlot()
+{
+    // 9.10 (CL-6639283) gives AFortPlayerPawn::SetLastEquippedWeaponOrGadget 21.40's parameters (const UFortItem*,
+    // const UFortWorldItemDefinition*) and strips it (slot 0x1E2, the shared empty function); 9.01 took the item's GUID
+    // (slot 0x1E0, 0x1771560). A weapon definition's ServerExecute (9.10 0x19A8770) ends in that call: "mov rax, [rdi];
+    // mov r8, rbp; mov rdx, r14; mov rcx, rdi; call [rax+0F10h]". Only that three-argument call is taken.
+    if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !ResolveWorldItemDefinitionLive())
+    {
+        return -1;
+    }
+    const uintptr_t ServerExecute = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWeaponItemDefinition"), Natives::UFortWorldItemDefinition_ServerExecuteIndex);
+    const uintptr_t End = ServerExecute ? Finder::FunctionEnd(ServerExecute) : 0;
+    uintptr_t LastVirtualCall = 0;
+    for (uintptr_t Site = End > ServerExecute ? FindVirtualCall(ServerExecute, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
+    {
+        LastVirtualCall = Site;
+    }
+    const auto SetsR8 = [](uintptr_t Site)
+    {
+        for (uintptr_t At = Site - 12; At < Site; ++At)
+        {
+            if ((Byte(At) == 0x4C || Byte(At) == 0x4D) && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xF8) == 0xC0)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const int32_t Slot = LastVirtualCall && SetsR8(LastVirtualCall) ? VirtualSlot(LastVirtualCall) : -1;
+    void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawn");
+    const uintptr_t Entry = VTableEntry(PawnVTable, Slot);
+    return Entry && Finder::IsStubFunction(Entry) ? Slot : -1;
+}
+
 bool Finder::ResolveWorldItemDefinitionLive()
 {
     UFunction* EquipWeaponDefinition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPawn:EquipWeaponDefinition");
@@ -16153,6 +16187,36 @@ bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff
     {
         const ptrdiff_t Guid = LastEquippedWeaponGuidOffset;
         EquipLastIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), 0x200, { Guid, Guid + 4, Guid + 8, Guid + 12 }, true);
+    }
+    // 9.10 (CL-6639283) moves the body out of the slot: EquipLastWeapon (slot 0x1C3, 0x17EC670) calls it first (0x17C44F0,
+    // which tries the new TempWeaponsStack before the GUID) and only then looks at its bool. The slot is the one whose
+    // first call reads the GUID's four words.
+    if (EquipLastIndex < 0)
+    {
+        const ptrdiff_t Guid = LastEquippedWeaponGuidOffset;
+        const ptrdiff_t GuidWords[] = { Guid, Guid + 4, Guid + 8, Guid + 12 };
+        void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawn");
+        uintptr_t FoundBody = 0;
+        for (int32_t Index = 0; PawnVTable && Index < 0x200; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(PawnVTable, Index);
+            const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+            const uintptr_t Call = End > Function && End - Function < 0x40 ? FindRawCall(Function, End) : 0;
+            const uintptr_t Body = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+            const uintptr_t BodyEnd = IsInText(Body) ? Finder::FunctionEnd(Body) : 0;
+            if (!BodyEnd || BodyEnd <= Body || BodyEnd - Body >= 0x800 || Body == FoundBody
+                || !std::all_of(std::begin(GuidWords), std::end(GuidWords), [&](ptrdiff_t Offset) { return ContainsDisp32(Body, BodyEnd, static_cast<int32_t>(Offset)); }))
+            {
+                continue;
+            }
+            if (FoundBody)
+            {
+                EquipLastIndex = -1;
+                break;
+            }
+            FoundBody = Body;
+            EquipLastIndex = Index;
+        }
     }
     const int32_t EquipDefaultIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPawn"), 0x40, { CurrentWeaponListOffset, CurrentWeaponListOffset + 8 }, true);
     if (EquipLastIndex < 0 || EquipDefaultIndex < 0)

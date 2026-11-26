@@ -49,6 +49,7 @@
 #include "McpProfileGroup.h"
 #include "Athena/AI/AthenaAIPerceptionComponent.h"
 #include "Camera/FortPlayerCameraZone.h"
+#include "Building/BuildingPropMusicPlayer.h"
 #include "Building/BuildingProp_DeimosSpawner.h"
 #include "Building/BuildingRift.h"
 #include "Creative/FortAthenaCreativePortal.h"
@@ -498,6 +499,8 @@ static void InstallHooks()
             AFortMinigame::HookNatives();
             // Creative's creature spawner (8.00 on, #566): its rift, the rift's RiftCreated event and the settings its knobs pick.
             ABuildingProp_DeimosSpawner::HookVTables();
+            // 7.40+ Creative: the radio's track and playback options (StartSongForOptionsChange, stripped).
+            ABuildingPropMusicPlayer::HookNatives();
             AAthenaCreativeRift::HookVTables();
             // 8.00+ Creative (#596): an island's Time of Day setting, its own time of day manager.
             UFortVolumeTimeOfDayComponent::HookVTables();

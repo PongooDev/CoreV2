@@ -237,6 +237,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\CapsuleComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\ShapeComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\SphereComponent.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingPropMusicPlayer.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingProp_DeimosSpawner.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingRift.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortCreativeRiftSpawnParams.h" />
@@ -580,6 +581,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CapsuleComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\SceneComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\SphereComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingPropMusicPlayer.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingProp_DeimosSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingRift.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortCreativeRiftSpawnParams.cpp" />

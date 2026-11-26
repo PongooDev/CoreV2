@@ -406,8 +406,15 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
     // has an ability set, but applied ability set handle was invalid!". 🟡 Where Epic's server applied it once the pawn
     // came isn't in the build; Core applies it as the pawn is possessed. Only where Core restores the give-items
     // mutators (8.30 to 9.00), the only way the server gives a gadget to a player without a pawn.
+    //
+    // A kept gadget after a respawn (#689, Playground without "Drop items when eliminated"): the player pawn's death
+    // (9.00 0x1752130, 8.51 0x16A04C0) resets the controller's applied ability sets (9.00 +0x2350, 8.51 +0x2168), but the
+    // set of applied items keeps the item, so ApplyGadgetItemAttributeSet skips it and the new pawn's ability system never
+    // gets the glider's FortGliderPackSet. Such an item gets RemoveGadgetData and then ApplyGadgetData, the same pair a
+    // drop and pick-up runs; the charges come back from the item entry's GenericAttributeValues.
     const ptrdiff_t ItemInstanceIdsOffset = Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds;
-    AFortInventory* Inventory = Role == ROLE_Authority && MyFortPawn ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    AFortPawn* const Pawn = MyFortPawn;
+    AFortInventory* Inventory = Role == ROLE_Authority && Pawn ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
     static UClass* const InventoryOwnerInterfaceClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInventoryOwnerInterface");
     if (!Inventory || !Natives::UFortGadgetItemDefinition_ApplyGadgetData || ItemInstanceIdsOffset < 0 || !Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet
         || !InventoryOwnerInterfaceClass || !Natives::UObject_GetInterfaceAddress || !AFortAthenaMutator_GiveItemsAtGamePhaseStep::AreNativesRestored())
@@ -415,6 +422,7 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
         return 0;
     }
     void* const InventoryOwner = Natives::UObject_GetInterfaceAddress(this, InventoryOwnerInterfaceClass);
+    UAbilitySystemComponent* const AbilitySystemComponent = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(Pawn));
     if (!InventoryOwner)
     {
         return 0;
@@ -433,7 +441,12 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
         return false;
     };
 
-    TArray<UFortWorldItem*> Pending;
+    struct FPendingGadget
+    {
+        UFortWorldItem* Item;
+        bool bAppliedToOldPawn;
+    };
+    TArray<FPendingGadget> Pending;
     FFortItemList& ItemList = Inventory->Inventory;
     TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
     for (int32_t Index = 0; Index < Instances.Num(); ++Index)
@@ -441,19 +454,34 @@ int32_t AFortPlayerControllerZone::ApplyInventoryGadgetData()
         UFortWorldItem* Item = Instances[Index];
         FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
         UFortGadgetItemDefinition* Gadget = Entry ? Cast<UFortGadgetItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
-        if (Gadget && Gadget->TrackedAttributes.Num() > 0 && !IsApplied(static_cast<FGuid>(Entry->ItemGuid)))
+        if (!Gadget || Gadget->TrackedAttributes.Num() <= 0)
         {
-            Pending.Add(Item);
+            continue;
+        }
+        if (!IsApplied(static_cast<FGuid>(Entry->ItemGuid)))
+        {
+            Pending.Add({ Item, false });
+            continue;
+        }
+        float Value = 0.0f;
+        if (Natives::UFortGadgetItemDefinition_RemoveGadgetData && AbilitySystemComponent
+            && !GetNumericAttributeBase(AbilitySystemComponent, static_cast<const TArray<FGameplayAttribute>&>(Gadget->TrackedAttributes)[0], Value))
+        {
+            Pending.Add({ Item, true });
         }
     }
     for (int32_t Index = 0; Index < Pending.Num(); ++Index)
     {
-        UFortWorldItem* Item = Pending[Index];
+        UFortWorldItem* Item = Pending[Index].Item;
         UObject* Gadget = static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(Item->ItemEntry).ItemDefinition);
+        if (Pending[Index].bAppliedToOldPawn)
+        {
+            Natives::UFortGadgetItemDefinition_RemoveGadgetData(Gadget, InventoryOwner, Item);
+        }
         Natives::UFortGadgetItemDefinition_ApplyGadgetData(Gadget, InventoryOwner, Item, false);
         ++Applied;
-        Log::Info(L"Gadget: {}'s {} was given without a pawn; its gadget data goes on {} now", GetName().ToStdString(), Gadget->GetName().ToStdString(),
-            reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))->GetName().ToStdString());
+        Log::Info(L"Gadget: {}'s {} {}; its gadget data goes on {} now", GetName().ToStdString(), Gadget->GetName().ToStdString(),
+            Pending[Index].bAppliedToOldPawn ? L"was applied to the pawn before" : L"was given without a pawn", reinterpret_cast<UObject*>(Pawn)->GetName().ToStdString());
     }
 #endif
     return Applied;

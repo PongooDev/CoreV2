@@ -256,6 +256,10 @@ namespace Natives
     // IFortInventoryOwnerInterface. Its ability set (ApplyGadgetItemAbilitySet, 9.00 0x17D5490) and attribute set
     // (ApplyGadgetItemAttributeSet, 0x17D5620) each skip a gadget item they applied already; both need the controller's pawn.
     inline void (*UFortGadgetItemDefinition_ApplyGadgetData)(UObject* This, void* InventoryOwner, UFortWorldItem* Item, bool bArg) = nullptr;
+    // UFortGadgetItemDefinition::RemoveGadgetData(InventoryOwner, Item) (9.00 0x150B8D0, 8.51 0x1464F50), the same finder:
+    // ApplyGadgetData's undo, through RemoveGadgetItemAbilitySet (9.00 0x17F3430) and RemoveGadgetItemAttributeSet
+    // (0x17F3570, which drops the item from the controller's set of applied items).
+    inline void (*UFortGadgetItemDefinition_RemoveGadgetData)(UObject* This, void* InventoryOwner, UFortWorldItem* Item) = nullptr;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 

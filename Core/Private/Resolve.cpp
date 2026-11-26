@@ -15472,6 +15472,10 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
         return Bind;
     }
     Natives::UFortGadgetItemDefinition_ApplyGadgetData = reinterpret_cast<decltype(Natives::UFortGadgetItemDefinition_ApplyGadgetData)>(ApplyGadgetData);
+    if (const uintptr_t RemoveGadgetData = GadgetDataFunction(L"UFortGadgetItemDefinition::RemoveGadgetData - Removing Gadget Data for Gadget Item [%s]!", true))
+    {
+        Natives::UFortGadgetItemDefinition_RemoveGadgetData = reinterpret_cast<decltype(Natives::UFortGadgetItemDefinition_RemoveGadgetData)>(RemoveGadgetData);
+    }
 
     // TArray's Num, 8 bytes in.
     const int32_t TrackedAttributesNum = static_cast<int32_t>(TrackedAttributesOffset + 8);

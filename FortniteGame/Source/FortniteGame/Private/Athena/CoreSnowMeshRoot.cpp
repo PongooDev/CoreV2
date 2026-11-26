@@ -37,6 +37,10 @@ namespace
     constexpr uint8_t SnowStateComplete = 4;
 
     TWeakObjectPtr<UObject> SnowScripting;
+    // UMeshNetworkSubsystem is the game instance's, so the Edge type Core gave it outlives the world: a launcher server
+    // that loads the map again for its next match is still an Edge there, and that world's Blueprints still wait for
+    // the root's state.
+    bool bCoreMadeEdge = false;
 
     // A Blueprint member of Object by name, when the build's class has it with this size.
     template <typename T>
@@ -105,7 +109,12 @@ void FCoreSnowMeshRoot::SetUp(AFortGameModeAthena* GameMode)
         Log::Warning(L"Unvaulting: {}, so the event doesn't run", !Snow ? L"no BP_SnowScripting in the world" : L"no mesh network subsystem");
         return;
     }
-    if (Mesh->GetMeshNetworkNodeType() != EMeshNetworkNodeType::Unknown)
+    // A world after Core's first: its BP_SnowScripting found the Edge at BeginPlay and took the Edge branch already, so
+    // what follows reaches it as the root's late replication reached Epic's edges (OnRep_AllChallengesCompleted,
+    // ResetUTCTime's onPillarsCompletedSet). Without it PillarsCompletedUTCTime stays the raw default and GWS0 waits
+    // forever ("Pillars UTC var is raw default"): no outro, no foundation swaps, no unvaulted item.
+    const bool bAlreadyEdge = bCoreMadeEdge && Mesh->GetMeshNetworkNodeType() == EMeshNetworkNodeType::Edge;
+    if (Mesh->GetMeshNetworkNodeType() != EMeshNetworkNodeType::Unknown && !bAlreadyEdge)
     {
         Log::Info(L"Unvaulting: the server already is a mesh node ({}), so Core doesn't stand in for the root", static_cast<int32_t>(Mesh->NodeType));
         return;
@@ -134,7 +143,11 @@ void FCoreSnowMeshRoot::SetUp(AFortGameModeAthena* GameMode)
 
     // The edge's own node, as AFortGameSession::SetMeshNodeType and its beacon's connection leave it, and the clients' copy.
     Mesh->SetConnectedToRoot(true);
-    Mesh->SetMeshNetworkNodeType(EMeshNetworkNodeType::Edge);
+    if (!bAlreadyEdge)
+    {
+        Mesh->SetMeshNetworkNodeType(EMeshNetworkNodeType::Edge);
+        bCoreMadeEdge = true;
+    }
     AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(GameMode->GetWorld()->GetGameState()));
     if (GameState && AFortGameStateAthena::HasMeshNetworkStatus())
     {
@@ -167,8 +180,8 @@ void FCoreSnowMeshRoot::SetUp(AFortGameModeAthena* GameMode)
     }
     BindPillars(GameMode->GetWorld());
     AskUnvaultedItem();
-    Log::Info(L"Unvaulting: Core stands in for the mesh root: the server is an Edge node connected to it, the challenges complete{}, the pillars {} (ResetUTCTime), "
-        L"the vote {}", AllChallengesCompleted ? L"" : L" (no AllChallengesCompleted)", bReset ? L"not voted yet" : L"UNSET",
+    Log::Info(L"Unvaulting: Core stands in for the mesh root{}: the server is an Edge node connected to it, the challenges complete{}, the pillars {} (ResetUTCTime), "
+        L"the vote {}", bAlreadyEdge ? L" again (the server stayed an Edge from its last world)" : L"", AllChallengesCompleted ? L"" : L" (no AllChallengesCompleted)", bReset ? L"not voted yet" : L"UNSET",
         DamageHandler && Next2 && ShownHandler ? L"counted as the root counts it once Next2 is in" : L"only by the Blueprint's 150 s AutoCompleteVote (no Next2 or no pillar classes)");
 #endif
 }

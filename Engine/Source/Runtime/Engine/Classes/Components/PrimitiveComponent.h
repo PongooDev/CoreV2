@@ -15,12 +15,15 @@ public:
     DefineUFunction(SetMaterial)
     DefineUFunction(SetPhysicsLinearVelocity)
     DefineUFunction(SetPhysicsAngularVelocityInRadians)
+    DefineUFunction(GetCollisionEnabled)
 
     int32_t GetNumMaterials() const;
     UMaterialInterface* GetMaterial(int32_t ElementIndex) const;
     void SetMaterial(int32_t ElementIndex, UMaterialInterface* Material);
     void SetPhysicsLinearVelocity(const FVector& NewVel, bool bAddToCurrent = false, FName BoneName = FName());
     void SetPhysicsAngularVelocityInRadians(const FVector& NewAngVel, bool bAddToCurrent = false, FName BoneName = FName());
+    // ECollisionEnabled::Type (0 NoCollision). Callers gate on FindStaticFunction_GetCollisionEnabled.
+    uint8_t GetCollisionEnabled() const;
 };
 
 class UStaticMesh;

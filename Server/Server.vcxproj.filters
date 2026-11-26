@@ -1814,6 +1814,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeapon.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortProjectileAthena.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeaponRangedMountedCannon.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Weapons</Filter>
     </ClInclude>
@@ -2630,6 +2633,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeapon.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortProjectileAthena.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeaponRangedMountedCannon.cpp">

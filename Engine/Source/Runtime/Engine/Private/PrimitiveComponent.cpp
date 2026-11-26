@@ -41,6 +41,12 @@ void UPrimitiveComponent::SetPhysicsAngularVelocityInRadians(const FVector& NewA
     Params.Call(this);
 }
 
+uint8_t UPrimitiveComponent::GetCollisionEnabled() const
+{
+    Reflection::FParams Params(StaticFunction_GetCollisionEnabled());
+    return Params.Call(const_cast<UPrimitiveComponent*>(this)) ? Params.Take<uint8_t>(L"ReturnValue") : 0;
+}
+
 bool UStaticMeshComponent::GetLocalBounds(FVector& Min, FVector& Max) const
 {
     // Without a mesh the function leaves both zero.

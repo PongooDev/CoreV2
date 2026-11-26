@@ -37,10 +37,12 @@
 #include "Engine/Engine.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameMode.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Kismet/GameplayStatics.h"
@@ -53,9 +55,11 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
+#include "Weapons/FortProjectileAthena.h"
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -1324,12 +1328,49 @@ namespace
         }
     }
 
+    // A shot's FHitResult from From to To (the hit's point; HitActor and HitComponent what it hit, or none for a shot
+    // that hit nothing, whose hit isn't blocking), written by the struct's own member names.
+    void FillShotHit(UScriptStruct* HitStruct, uint8_t* Data, const FVector& From, const FVector& To, UObject* HitActor, UObject* HitComponent, bool bBlocking)
+    {
+        FVector Normal = From - To;
+        const float Length = Normal.Size();
+        Normal = Length > 1.0f ? Normal * (1.0f / Length) : FVector(0.0f, 0.0f, 1.0f);
+        const auto Member = [&](const wchar_t* Name) -> UProperty* { return HitStruct->FindPropertyByName(FName(Name, FNAME_Find)); };
+        const auto SetVector = [&](const wchar_t* Name, const FVector& Value)
+        {
+            if (UProperty* Property = Member(Name))
+            {
+                *reinterpret_cast<FVector*>(Data + Property->GetOffset_ForInternal()) = Value;
+            }
+        };
+        if (UBoolProperty* Blocking = static_cast<UBoolProperty*>(Member(L"bBlockingHit")))
+        {
+            Blocking->SetPropertyValue(Data + Blocking->GetOffset_ForInternal(), bBlocking);
+        }
+        SetVector(L"Location", To);
+        SetVector(L"ImpactPoint", To);
+        SetVector(L"Normal", Normal);
+        SetVector(L"ImpactNormal", Normal);
+        SetVector(L"TraceStart", From);
+        SetVector(L"TraceEnd", To);
+        if (UProperty* Distance = Member(L"Distance"))
+        {
+            *reinterpret_cast<float*>(Data + Distance->GetOffset_ForInternal()) = Length;
+        }
+        if (UProperty* Actor = Member(L"Actor"); Actor && HitActor)
+        {
+            *reinterpret_cast<FWeakObjectPtr*>(Data + Actor->GetOffset_ForInternal()) = HitActor;
+        }
+        if (UProperty* Component = Member(L"Component"); Component && HitComponent)
+        {
+            *reinterpret_cast<FWeakObjectPtr*>(Data + Component->GetOffset_ForInternal()) = HitComponent;
+        }
+    }
+
     // The hit in a damage effect's context, as a weapon ability's targeting adds it: a blocking FHitResult from the
     // shooter to the target (UAbilitySystemBlueprintLibrary::EffectContextAddHitResult) and the context's origin
     // (EffectContextSetOrigin). The victim's damage cue (AFortPawn::GameplayCue_Damage) gets its instigator and hit from
     // the context; without them a player hit by a bot saw no hit direction (#233).
-    // A shot's FHitResult added to an effect context, from From to To (the hit's point; HitActor what it hit, or none
-    // for a shot that hit nothing, whose hit isn't blocking), and the context's origin.
     bool AddShotHitToContext(void* ContextHandle, const FVector& From, const FVector& To, UObject* HitActor, bool bBlocking)
     {
         static UFunction* AddHitResult = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextAddHitResult");
@@ -1341,41 +1382,11 @@ namespace
         {
             return false;
         }
-        FVector Normal = From - To;
-        const float Length = Normal.Size();
-        Normal = Length > 1.0f ? Normal * (1.0f / Length) : FVector(0.0f, 0.0f, 1.0f);
         Reflection::FParams Hit(AddHitResult, true);
         bool bAdded = false;
         if (Hit.CopyStruct(L"EffectContext", ContextHandle))
         {
-            UScriptStruct* HitStruct = static_cast<UStructProperty*>(HitProperty)->Struct;
-            uint8_t* Data = static_cast<uint8_t*>(Hit.GetAddress(L"HitResult"));
-            const auto Member = [&](const wchar_t* Name) -> UProperty* { return HitStruct->FindPropertyByName(FName(Name, FNAME_Find)); };
-            const auto SetVector = [&](const wchar_t* Name, const FVector& Value)
-            {
-                if (UProperty* Property = Member(Name))
-                {
-                    *reinterpret_cast<FVector*>(Data + Property->GetOffset_ForInternal()) = Value;
-                }
-            };
-            if (UBoolProperty* Blocking = static_cast<UBoolProperty*>(Member(L"bBlockingHit")))
-            {
-                Blocking->SetPropertyValue(Data + Blocking->GetOffset_ForInternal(), bBlocking);
-            }
-            SetVector(L"Location", To);
-            SetVector(L"ImpactPoint", To);
-            SetVector(L"Normal", Normal);
-            SetVector(L"ImpactNormal", Normal);
-            SetVector(L"TraceStart", From);
-            SetVector(L"TraceEnd", To);
-            if (UProperty* Distance = Member(L"Distance"))
-            {
-                *reinterpret_cast<float*>(Data + Distance->GetOffset_ForInternal()) = Length;
-            }
-            if (UProperty* Actor = Member(L"Actor"); Actor && HitActor)
-            {
-                *reinterpret_cast<FWeakObjectPtr*>(Data + Actor->GetOffset_ForInternal()) = HitActor;
-            }
+            FillShotHit(static_cast<UStructProperty*>(HitProperty)->Struct, static_cast<uint8_t*>(Hit.GetAddress(L"HitResult")), From, To, HitActor, nullptr, bBlocking);
             Hit.Set(L"bReset", true);
             bAdded = Hit.Call(LibraryDefault);
         }
@@ -4002,6 +4013,26 @@ void FCoreAthenaBotController::AddWeaponSpreadHeat(FCoreAthenaBotWeapon& Weapon,
     Weapon.LastSpreadUpdateTime = Now;
 }
 
+namespace
+{
+    // What the shooter's client sends when its copy of a bullet touches a pawn (AFortProjectileAthena::
+    // ServerNotifyPawnHit): the blocking hit on the pawn, from where the bullet started.
+    void NotifyBulletPawnHit(AFortProjectileAthena* Bullet, AFortPawn* Target, const FVector& From)
+    {
+        UScriptStruct* HitStruct = AFortProjectileAthena::HitResultStruct();
+        if (!HitStruct || !Bullet || !Target || Target->bIsDying)
+        {
+            return;
+        }
+        const FVector TargetLocation = LocationOf(reinterpret_cast<AActor*>(Target));
+        const FVector To(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f);
+        FStructValue Hit(HitStruct);
+        FillShotHit(HitStruct, static_cast<uint8_t*>(Hit.Get()), From, To, reinterpret_cast<UObject*>(Target),
+            reinterpret_cast<UObject*>(static_cast<USceneComponent*>(reinterpret_cast<AActor*>(Target)->RootComponent)), true);
+        Bullet->ServerNotifyPawnHit(Hit.Get());
+    }
+}
+
 bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget, bool bForShow)
 {
 #if WITH_SERVER_CODE
@@ -4111,11 +4142,50 @@ bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector
         }
         return false;
     }
+    // A bullet's server copy has no collision (AFortProjectileAthena): its pawn hit is the shooter's client's report,
+    // ServerNotifyPawnHit, which a bot has no client to send (CoreV2 #670: the bots' sniper shots hurt no one). Core
+    // sends it as that client would, when the bullet reaches the pawn its shot hit. A build whose server copy collides
+    // hits the pawn itself.
+    AFortProjectileAthena* Bullet = !bForShow && HomingTarget ? Cast<AFortProjectileAthena>(reinterpret_cast<UObject*>(Projectile)) : nullptr;
+    AFortPawn* HitPawn = Bullet ? Cast<AFortPawn>(reinterpret_cast<UObject*>(HomingTarget)) : nullptr;
+    UPrimitiveComponent* BulletCollision = HitPawn ? Cast<UPrimitiveComponent>(reinterpret_cast<UObject*>(static_cast<USceneComponent*>(Projectile->RootComponent))) : nullptr;
+    // ECollisionEnabled::NoCollision.
+    constexpr uint8_t NoCollision = 0;
+    const bool bReportsPawnHit = BulletCollision && AFortProjectileAthena::HitResultStruct() && UPrimitiveComponent::FindStaticFunction_GetCollisionEnabled()
+        && BulletCollision->GetCollisionEnabled() == NoCollision;
+    float FlightTime = 0.0f;
+    if (bReportsPawnHit)
+    {
+        UProjectileMovementComponent* Movement = Bullet->ProjectileMovementComponent;
+        const float Speed = Movement ? static_cast<FVector>(Movement->Velocity).Size() : 0.0f;
+        FlightTime = Speed > 1.0f ? (LocationOf(HomingTarget) - SpawnLocation).Size() / Speed : 0.0f;
+        UWorld* World = Pawn->GetWorld();
+        if (FlightTime > 0.01f && World)
+        {
+            const FWeakObjectPtr WeakBullet(reinterpret_cast<UObject*>(Bullet));
+            const FWeakObjectPtr WeakTarget(reinterpret_cast<UObject*>(HitPawn));
+            FTimerHandle Handle;
+            World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakBullet, WeakTarget, SpawnLocation]()
+            {
+                NotifyBulletPawnHit(static_cast<AFortProjectileAthena*>(WeakBullet.Get()), static_cast<AFortPawn*>(WeakTarget.Get()), SpawnLocation);
+            }), FlightTime, false);
+        }
+        else
+        {
+            NotifyBulletPawnHit(Bullet, HitPawn, SpawnLocation);
+        }
+    }
     if (Count++ < 1)
     {
         APawn* ProjectileInstigator = Projectile->Instigator;
         Log::Info(L"Battle Royale bots: {}'s {} fires {} the game's way ({}instigator {})", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(Projectile)),
             bForShow ? std::wstring(L"for show in the warmup, no effects; ") : std::format(L"{} hit and {} explosion effects; ", Effects[0], Effects[1]), NameOf(reinterpret_cast<UObject*>(ProjectileInstigator)));
+    }
+    static int32_t LoggedPawnHits = 0;
+    if (bReportsPawnHit && LoggedPawnHits++ < 3)
+    {
+        Log::Info(L"Battle Royale bots: {}'s {} has no collision on the server; Core reports its hit on {} in {:.2f} s (AFortProjectileAthena::ServerNotifyPawnHit)", BotName,
+            NameOf(reinterpret_cast<UObject*>(Projectile)), NameOf(reinterpret_cast<UObject*>(HitPawn)), FlightTime);
     }
     return true;
 #else

@@ -156,6 +156,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\IConsoleManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\Platform.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\ThreadHeartBeat.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformFilemanager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProcess.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProperties.h" />
@@ -548,6 +549,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ConsoleManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformMisc.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformFileManager.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadHeartBeat.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadingBase.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Internationalization\TextLocalizationManager.cpp" />

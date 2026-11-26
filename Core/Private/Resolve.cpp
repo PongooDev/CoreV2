@@ -19,6 +19,7 @@
 #include "../../ThirdParty/MinHook/src/hde/hde64.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iterator>
 #include <map>
@@ -22095,6 +22096,173 @@ bool Finder::ResolveModularFeaturesLive()
     Natives::IModularFeatures_Get = reinterpret_cast<decltype(Natives::IModularFeatures_Get)>(Get);
     Log::Info(L"Finder: IModularFeatures::Get at 0x{:X} (from {} \"VoiceChatToken\" lookups), RegisterModularFeature 0x{:X}", Get - Finder::ImageBase(), Functions,
         reinterpret_cast<uintptr_t>(VTable[3]) - Finder::ImageBase());
+    return true;
+}
+
+bool Finder::ResolveThreadHeartBeat()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::FThreadHeartBeat_GetNoInit != nullptr;
+    }
+    bSearched = true;
+
+    // FThreadHeartBeat::Get makes the singleton, whose constructor starts L"FHeartBeatThread" (inlined into Get on 9.01
+    // 0x1CDD350 and 9.10 0x1D79340; its own function on 3.3, 0x11E9350, called by Get 0x11F7B80). Get stores the object
+    // into its static and into FThreadHeartBeat::Singleton, which GetNoInit only reads: "mov rax, [Singleton]; ret"
+    // (9.10 0x1D7DF90, 9.01 0x1CE1F90, 3.3 0x11FBA90). Epic's FSlowHeartBeatScope is inlined at each use:
+    //   call GetNoInit; test rax, rax; jz; xor edx, edx; mov rcx, rax; call SuspendHeartBeat / ResumeHeartBeat
+    // (9.10: 9 sites call 0x1D8B200, 6 call 0x1D88E00). ResumeHeartBeat restarts the thread's clock from
+    // QueryPerformanceCounter (FThreadHeartBeatClock / FPlatformTime::Seconds); SuspendHeartBeat only counts.
+    const auto Start = std::chrono::steady_clock::now();
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"FHeartBeatThread");
+    if (Refs.empty())
+    {
+        Log::Info(L"Finder: no FHeartBeatThread on this build, so no hang detector to suspend");
+        return false;
+    }
+
+    uintptr_t GetNoInit = 0;
+    uintptr_t Get = 0;
+    const auto FindGetNoInit = [&](uintptr_t Candidate)
+    {
+        for (const auto& [Instruction, Target] : Finder::DecodedRipReferences(Candidate))
+        {
+            // mov [rip+disp32], r64 (REX.W 89 /r).
+            if ((Byte(Instruction) & 0xFB) != 0x48 || Byte(Instruction + 1) != 0x89)
+            {
+                continue;
+            }
+            for (const uintptr_t Ref : Finder::RipReferencesTo(Target))
+            {
+                // Ref is the modrm byte of "48 8B 05 disp32", followed by ret. A leaf with no .pdata entry, so its start
+                // is told by the 16-byte alignment the compiler gives it.
+                if (Byte(Ref) == 0x05 && Byte(Ref - 1) == 0x8B && Byte(Ref - 2) == 0x48 && Byte(Ref + 5) == 0xC3 && ((Ref - 2) & 0xF) == 0)
+                {
+                    GetNoInit = Ref - 2;
+                    Get = Candidate;
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    for (const uintptr_t Ref : Refs)
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        if (!Function)
+        {
+            continue;
+        }
+        if (FindGetNoInit(Function))
+        {
+            break;
+        }
+        for (const uintptr_t Site : Finder::CallsTo(Function, false))
+        {
+            const uintptr_t Caller = Finder::FunctionStart(Site);
+            if (Caller && FindGetNoInit(Caller))
+            {
+                break;
+            }
+        }
+        if (GetNoInit)
+        {
+            break;
+        }
+    }
+    if (!GetNoInit)
+    {
+        Log::Warning(L"Finder: FThreadHeartBeat::GetNoInit not found (from {} FHeartBeatThread references), Core's start-up doesn't suspend the hang detector", Refs.size());
+        return false;
+    }
+
+    struct FScopeCallee
+    {
+        uintptr_t Function = 0;
+        int32_t Sites = 0;
+    };
+    FScopeCallee Callees[8];
+    int32_t NumCallees = 0;
+    int32_t ScopeSites = 0;
+    for (const uintptr_t Site : Finder::CallsTo(GetNoInit, false))
+    {
+        // test rax, rax; jz short
+        if (Byte(Site + 5) != 0x48 || Byte(Site + 6) != 0x85 || Byte(Site + 7) != 0xC0 || Byte(Site + 8) != 0x74)
+        {
+            continue;
+        }
+        const uintptr_t Callee = Finder::NextCall(Site + 10, 0x10);
+        if (!Callee)
+        {
+            continue;
+        }
+        ++ScopeSites;
+        int32_t Index = 0;
+        while (Index < NumCallees && Callees[Index].Function != Callee)
+        {
+            ++Index;
+        }
+        if (Index == NumCallees)
+        {
+            if (NumCallees == static_cast<int32_t>(std::size(Callees)))
+            {
+                continue;
+            }
+            Callees[NumCallees++].Function = Callee;
+        }
+        ++Callees[Index].Sites;
+    }
+
+    HMODULE Kernel32 = GetModuleHandleW(L"kernel32.dll");
+    HMODULE Ntdll = GetModuleHandleW(L"ntdll.dll");
+    const void* const QueryPerformanceCounterAddress = Kernel32 ? reinterpret_cast<const void*>(GetProcAddress(Kernel32, "QueryPerformanceCounter")) : nullptr;
+    const void* const RtlQueryPerformanceCounterAddress = Ntdll ? reinterpret_cast<const void*>(GetProcAddress(Ntdll, "RtlQueryPerformanceCounter")) : nullptr;
+    const auto CallsQueryPerformanceCounter = [&](uintptr_t Function)
+    {
+        for (const auto& [Instruction, Target] : Finder::DecodedRipReferences(Function))
+        {
+            const uintptr_t Op = Instruction + ((Byte(Instruction) & 0xF0) == 0x40 ? 1 : 0);
+            if (Byte(Op) != 0xFF || Byte(Op + 1) != 0x15 || !Finder::IsReadable(reinterpret_cast<const void*>(Target), sizeof(void*)))
+            {
+                continue;
+            }
+            const void* const Import = *reinterpret_cast<const void* const*>(Target);
+            if (Import && (Import == QueryPerformanceCounterAddress || Import == RtlQueryPerformanceCounterAddress))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The two functions the scopes call: the one that reads the clock resumes, the other suspends.
+    uintptr_t Suspend = 0;
+    uintptr_t Resume = 0;
+    int32_t SuspendSites = 0;
+    int32_t ResumeSites = 0;
+    bool bAmbiguous = NumCallees != 2;
+    for (int32_t Index = 0; !bAmbiguous && Index < NumCallees; ++Index)
+    {
+        const bool bResume = CallsQueryPerformanceCounter(Callees[Index].Function);
+        uintptr_t& Function = bResume ? Resume : Suspend;
+        bAmbiguous = Function != 0;
+        Function = Callees[Index].Function;
+        (bResume ? ResumeSites : SuspendSites) = Callees[Index].Sites;
+    }
+    const long long Milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Start).count();
+    if (bAmbiguous || !Suspend || !Resume)
+    {
+        Log::Warning(L"Finder: FThreadHeartBeat::SuspendHeartBeat / ResumeHeartBeat not found ({} heartbeat scope sites calling {} functions after GetNoInit 0x{:X}), "
+            L"Core's start-up doesn't suspend the hang detector", ScopeSites, NumCallees, GetNoInit - Finder::ImageBase());
+        return false;
+    }
+    Natives::FThreadHeartBeat_GetNoInit = reinterpret_cast<decltype(Natives::FThreadHeartBeat_GetNoInit)>(GetNoInit);
+    Natives::FThreadHeartBeat_SuspendHeartBeat = reinterpret_cast<decltype(Natives::FThreadHeartBeat_SuspendHeartBeat)>(Suspend);
+    Natives::FThreadHeartBeat_ResumeHeartBeat = reinterpret_cast<decltype(Natives::FThreadHeartBeat_ResumeHeartBeat)>(Resume);
+    Log::Info(L"Finder: FThreadHeartBeat::Get 0x{:X}, GetNoInit 0x{:X}, SuspendHeartBeat 0x{:X} ({} sites), ResumeHeartBeat 0x{:X} ({} sites) ({} ms)",
+        Get - Finder::ImageBase(), GetNoInit - Finder::ImageBase(), Suspend - Finder::ImageBase(), SuspendSites, Resume - Finder::ImageBase(), ResumeSites, Milliseconds);
     return true;
 }
 

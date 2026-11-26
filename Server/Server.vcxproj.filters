@@ -748,6 +748,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\ThreadHeartBeat.h">
+      <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformFilemanager.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
@@ -1921,6 +1924,9 @@
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformFileManager.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadHeartBeat.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadingBase.cpp">

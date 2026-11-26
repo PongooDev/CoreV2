@@ -209,6 +209,9 @@ namespace Finder
     // feature: the call right before both GetModularFeatureImplementationCount (slot 1) and GetModularFeatureImplementation
     // (slot 2). False (logged once) where the game never looks the feature up (before 1.7.2) or the lookups aren't found.
     bool ResolveModularFeaturesLive();
+    // FThreadHeartBeat::GetNoInit, SuspendHeartBeat and ResumeHeartBeat (HAL/ThreadHeartBeat.h), from the singleton that
+    // starts "FHeartBeatThread" and the engine's inlined FSlowHeartBeatScopes. False (logged once) where they aren't found.
+    bool ResolveThreadHeartBeat();
     // GConfig, GEngineIni, FConfigCacheIni::Find and FConfigFile::CombineFromBuffer (the online hotfix's ini merge).
     bool ResolveConfigCombine();
     // 5.21+: UFortHotfixManager's after-hotfix handler's FConfigCacheIni::GetArray, GConfig and GGameIni, and its call

@@ -13,6 +13,7 @@ class FPakPlatformFile;
 class FLinkerInstancingContext;
 class UFortAssetManager;
 class IModularFeatures;
+class FThreadHeartBeat;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
 class UAthenaMarkerComponent;
@@ -173,6 +174,11 @@ namespace Natives
     // IModularFeatures::Get (Core's Features/ModularFeatures.cpp: the static FModularFeatures), from the game's own lookups
     // of its "VoiceChatToken" feature (Finder::ResolveModularFeaturesLive). 7.00 0x16F3FC0, 6.31 0x1703DE0, 7.10 0x174B6F0.
     inline IModularFeatures& (*IModularFeatures_Get)() = nullptr;
+    // FThreadHeartBeat::GetNoInit, SuspendHeartBeat and ResumeHeartBeat (Finder::ResolveThreadHeartBeat). 9.10 CL-6573057
+    // 0x1D7DF90, 0x1D8B200, 0x1D88E00; 9.01 0x1CE1F90, 0x1CEEFD0, 0x1CECBC0; 3.3 0x11FBA90, 0x120B100, 0x1207340.
+    inline FThreadHeartBeat* (*FThreadHeartBeat_GetNoInit)() = nullptr;
+    inline void (*FThreadHeartBeat_SuspendHeartBeat)(FThreadHeartBeat* This, bool bAllThreads) = nullptr;
+    inline void (*FThreadHeartBeat_ResumeHeartBeat)(FThreadHeartBeat* This, bool bAllThreads) = nullptr;
 
     inline int (*CRT_rand)() = nullptr;
     inline float (*FMath_SRand)() = nullptr;

@@ -4,6 +4,7 @@
 #include "CrashLog.h"
 #include "Diagnostics.h"
 #include "Finder.h"
+#include "HAL/ThreadHeartBeat.h"
 #include "GameMapsSettings.h"
 #include "Hooks.h"
 #include "LaunchEngineLoop.h"
@@ -107,6 +108,8 @@
 #include "AbilitySystemComponent.h"
 #include "VivoxVoiceChatToken.h"
 #include "Weapons/FortWeaponRangedMountedCannon.h"
+
+#include <chrono>
 
 namespace
 {
@@ -360,8 +363,15 @@ static void InstallHooks()
         }
     }
 
+    Finder::ResolveThreadHeartBeat();
     GameThread::Enqueue([]
     {
+        // This runs in the engine's first frame with the map (after LoadMap), before its world ticks, and takes seconds
+        // (9.10 CL-6639283: about 11 s here, more on a slower PC). The engine's hang detector ends a game thread that sends
+        // no heartbeat for HangDuration (25 s; fatal on 9.10, #690), so Core's start-up is held out of it as the engine's
+        // own slow work is (FSlowHeartBeatScope).
+        const auto Start = std::chrono::steady_clock::now();
+        FSlowHeartBeatScope SuspendHeartBeat;
         FCommandLine::CheckServerSwitches();
         // Battle Royale servers register with the matchmaking service after "Dedicated Server Ready!" (Core-Docs
         // Athena-Boot-1.7.2.md §1 B7).
@@ -521,6 +531,11 @@ static void InstallHooks()
             AFortGameModeAthena::HookMatchAssignmentVTables();
             UNetDriver::AddPreReplicationCallback(&AFortPlayerController::ReplicateServerFinishedLoadingAfterGameState);
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");
+        }
+        if (SuspendHeartBeat.IsSuspended())
+        {
+            Log::Info(L"Core's start-up on the game thread took {} ms with the hang detector's heartbeat suspended",
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Start).count());
         }
     });
 

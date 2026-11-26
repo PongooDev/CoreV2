@@ -7686,6 +7686,27 @@ bool Finder::ResolvePickupGiveLive()
     return true;
 }
 
+uintptr_t Finder::PickupGiveSuperCall(uintptr_t Override)
+{
+    // 9.00's AFortPickupCreative::GivePickupTo (CL-6337466 0x1081380, its vtable's slot 0xC0) gives each of its entries
+    // without an OverridePickupClass its own OverridePickupClass, then ends in Super::GivePickupTo, the stripped body
+    // (jmp 0x1506290 at 0x108146E). Only an override with its own unwind entry is looked at, and only while the stripped
+    // body isn't the shared empty function, which every other stripped call also goes to.
+    const uintptr_t Stripped = reinterpret_cast<uintptr_t>(Natives::AFortPickup_GivePickupToStripped);
+    if (!Stripped || Natives::AFortPickup_GivePickupToStripped == Natives::SharedEmptyFunction || !IsInText(Override) || Finder::FunctionStart(Override) != Override)
+    {
+        return 0;
+    }
+    for (const auto& [Site, Target] : Finder::DecodedDirectBranches(Override))
+    {
+        if (Target == Stripped)
+        {
+            return Site;
+        }
+    }
+    return 0;
+}
+
 bool Finder::ResolvePlayerDropPickupLive()
 {
     if (!Natives::AFortPickup_CreatePickup && !ResolvePickupLive())

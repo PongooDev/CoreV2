@@ -157,6 +157,9 @@ namespace Finder
     // Every `call rel32` of the function's pieces, decoded instruction by instruction (a byte scan also takes an E8 inside
     // another instruction's displacement for one): the call's address and its target.
     std::vector<std::pair<uintptr_t, uintptr_t>> DecodedDirectCalls(uintptr_t Function);
+    // Every `call rel32` and `jmp rel32` (a tail call) of the function's pieces, decoded instruction by instruction: the
+    // instruction's address and its target.
+    std::vector<std::pair<uintptr_t, uintptr_t>> DecodedDirectBranches(uintptr_t Function);
     // Every `lea r64, [rip+disp32]` of the function's pieces, decoded instruction by instruction: the lea's address and the
     // address it takes (a function bound into a delegate, a string, a global).
     std::vector<std::pair<uintptr_t, uintptr_t>> DecodedAddressesTaken(uintptr_t Function);
@@ -251,6 +254,9 @@ namespace Finder
     bool ResolveWorldItemDefinitionLive();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
+    // The call or tail jump to the stripped AFortPickup::GivePickupTo in a class's own native override of it
+    // (Super::GivePickupTo), or 0.
+    uintptr_t PickupGiveSuperCall(uintptr_t Override);
     bool ResolvePlayerDropPickupLive();
     bool ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset);
     bool ResolveAIDirectorLive();

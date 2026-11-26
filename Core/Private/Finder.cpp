@@ -704,6 +704,19 @@ std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedDirectCalls(uintptr_
     return Calls;
 }
 
+std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedDirectBranches(uintptr_t Function)
+{
+    std::vector<std::pair<uintptr_t, uintptr_t>> Branches;
+    ForEachInstruction(Function, [&](uintptr_t Address, const hde64s& Instruction)
+    {
+        if ((Instruction.opcode == 0xE8 || Instruction.opcode == 0xE9) && !(Instruction.flags & F_PREFIX_66))
+        {
+            Branches.emplace_back(Address, RelativeTarget(Address, 1, 5));
+        }
+    });
+    return Branches;
+}
+
 std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedAddressesTaken(uintptr_t Function)
 {
     std::vector<std::pair<uintptr_t, uintptr_t>> Taken;

@@ -1650,14 +1650,36 @@ void AFortPickup::HookVTables()
     }
 
     const int32_t GiveIndex = Natives::AFortPickup_GivePickupToIndex;
+    TSet<uintptr_t> Overrides;
     for (TObjectIterator<UClass> It; It; ++It)
     {
         UClass* Class = *It;
         UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
         void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-        if (VTable && VTable[GiveIndex] == Natives::AFortPickup_GivePickupToStripped)
+        if (!VTable)
+        {
+            continue;
+        }
+        if (VTable[GiveIndex] == Natives::AFortPickup_GivePickupToStripped)
         {
             Hooks::SwapVTable(L"AFortPickup::GivePickupTo", VTable, GiveIndex, reinterpret_cast<void*>(&GivePickupToHK));
+            continue;
+        }
+        // A subclass's own override keeps its part and ends in Super::GivePickupTo, the stripped body that only destroys
+        // the pickup (#686: 9.00's AFortPickupCreative, which Creative's Item Spawner spawns, gave nothing and never
+        // broadcast OnPickup, which the spawner's Minigame_Spawner_Component binds to spawn the next one). That call goes
+        // to Core's GivePickupTo instead.
+        const uintptr_t Override = reinterpret_cast<uintptr_t>(VTable[GiveIndex]);
+        if (Overrides.Contains(Override))
+        {
+            continue;
+        }
+        Overrides.Add(Override);
+        if (uint8_t* SuperCall = reinterpret_cast<uint8_t*>(Finder::PickupGiveSuperCall(Override)))
+        {
+            Log::Info(L"Finder: {}'s AFortPickup::GivePickupTo override (0x{:X}) calls the stripped Super::GivePickupTo at 0x{:X}", Class->GetName().ToStdString(),
+                Override - Finder::ImageBase(), reinterpret_cast<uintptr_t>(SuperCall) - Finder::ImageBase());
+            Hooks::RedirectCall(L"AFortPickup::GivePickupTo (Super call)", SuperCall, reinterpret_cast<void*>(&GivePickupToHK));
         }
     }
 }

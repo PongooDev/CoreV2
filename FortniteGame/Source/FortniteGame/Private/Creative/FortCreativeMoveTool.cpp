@@ -291,6 +291,17 @@ namespace
         }
     }
 
+    // #685: the restored code's refusals, for reports of copies that fail.
+    std::wstring NameOf(const UObject* Object)
+    {
+        return Object ? Object->GetName().ToStdString() : std::wstring(L"none");
+    }
+
+    std::wstring ClassNameOf(const UObject* Object)
+    {
+        return Object ? Object->GetClass()->GetName().ToStdString() : std::wstring(L"none");
+    }
+
     uintptr_t ImplementationOf(UFunction* Function)
     {
         UObject* Default = Function ? AFortCreativeMoveTool::StaticClass()->GetDefaultObject(false) : nullptr;
@@ -451,8 +462,10 @@ void AFortCreativeMoveTool::CalculateBounds(FTransform& OutSelectionToWorld, FBo
 void AFortCreativeMoveTool::StartInteracting(const TArray<AActor*>& Actors)
 {
     // 8.51 0x1873610.
-    if (ActiveMovementMode)
+    if (UObjectInteractionBehavior* Active = ActiveMovementMode)
     {
+        const TStructArray<FCreativeSelectedActorInfo>& Held = SelectedActors;
+        Log::Info(L"Creative phone: {} is still in {} with {} selected actor(s), so {} new actor(s) aren't selected", NameOf(this), NameOf(Active), Held.Num(), Actors.Num());
         return;
     }
     ActiveMovementMode = DetermineActorMoveMode(Actors);
@@ -615,6 +628,7 @@ AActor* AFortCreativeMoveTool::SpawnActorWithTransform(AActor* ActorToSpawn, FTr
     AFortPlayerController* Controller = GetOwningFortPlayerController();
     if (!Controller)
     {
+        Log::Info(L"Creative phone: {} can't copy {}: the phone has no player controller", NameOf(this), ClassNameOf(ActorToSpawn));
         return Finish();
     }
 
@@ -676,6 +690,7 @@ AActor* AFortCreativeMoveTool::SpawnActorWithTransform(AActor* ActorToSpawn, FTr
         AFortVolume* Volume = VolumeManager->GetVolumeForLocation(Top);
         if (!Volume)
         {
+            Log::Info(L"Creative phone: {} can't copy {}: no island volume at ({:.0f}, {:.0f}, {:.0f})", NameOf(this), ClassNameOf(ActorToSpawn), Top.X, Top.Y, Top.Z);
             return nullptr;
         }
         TArray<AActor*> ActorsToRemove;
@@ -690,12 +705,21 @@ AActor* AFortCreativeMoveTool::SpawnActorWithTransform(AActor* ActorToSpawn, FTr
         Level = Streamed ? static_cast<ULevel*>(Streamed->LoadedLevel) : nullptr;
         if (!bCanAfford)
         {
+            Log::Info(L"Creative phone: {} can't copy {}: the island's budget refused it ({} existing building(s) to replace, preview {})", NameOf(this), ClassNameOf(ActorToSpawn),
+                ActorsToRemove.Num(), bForPreviewing);
             return Finish();
         }
     }
 
     const bool bGridAllows = QueryResult == GridCanAdd || QueryResult == GridExistingActor || QueryResult == GridForcedAdd;
-    if ((bIgnoreStructuralIssues || bGridAllows) && (bAllowOverlap || !IsOverlappingIdenticalActor(ActorToSpawn, TargetTransform)))
+    const bool bStructureAllows = bIgnoreStructuralIssues || bGridAllows;
+    const bool bOverlapAllows = bStructureAllows && (bAllowOverlap || !IsOverlappingIdenticalActor(ActorToSpawn, TargetTransform));
+    if (!bOverlapAllows)
+    {
+        Log::Info(L"Creative phone: {} can't copy {}: {} (structural grid result {})", NameOf(this), ClassNameOf(ActorToSpawn),
+            bStructureAllows ? L"an identical actor overlaps" : L"the structural grid refused it", QueryResult);
+    }
+    if (bOverlapAllows)
     {
         if (bShouldDestroyPropsWhenPlacing)
         {
@@ -824,10 +848,17 @@ void AFortCreativeMoveTool::ServerDuplicateStartInteracting_Implementation(const
         return;
     }
     TArray<FOriginalAndSpawnedPair>& Placed = NewlyPlacedActors;
+    if (bClientNeedsToWaitForReplication() || Placed.Num() > 0)
+    {
+        const TStructArray<FCreativeSelectedActorInfo>& Held = SelectedActors;
+        Log::Info(L"Creative phone: {} copies {} actor(s) while the last copy waits: {} of {} selected actor(s) reported by the client (waiting {}), {} placed pair(s) unreported",
+            NameOf(this), Actors.Num(), NumberOfReplicatedSelectedActors(), Held.Num(), bClientNeedsToWaitForReplication(), Placed.Num());
+    }
     Placed.Reset();
     UObjectInteractionBehavior* MoveMode = DetermineActorMoveMode(Actors);
     if (!MoveMode)
     {
+        Log::Info(L"Creative phone: {} can't copy {} actor(s) (the first {}): no interaction behaviour takes them", NameOf(this), Actors.Num(), ClassNameOf(Actors[0]));
         return;
     }
     const bool bOnGrid = IsChildOf(MoveMode, UMoveBuildingsOnGrid::StaticClass());
@@ -880,9 +911,15 @@ void AFortCreativeMoveTool::ServerSpawnSelectedActorsWithTransform_Implementatio
         }
     }
     std::stable_sort(Actors.begin(), Actors.end(), [](AActor* A, AActor* B) { return A->GetTransform().Translation.Z < B->GetTransform().Translation.Z; });
+    const TArray<FOriginalAndSpawnedPair>& Placed = NewlyPlacedActors;
     for (AActor* Actor : Actors)
     {
+        const int32_t PlacedBefore = Placed.Num();
         ServerSpawnActorWithTransform_Implementation(Actor, Actor->GetTransform(), bAllowOverlap, bAllowGravity, bIgnoreStructuralIssues, bForPreviewing);
+        if (Placed.Num() == PlacedBefore)
+        {
+            Log::Info(L"Creative phone: {} didn't place {} ({})", NameOf(this), NameOf(Actor), ClassNameOf(Actor));
+        }
     }
     const FMulticastScriptDelegate& Finished = OnFinishedSpawningSelectedActors;
     Finished.ProcessMulticastDelegate(nullptr);

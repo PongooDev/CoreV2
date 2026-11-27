@@ -210,6 +210,10 @@ public:
     // thanked the bus driver" (Athena.ThankedBusDriver, TeamVictim for a teammate) in its feed. One bit of a byte of
     // flags on every build that has it (5.30 to 6.01: bit 1, after bInAircraft's), so it is read and set by its mask:
     // as a whole byte it read true for anyone in the aircraft and its store set bInAircraft instead.
+    // Set by the server's EnterAircraft (9.01 0x107C110, with the controller's own IsInAircraft) and cleared by
+    // ExitAircraft (0x107D3F0).
+    DefineBitfieldUProperty(bInAircraft)
+    static bool HasInAircraft() { return Member_bInAircraft.IsAvailable(); }
     DefineBitfieldUProperty(bThankedBusDriver)
     static bool HasThankedBusDriver() { return Member_bThankedBusDriver.IsAvailable(); }
 

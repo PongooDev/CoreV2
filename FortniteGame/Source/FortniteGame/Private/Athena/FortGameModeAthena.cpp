@@ -3244,6 +3244,26 @@ void AFortGameModeAthena::ReportGamePhaseStep(const wchar_t* Event)
                 Bus += std::format(L"; a bus's drop starts {} and ends {}", Against(Aircraft->DropStartTime), Against(Aircraft->DropEndTime));
             }
         }
+        // #708 (temporary, 9.01 players never jump): what the jump's checks read. The client sends
+        // ServerAttemptAircraftJump only while the replicated bAircraftIsLocked is clear; the server's
+        // _Implementation (9.01 0x17BBAF0) needs the controller in the aircraft, then ServerRestartPlayer asks
+        // PlayerCanRestart, which sends a player with bHasEverSkydivedFromBus to the respawn check instead.
+        if (AFortGameStateAthena::HasAircraftIsLocked())
+        {
+            Bus += GameState->bAircraftIsLocked ? L"; the aircraft is locked" : L"; the aircraft is unlocked";
+        }
+        if (AFortPlayerStateAthena::HasInAircraft() && AFortPlayerStateZone::HasEverSkydivedFromBus())
+        {
+            for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+            {
+                AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+                if (AthenaState && !AthenaState->bIsABot)
+                {
+                    Bus += std::format(L"; {} {} the aircraft, {}skydived from the bus before", AthenaState->GetName().ToStdString(), AthenaState->bInAircraft ? L"is in" : L"isn't in",
+                        static_cast<AFortPlayerStateZone*>(AthenaState)->bHasEverSkydivedFromBus ? L"" : L"never ");
+                }
+            }
+        }
     }
 
     UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;

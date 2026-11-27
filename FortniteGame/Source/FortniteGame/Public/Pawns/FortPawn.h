@@ -56,6 +56,7 @@ class AFortPawn : public APawn
     DefineUFunction(GetMaxShield)
     DefineUFunction(SetHealth)
     DefineUFunction(SetMaxHealth)
+    DefineUFunction(SetShield)
     DefineUFunction(SetGravityJumpMultipliers)
     DefineUFunction(SetGravityMultiplier)
     DefineUFunction(SetMovementSpeedMultiplier)
@@ -167,8 +168,9 @@ public:
     // ForceMaxHealth does it (Battle Royale's GE_Map_Athena_Vitality_Health caps it at 100), and the shield's clamp with
     // it. False without a health set that has shields.
     bool ForceMaxShield(float NewMaxShield);
-    // Server (#155): the shield (CurrentShield, base and current value), clamped to the maximum shield; it replicates
-    // with the health set. False without a health set that has shields.
+    // Server (#155): the shield (CurrentShield), clamped to the maximum shield; it replicates with the health set. 6.01
+    // on through Epic's AFortPawn::SetShield (the ability system's base value, CoreV2 #707), before that the
+    // attribute's base and current value. False without a health set that has shields.
     bool SetShield(float NewShield);
 
     // "cheat fly 3000" (#129): the pawn runs at Speed (and walks and sprints faster by as much), 0 gives it its own

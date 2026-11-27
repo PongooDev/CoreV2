@@ -270,15 +270,35 @@ bool AFortPawn::ForceMaxShield(float NewMaxShield)
 
 bool AFortPawn::SetShield(float NewShield)
 {
-    // No pawn function sets the shield (only SetHealth and SetMaxHealth exist); the game's own changes go through the
-    // ability system to CurrentShield's base value, which a later effect on it starts from, so both values are set.
     UFortHealthSet* Set = HealthSet;
     if (!Set || !UFortHealthSet::HasShield())
     {
         return false;
     }
-    FFortGameplayAttributeData& ShieldData = Set->CurrentShield;
     const float Value = std::clamp(NewShield, 0.0f, std::max(0.0f, static_cast<float>(Set->Shield.CurrentValue)));
+    // 6.01+: Epic's AFortPawn::SetShield (9.10 CL-6573057 RVA 0x17EF850) is SetNumericAttributeBase(CurrentShield) on
+    // the pawn's ability system, which moves CurrentShield's aggregator when it has one. The damage execution captures
+    // CurrentShield through that aggregator to split a hit into ShieldDamage and Damage, and
+    // UFortHealthSet::PostGameplayEffectExecute (RVA 0x11C6F90) sends the shield hit and shield break cues only for
+    // ShieldDamage. Written past the aggregator, the shield was absorbed while every hit counted as health: white
+    // numbers and no shield break sound (CoreV2 #707, 8.51 bots' starting shield).
+    UFunction* const Function = static_cast<UAbilitySystemComponent*>(AbilitySystemComponent) ? FindStaticFunction_SetShield() : nullptr;
+    if (Function)
+    {
+        Reflection::FParams Params(Function);
+        if (Params.Set(L"NewShieldValue", Value) && Params.Call(this))
+        {
+            ForceNetUpdate();
+            if (APlayerState* State = PlayerState)
+            {
+                State->ForceNetUpdate();
+            }
+            return true;
+        }
+    }
+    // Before 6.01 no pawn function sets the shield: CurrentShield's base value, which a later effect on it starts from,
+    // and its current value.
+    FFortGameplayAttributeData& ShieldData = Set->CurrentShield;
     ShieldData.BaseValue = Value;
     ShieldData.CurrentValue = Value;
     ForceNetUpdate();

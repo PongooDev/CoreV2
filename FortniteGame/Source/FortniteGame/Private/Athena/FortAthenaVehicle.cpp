@@ -218,6 +218,7 @@ namespace
 void AFortAthenaVehicle::HookVTables()
 {
     RestoreStrippedImplementation(L"AFortAthenaVehicle::ServerUpdatePhysicsParams_Implementation", FindStaticFunction_ServerUpdatePhysicsParams(), reinterpret_cast<void*>(&ServerUpdatePhysicsParams_ImplementationHK));
+    RestoreStrippedImplementation(L"AFortPhysicsPawn::ServerMove_Implementation", FindStaticFunction_ServerMove(), reinterpret_cast<void*>(&ServerMove_ImplementationHK));
 
     // ReplicatedInputParams is a reflected struct: without it (or its struct) there is nothing to restore into.
     if (FindStaticFunction_ServerUpdateInputParams())
@@ -234,6 +235,18 @@ void AFortAthenaVehicle::HookVTables()
 void AFortAthenaVehicle::ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState)
 {
     This->ServerUpdatePhysicsParams_Implementation(InState);
+}
+
+// 9.20's name for ServerUpdatePhysicsParams. Its ClientAckGoodMove reply (slot 0xE7) and ServerUpdateStateSync (slot
+// 0xE9, also empty) are left out: nothing in the build shows what the server sent or kept.
+void AFortAthenaVehicle::ServerMove_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState)
+{
+    ServerUpdatePhysicsParams_Implementation(InState);
+}
+
+void AFortAthenaVehicle::ServerMove_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState)
+{
+    This->ServerMove_Implementation(InState);
 }
 
 void AFortAthenaVehicle::ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState)

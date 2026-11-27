@@ -33,6 +33,9 @@ class AFortAthenaVehicle : public APawn
 {
     DefineUnrealClass(AFortAthenaVehicle, FortniteGame)
     DefineUFunction(ServerUpdatePhysicsParams)
+    // 9.20 (CL-6822798) renames it AFortPhysicsPawn::ServerMove (21.40 slot 261), same FReplicatedPhysicsPawnState,
+    // same slot as 9.10's (0xEB, the shared empty function; exec 0x1CD4CA0).
+    DefineUFunction(ServerMove)
     DefineUFunction(ServerUpdateInputParams)
     DefineUStructProperty(FReplicatedAthenaVehicleInputState, ReplicatedInputParams)
     DefineUFunction(IsAsleep)
@@ -47,11 +50,13 @@ public:
     bool IsAsleep() const;
 
     void ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);
+    void ServerMove_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);
     void ServerUpdateInputParams_Implementation(const FReplicatedAthenaVehicleInputState& InState);
 
     static void HookVTables();
 
 private:
     static void ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState);
+    static void ServerMove_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState);
     static void ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState);
 };

@@ -8,6 +8,7 @@
 #include "Natives.h"
 #include "Templates/TypeHash.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -214,6 +215,15 @@ bool FFortCreativeBudgetTracker::CanAddActors(const TArray<AActor*>& NewActors, 
     if (!ClassTracker.CanAddActors(NewActors, ActorsToRemove))
     {
         return false;
+    }
+    // 9.20 (CL-6822798) drops FCreativeActorId: the cost table (0x57DFDB0) and the instance counts are keyed by the
+    // actor's TSoftClassPtr (56-byte elements, the actor cost 0x141E6B0), which the 8.51 reading below can't walk. The
+    // build has no replacement check of its own, so the new actors go through its CanAddActors (0x140C160) alone.
+    static const bool bActorIdKeys = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.CreativeActorId") != nullptr;
+    if (!bActorIdKeys)
+    {
+        using FCanAddActors = bool (*)(const FFortCreativeBudgetTracker*, const TArray<AActor*>*);
+        return Natives::FFortCreativeBudgetTracker_CanAddActors && reinterpret_cast<FCanAddActors>(Natives::FFortCreativeBudgetTracker_CanAddActors)(this, &NewActors);
     }
 
     TArray<FActorIdCount> NewCounts;

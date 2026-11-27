@@ -3,6 +3,7 @@
 #include "Building/BuildingSMActor.h"
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
+#include "UObject/Stack.h"
 
 #include <vector>
 
@@ -78,6 +79,9 @@ private:
     bool StartsAlreadySearched();
     float& SavedReservedRandomValue();
     void SpawnFloorLoot();
+    // True when the floor loot waits for the container's level to be shown (OnFloorLootLevelShown).
+    bool WaitForLevelShown();
+    void OnFloorLootLevelShown();
     FVector GetAthenaTossForward();
     float GetAthenaLootFront();
     FVector GetAthenaLootSpawnLocation();
@@ -90,4 +94,7 @@ private:
     static void InitializeTierGroupDataHK(ABuildingContainer* This, uint8_t State, bool bInitializeAgain);
     static bool SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter, uint8_t InPickupSourceTypeFlag, uint8_t InPickupSpawnSource);
     static inline void (*PostLoadOG)(ABuildingContainer* This) = nullptr;
+    // Core's native for ULevelStreaming::OnLevelShown (WaitForLevelShown).
+    static inline UFunction* FloorLootLevelShownHandler = nullptr;
+    DECLARE_FUNCTION(execOnFloorLootLevelShown);
 };

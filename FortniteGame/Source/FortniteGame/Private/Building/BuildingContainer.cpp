@@ -5,6 +5,8 @@
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Components/PrimitiveComponent.h"
+#include "Engine/Level.h"
+#include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -72,6 +74,8 @@ namespace
     int32_t FloorLootContainers = 0;
     int32_t FloorLootPickups = 0;
     int32_t FloorLootLoadedWeapons = 0;
+    // Of FloorLootContainers, those that waited for their level to be shown (ABuildingContainer::WaitForLevelShown).
+    int32_t FloorLootWaitedContainers = 0;
 
     // Battle Royale's loot packages have some rows for one loot level only (from 1.8.2: the medium ammo of
     // WorldList.AthenaAmmoLarge and WorldList.AthenaLoot.Ammo(.Medium), MinWorldLevel = MaxWorldLevel = 1, 2 and 3). The
@@ -404,6 +408,60 @@ void ABuildingContainer::SpawnFloorLoot()
     SpawnFloorLootAt(FloorLootSpots.Add(std::move(Spot)), World, WorldLevel);
 }
 
+bool ABuildingContainer::WaitForLevelShown()
+{
+    // 9.00's Athena_POI_Foundations makes Neo Tilted's and Mega Mall's plots dynamic (LF_Athena_POI_50x53: City_002;
+    // LF_Athena_StreamingTest23: StripMall_003, which streams Mall_001; StartEnabled_Stationary, Static on 9.20). Their
+    // levels' buildings are PostUpdated before the level is visible, while the container's transform is still the
+    // identity: the floor loot spawned at the world's origin and fell through the ground (9.00 boot: 37 + 108 pickups at
+    // (0, 0), Z -894 after 40 s; Diner_001's, on a Static plot, rested at pivot + 60) (#694). It waits for the level to be
+    // shown (ULevelStreaming::OnLevelShown): the container is on its plot then, and the floor under it has collision.
+    // On that 9.00 boot 331 of 2691 containers waited, and City_002's and Mall_001's pickups rested at pivot + 60.
+    ULevel* Level = GetLevel();
+    UWorld* World = GetWorld();
+    if (!FloorLootLevelShownHandler || !Level || !World || !ULevel::HasIsVisible() || Level->bIsVisible)
+    {
+        return false;
+    }
+    for (ULevelStreaming* Streaming : static_cast<TArray<ULevelStreaming*>&>(World->StreamingLevels))
+    {
+        if (Streaming && static_cast<ULevel*>(Streaming->LoadedLevel) == Level)
+        {
+            Streaming->OnLevelShown.AddUniqueDynamic(this, FloorLootLevelShownHandler->GetFName());
+            ++FloorLootWaitedContainers;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ABuildingContainer::OnFloorLootLevelShown()
+{
+    ULevel* Level = GetLevel();
+    if (UWorld* World = GetWorld())
+    {
+        for (ULevelStreaming* Streaming : static_cast<TArray<ULevelStreaming*>&>(World->StreamingLevels))
+        {
+            if (Streaming && static_cast<ULevel*>(Streaming->LoadedLevel) == Level)
+            {
+                Streaming->OnLevelShown.RemoveDynamic(this, FloorLootLevelShownHandler->GetFName());
+            }
+        }
+    }
+    if (!IsPendingKill() && !bDestroyed)
+    {
+        InitializeTierGroupData(EFortBuildingPersistentState::GetNew(), false);
+    }
+}
+
+DEFINE_FUNCTION(ABuildingContainer::execOnFloorLootLevelShown)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<ABuildingContainer*>(Context)->OnFloorLootLevelShown();
+    P_NATIVE_END;
+}
+
 void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
 {
 #if WITH_SERVER_CODE
@@ -532,6 +590,10 @@ void ABuildingContainer::InitializeTierGroupData(EFortBuildingPersistentState St
 
     if (StartsAlreadySearched())
     {
+        if (State == EFortBuildingPersistentState::GetNew() && WaitForLevelShown())
+        {
+            return;
+        }
         if (State == EFortBuildingPersistentState::GetNew())
         {
             SpawnFloorLoot();
@@ -794,6 +856,8 @@ void ABuildingContainer::HookVTables()
         return;
     }
 
+    FloorLootLevelShownHandler = ULevel::HasIsVisible() ? StaticClass()->AddNativeFunction(L"OnFloorLootLevelShown", &execOnFloorLootLevelShown) : nullptr;
+
     const int32_t SpawnLootIndex = Natives::ABuildingContainer_SpawnLootIndex;
     const int32_t PostUpdateIndex = Natives::ABuildingSMActor_PostUpdateIndex;
     const int32_t PostLoadIndex = Natives::ABuildingContainer_PostLoadIndex;
@@ -915,8 +979,10 @@ void ABuildingContainer::LogWorldContainers(UWorld* World)
     // spawns its own: the counts start again for the next one.
     if (FloorLootContainers > 0)
     {
-        UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups (%d loaded weapons)"), FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);
+        UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups (%d loaded weapons)%s"), FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons,
+            FloorLootWaitedContainers > 0 ? *FString::Printf(TEXT(", %d of the containers once their level was shown"), FloorLootWaitedContainers) : TEXT(""));
     }
+    FloorLootWaitedContainers = 0;
     FloorLootContainers = 0;
     FloorLootPickups = 0;
     FloorLootLoadedWeapons = 0;}

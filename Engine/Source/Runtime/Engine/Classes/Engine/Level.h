@@ -14,6 +14,10 @@ class ULevel : public UObject
 public:
     DefineUProperty(UWorld*, OwningWorld)
     DefineBitfieldUProperty(bIsVisible)
+    static bool HasIsVisible()
+    {
+        return Member_bIsVisible.IsAvailable();
+    }
     DefineNativeBitfield(bIsAssociatingLevel, ULevel_bIsAssociatingLevel, Natives::ULevel_bIsAssociatingLevelMask)
 
     bool HasVisibilityChangeRequestPending() const;

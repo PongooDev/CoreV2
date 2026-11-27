@@ -29,6 +29,15 @@ class EDynamicFoundationEnabledState
     DefineUEnumValue(Disabled)
 };
 
+// 9.30's (CL-7095426) replicated dynamic plot state: DynamicFoundationTransform's translation and rotation and
+// FoundationEnabledState, which are no longer replicated themselves.
+struct FDynamicBuildingFoundationRepData
+{
+    FVector Translation;
+    FQuat Rotation;
+    uint8_t EnabledState;
+};
+
 // A building's or a POI's plot: its static mesh is the plot, and the level it streams in (a building or POI sublevel,
 // /Temp/Game/... once loaded) sits on it.
 class ABuildingFoundation : public ABuildingSMActor
@@ -39,6 +48,7 @@ class ABuildingFoundation : public ABuildingSMActor
     DefineUFunction(SetDynamicFoundationEnabled)
     DefineUFunction(OnRep_FoundationEnabled)
     DefineUFunction(OnRep_FoundationEnabledState)
+    DefineUFunction(OnRep_DynamicFoundationRepData)
 
 public:
     // The streamed level's package (/Temp/Game/Athena/Maps/POI/Athena_POI_City_001_43); None until it streams.
@@ -58,9 +68,14 @@ public:
     DefineBitfieldUProperty(bFoundationEnabled)
     // 8.20: the same as an EDynamicFoundationEnabledState, with OnRep_FoundationEnabledState (no parameter).
     DefineUProperty(EDynamicFoundationEnabledState, FoundationEnabledState)
+    // 9.30: what replicates the transform and the state, with OnRep_DynamicFoundationRepData (0x1B6EED0 -> 0x12B16E0),
+    // which takes the place of both OnReps.
+    DefineUProperty(FDynamicBuildingFoundationRepData, DynamicFoundationRepData)
+    static bool HasDynamicFoundationRepData() { return Member_DynamicFoundationRepData.IsAvailable() && FindStaticFunction_OnRep_DynamicFoundationRepData(); }
     static bool HasFoundationEnabledState()
     {
-        return Member_FoundationEnabledState.IsAvailable() && FindStaticFunction_OnRep_FoundationEnabledState() && EDynamicFoundationEnabledState::StaticEnum();
+        return Member_FoundationEnabledState.IsAvailable() && (FindStaticFunction_OnRep_FoundationEnabledState() || HasDynamicFoundationRepData())
+            && EDynamicFoundationEnabledState::StaticEnum();
     }
     static bool HasFoundationEnabled()
     {
@@ -90,6 +105,9 @@ public:
     // 8.20's (0xF88DE0, through its exec's jmp): on a dynamic plot that has begun play, shows its level and LOD actors for
     // Enabled or streams them out.
     void OnRep_FoundationEnabledState();
+    // 9.30's: on a dynamic plot, moves it to DynamicFoundationTransform when the replicated translation is set, then shows
+    // its level and LOD actors for Enabled or streams them out.
+    void OnRep_DynamicFoundationRepData();
     // Picks the plot's level (the world manager's saved one, else its own pick) and streams it in (6.00 0xD142E0).
     bool SelectAndSetupMyBuildingLevel(FFortBuildingRandomList* RandomList);
 

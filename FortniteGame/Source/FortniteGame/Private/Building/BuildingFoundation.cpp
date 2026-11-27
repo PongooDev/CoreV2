@@ -53,7 +53,23 @@ void ABuildingFoundation::SetDynamicFoundationTransform(const FTransform& NewTra
 
 void ABuildingFoundation::OnRep_DynamicFoundationTransform()
 {
+    // 9.30 replicates the transform in DynamicFoundationRepData, whose OnRep moves the plot.
+    if (HasDynamicFoundationRepData())
+    {
+        FDynamicBuildingFoundationRepData& RepData = DynamicFoundationRepData;
+        const FTransform& Transform = DynamicFoundationTransform;
+        RepData.Translation = Transform.Translation;
+        RepData.Rotation = Transform.Rotation;
+        OnRep_DynamicFoundationRepData();
+        return;
+    }
     Reflection::FParams Params(StaticFunction_OnRep_DynamicFoundationTransform());
+    Params.Call(this);
+}
+
+void ABuildingFoundation::OnRep_DynamicFoundationRepData()
+{
+    Reflection::FParams Params(StaticFunction_OnRep_DynamicFoundationRepData());
     Params.Call(this);
 }
 
@@ -162,6 +178,14 @@ void ABuildingFoundation::OnRep_FoundationEnabled(bool bOldEnabled)
 
 void ABuildingFoundation::OnRep_FoundationEnabledState()
 {
+    // 9.30 replicates the state in DynamicFoundationRepData, whose OnRep streams the plot's level.
+    if (HasDynamicFoundationRepData())
+    {
+        FDynamicBuildingFoundationRepData& RepData = DynamicFoundationRepData;
+        RepData.EnabledState = static_cast<uint8_t>(FoundationEnabledState);
+        OnRep_DynamicFoundationRepData();
+        return;
+    }
     Reflection::FParams Params(StaticFunction_OnRep_FoundationEnabledState());
     Params.Call(this);
 }

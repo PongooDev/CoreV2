@@ -190,6 +190,8 @@ namespace
         TMap<FReplicatedActorKey, FOpenActorChannel> OpenActors;
         TMap<FReplicatedActorKey, FClosedActorChannel> ClosedAt;
         TMap<UClass*, FReopenedClassStats> ReopenedByClass;
+        // CoreV2 #694: channels opened in the window by the actor's class, to tell whether floor loot reaches a client.
+        TMap<UClass*, int32_t> OpenedByClass;
         uint32_t Frame = 0;
         float WindowStart = -1.0f;
         int32_t Frames = 0;
@@ -379,6 +381,7 @@ void UNetDriver::LogConnectionReplication()
                 continue;
             }
             ++Stats.Opened;
+            ++Stats.OpenedByClass.FindOrAdd(Channel->Actor->GetClass());
             const FClosedActorChannel* Closed = Stats.ClosedAt.Find(Key);
             if (!Closed || Now - Closed->Time > ReopenWindow)
             {
@@ -451,6 +454,21 @@ void UNetDriver::LogConnectionReplication()
             }
             Top += FString::Printf(TEXT("%s%s %d [%s] (e.g. %s)"), i ? TEXT("; ") : TEXT(""), *Classes[i].Key->GetName(), ClassStats.Count, *Reasons, *ClassStats.Example);
         }
+        TArray<TPair<UClass*, int32_t>> OpenedClasses;
+        for (const auto& Pair : Stats.OpenedByClass)
+        {
+            OpenedClasses.Add(TPair<UClass*, int32_t>{ Pair.Key, Pair.Value });
+        }
+        ::Sort(OpenedClasses.GetData(), OpenedClasses.Num(), [](const auto& A, const auto& B) { return A.Value > B.Value; });
+        FString OpenedTop;
+        for (int32_t i = 0; i < OpenedClasses.Num() && i < 4; ++i)
+        {
+            OpenedTop += FString::Printf(TEXT("%s%s %d"), i ? TEXT(", ") : TEXT(" ("), *OpenedClasses[i].Key->GetName(), OpenedClasses[i].Value);
+        }
+        if (!OpenedTop.IsEmpty())
+        {
+            OpenedTop += TEXT(")");
+        }
         AActor* ViewTarget = Connection->ViewTarget;
         FString ViewPoint = FString::Printf(TEXT("; view point over %.0f m from its pawn in %d of %d frames (farthest %.0f m), at another player's pawn in %d%s%s"),
             ViewPointOffDistance / 100.0f, Stats.ViewOffOwnPawn, Stats.ViewFrames, Stats.ViewMaxFromOwnPawn / 100.0f, Stats.ViewAtOtherPawn,
@@ -474,8 +492,8 @@ void UNetDriver::LogConnectionReplication()
             ViewPoint += FString::Printf(TEXT("; camera %s, owner %s (another owner in %d frames, shared with another player in %d)"), *Player.CameraManager->GetName(),
                 Owner == Controller ? TEXT("its own") : Owner ? *Owner->GetName() : TEXT("none"), Stats.CameraForeignOwner, Stats.CameraShared);
         }
-        const FString Line = FString::Printf(TEXT("Net (#567): %s over %.0fs: %d frames, %d saturated; %d actor channels open, %d opened, %d closed, %d reopened within %.0fs%s%s; view target %s, net speed %d%s"),
-            *Controller->GetName(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.Num(), Stats.Opened, Stats.Closed, Stats.Reopened, ReopenWindow,
+        const FString Line = FString::Printf(TEXT("Net (#567): %s over %.0fs: %d frames, %d saturated; %d actor channels open, %d opened%s, %d closed, %d reopened within %.0fs%s%s; view target %s, net speed %d%s"),
+            *Controller->GetName(), Now - Stats.WindowStart, Stats.Frames, Stats.SaturatedFrames, Stats.OpenActors.Num(), Stats.Opened, *OpenedTop, Stats.Closed, Stats.Reopened, ReopenWindow,
             Top.IsEmpty() ? TEXT("") : TEXT(": "), *Top, ViewTarget ? *ViewTarget->GetName() : TEXT("none"), UPlayer::HasCurrentNetSpeed() ? Connection->CurrentNetSpeed : -1, *ViewPoint);
         Log::Info(L"{}", Line.ToStdString());
 
@@ -492,6 +510,7 @@ void UNetDriver::LogConnectionReplication()
             Stats.ClosedAt.Remove(Key);
         }
         Stats.ReopenedByClass.Empty();
+        Stats.OpenedByClass.Empty();
         Stats.WindowStart = Now;
         Stats.Frames = Stats.SaturatedFrames = Stats.Opened = Stats.Closed = Stats.Reopened = 0;
         Stats.ViewFrames = Stats.ViewOffOwnPawn = Stats.ViewAtOtherPawn = Stats.CameraForeignOwner = Stats.CameraShared = 0;

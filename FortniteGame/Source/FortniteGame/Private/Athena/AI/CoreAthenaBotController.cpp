@@ -7981,6 +7981,9 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
     {
         Building->SetTeam(PlayerState->TeamIndex);
     }
+    // TEMPORARY (#701, bots' pieces editable on 7.40): the team the piece ended up with. Remove once #701 is resolved.
+    Log::Info(L"Battle Royale bots (#701): {} (team {}) placed {}: {}", BotName, PlayerState ? static_cast<int32_t>(static_cast<uint8_t>(PlayerState->TeamIndex)) : -1,
+        NameOf(reinterpret_cast<UObject*>(Building)), Building->DescribeTeamsForEditDiagnostic());
     UAthenaNavSystem::AddDirtyArea(Building);
     Materials[Kind] -= BuildingPieceCost;
     ++PiecesBuilt;

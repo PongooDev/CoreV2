@@ -11,6 +11,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
+#include "FortKismetLibrary.h"
 #include "FortRuntimeOptions.h"
 #include "GameplayTagContainer.h"
 #include "Hooks.h"
@@ -92,6 +93,15 @@ namespace
     void SetEditingPlayer(ABuildingSMActor* Building, AFortPlayerStateZone* EditingPlayer)
     {
         CallVirtual<void>(Building, Natives::ABuildingSMActor_SetEditingPlayerIndex, EditingPlayer);
+    }
+
+    // TEMPORARY (#701, bots' pieces editable on 7.40): one line per edit RPC with both sides' teams. Remove once #701 is
+    // resolved, with ABuildingActor::DescribeTeamsForEditDiagnostic.
+    void LogEditDiagnostic(const wchar_t* Rpc, AFortPlayerController* Editor, ABuildingSMActor* Building, const wchar_t* CanBePlayerEdited, bool bAllowed)
+    {
+        Log::Info(L"Building (#701): {} by {} (team {}) on {}: {}; CanBePlayerEdited {}, edit {}", Rpc, Editor->GetName().ToStdString(),
+            static_cast<int32_t>(UFortKismetLibrary::GetActorTeam(reinterpret_cast<AActor*>(Editor))), Building ? Building->GetName().ToStdString() : std::wstring(L"(none)"),
+            Building ? Building->DescribeTeamsForEditDiagnostic() : std::wstring(L"-"), CanBePlayerEdited, bAllowed ? L"allowed" : L"refused");
     }
 
     // A player's piece is player built (IsPlayerBuilt: an OwnerPersistentID or bPlayerPlaced). InitializeBuildingActor
@@ -473,7 +483,14 @@ void AFortPlayerController::ServerEditBuildingActor_Implementation(ABuildingSMAc
 {
 #if WITH_SERVER_CODE
     ABuildingSMActor* Building = BuildingActorToEdit;
-    if (!Building || !Building->GetWorld() || reinterpret_cast<UObject*>(EditingPlayerOf(Building)) != reinterpret_cast<UObject*>(PlayerStateOf(this)) || Building->bDestroyed)
+    const bool bAllowed = Building && Building->GetWorld() && reinterpret_cast<UObject*>(EditingPlayerOf(Building)) == reinterpret_cast<UObject*>(PlayerStateOf(this)) && !Building->bDestroyed;
+    // TEMPORARY (#701, bots' pieces editable on 7.40). Remove once #701 is resolved.
+    if (Building)
+    {
+        const bool bCanBePlayerEdited = CallVirtual<bool>(Building, Natives::ABuildingSMActor_CanBePlayerEditedIndex, this);
+        LogEditDiagnostic(L"ServerEditBuildingActor", this, Building, bCanBePlayerEdited ? L"true" : L"false", bAllowed);
+    }
+    if (!bAllowed)
     {
         return;
     }
@@ -522,11 +539,14 @@ void AFortPlayerController::ServerBeginEditingBuildingActor_Implementation(ABuil
 {
 #if WITH_SERVER_CODE
     ABuildingSMActor* Building = BuildingActorToEdit;
-    if (!Building || !MyFortPawn || !CallVirtual<bool>(Building, Natives::ABuildingSMActor_CanBePlayerEditedIndex, this))
+    const bool bCanBePlayerEdited = Building && CallVirtual<bool>(Building, Natives::ABuildingSMActor_CanBePlayerEditedIndex, this);
+    APlayerState* State = PlayerStateOf(this);
+    // TEMPORARY (#701, bots' pieces editable on 7.40). Remove once #701 is resolved.
+    LogEditDiagnostic(L"ServerBeginEditingBuildingActor", this, Building, bCanBePlayerEdited ? L"true" : L"false", bCanBePlayerEdited && MyFortPawn && State);
+    if (!Building || !MyFortPawn || !bCanBePlayerEdited)
     {
         return;
     }
-    APlayerState* State = PlayerStateOf(this);
     if (!State)
     {
         return;

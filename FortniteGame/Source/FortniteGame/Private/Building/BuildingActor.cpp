@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingActor.h"
 #include "Finder.h"
+#include "FortKismetLibrary.h"
 #include "Hooks.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
@@ -172,6 +173,14 @@ void ABuildingActor::SetTeam(uint8_t InTeam)
     {
         Team = EFortTeam{ InTeam };
     }
+}
+
+std::wstring ABuildingActor::DescribeTeamsForEditDiagnostic() const
+{
+    // TEMPORARY (#701). The interface team is what CanBePlayerEdited compares (7.40: TeamIndex).
+    const std::wstring Index = HasTeamIndex() ? std::to_wstring(static_cast<int32_t>(TeamIndex)) : std::wstring(L"-");
+    return std::format(L"Team {}, TeamIndex {}, interface team {}", static_cast<int32_t>(static_cast<uint8_t>(Team)), Index,
+        static_cast<int32_t>(UFortKismetLibrary::GetActorTeam(this)));
 }
 
 void ABuildingActor::Die(FGameplayTag DeathReason, AController* EventInstigator, AActor* DamageCauser, const FGameplayEffectContextHandle* EffectContext)

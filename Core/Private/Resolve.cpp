@@ -13087,6 +13087,22 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
     {
         Index = AnswerLoopSlot;
     }
+    else if (Index < 0 && AnswerLoops == 0 && ControllerVTable && Packed::Changelist() == 7095426)
+    {
+        // 9.30: Athena's 0x1196FC0 passes both drop and destroy by reference to the game state (0x1167B40).
+        // Its last call passes this in r9, the definition on the stack, destroy in r8 and drop in rdx.
+        const uintptr_t Args = UniqueFunction({ 0x4C, 0x8B, 0xCF, 0x4C, 0x89, 0x74, 0x24, 0x20,
+            0x4C, 0x8B, 0xC6, 0x48, 0x8B, 0xD5, 0x48, 0x8B, 0xCB, 0xE8 });
+        const uintptr_t Override = Args ? Finder::FunctionStart(Args) : 0;
+        const int32_t Slot = FirstVTableIndex(AthenaVTable, Override);
+        if (Slot >= 0 && Finder::IsReadable(ControllerVTable + Slot, sizeof(void*))
+            && IsSharedEmptyBody(reinterpret_cast<uintptr_t>(ControllerVTable[Slot])))
+        {
+            Index = Slot;
+            Function = Override;
+            Natives::AFortPlayerController_ShouldDropItemHasOutParams = true;
+        }
+    }
     else if (Index < 0 && AnswerLoops > 1)
     {
         Log::Error(L"Finder: AFortPlayerController::ShouldDropItem: {} overrides loop over the mutators' answers, none is taken", AnswerLoops);
@@ -13098,7 +13114,8 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
         return false;
     }
     Natives::AFortPlayerController_ShouldDropItemIndex = Index;
-    Log::Info(L"Finder: AFortPlayerController::ShouldDropItem is slot 0x{:X} (Athena's 0x{:X} asks the game state's mutators)", Index, Function - Finder::ImageBase());
+    Log::Info(L"Finder: AFortPlayerController::ShouldDropItem is slot 0x{:X} (Athena's 0x{:X} asks the game state's mutators{})",
+        Index, Function - Finder::ImageBase(), Natives::AFortPlayerController_ShouldDropItemHasOutParams ? L" with drop and destroy outputs" : L"");
     return true;
 }
 

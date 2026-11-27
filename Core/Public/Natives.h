@@ -757,6 +757,7 @@ namespace Natives
     // given what it would otherwise do (slot 0x31D; AFortPlayerControllerAthena's, 0xC26970, asks the game state's
     // mutators). -1 where the build has none.
     inline int32_t AFortPlayerController_ShouldDropItemIndex = -1;
+    inline bool AFortPlayerController_ShouldDropItemHasOutParams = false;
     // Where Finder::ResolveOnPostEarnedKillLive finds it (6.31): the slot of AFortAthenaMutator's
     // FortGameStateAthena_OnPostEarnedKill (21.40's name; 6.31 CL-4573279 slot 0xD4, the empty function in AFortAthenaMutator,
     // AFortAthenaMutator_TDM's 0xD3C1B0), which 6.31 calls with the killer's controller. The game state's mutators hear

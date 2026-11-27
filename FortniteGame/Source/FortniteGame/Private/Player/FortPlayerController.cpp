@@ -2102,6 +2102,12 @@ void AFortPlayerController::ServerCombineInventoryItems_Implementation(const FGu
 bool AFortPlayerController::ShouldDropItem(const UFortWorldItemDefinition* ItemDefinition, bool bShouldDrop)
 {
     const int32_t Index = Natives::AFortPlayerController_ShouldDropItemIndex;
+    if (Index >= 0 && ItemDefinition && Natives::AFortPlayerController_ShouldDropItemHasOutParams)
+    {
+        bool bShouldDestroy = false;
+        CallVirtual<void>(this, Index, ItemDefinition, &bShouldDrop, &bShouldDestroy);
+        return bShouldDrop;
+    }
     return Index >= 0 && ItemDefinition ? CallVirtual<bool>(this, Index, ItemDefinition, bShouldDrop) : bShouldDrop;
 }
 

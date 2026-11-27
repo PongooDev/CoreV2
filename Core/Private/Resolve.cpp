@@ -4930,7 +4930,24 @@ namespace
                 }
             }
         }
+        // 9.30 (CL-7095426, 0x2E6ACAD) uses disp8 for the channel: mov rax, [rbx+58h];
+        // mov r8, [rbx+10h]; mov ecx, [rax+90h]. The older loads above use disp32.
+        if (!OwningChannelLoads && ReplicatePropertiesEnd && ActorChannelBits > 0)
+        {
+            const std::initializer_list<int32_t> ChannelAndBits = { 0x48, 0x8B, 0x43, -1, 0x4C, 0x8B, 0x43, -1,
+                0x8B, 0x88, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
+            const uintptr_t Load = FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, ChannelAndBits);
+            if (Load && !FindInstruction(Load + 1, ReplicatePropertiesEnd, ChannelAndBits))
+            {
+                OwningChannel = static_cast<int8_t>(Byte(Load + 3));
+                ++OwningChannelLoads;
+            }
+        }
         RequireOffset(L"FObjectReplicator::OwningChannel", Natives::FObjectReplicator_OwningChannel, OwningChannelLoads == 1 ? OwningChannel : 0);
+        if (OwningChannelLoads == 1 && OwningChannel > 0)
+        {
+            Log::Info(L"Finder: FObjectReplicator::OwningChannel +0x{:X}", OwningChannel);
+        }
 
         Sites::FlushActorDormancyCalls.clear();
         uintptr_t StrippedFlushDormancy = 0;

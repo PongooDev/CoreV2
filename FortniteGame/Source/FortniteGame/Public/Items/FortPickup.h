@@ -200,6 +200,10 @@ public:
 private:
     void GivePickupToPlayer(AFortPlayerController* PlayerController);
     void GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterface* InventoryOwner);
+    // The give's call of the pickup's virtual once its items went to InventoryOwner. AFortPickup's is empty; 9.00+
+    // AFortGameModePickup_Wax adds its AmountOfTokens to the owner's tokens there, AFortPickupBackpack shows "Backpack
+    // Retrieved!". Nothing where Finder::ResolvePickupGiveLive didn't prove the slot.
+    void OnPickupGivenTo(IFortInventoryOwnerInterface* InventoryOwner);
     // OnPickup's broadcast, as SetPickupTarget broadcasts OnPickupAttempted: this pickup, the pawn it flew to, its item
     // and where it was going (PickupLocationData's PickupTarget and LootFinalPosition).
     void BroadcastOnPickup();

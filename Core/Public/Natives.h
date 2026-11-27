@@ -499,6 +499,9 @@ namespace Natives
     inline void* AFortPickup_GivePickupToStripped = nullptr;
     // 9.10+: GivePickupTo(InventoryOwner, bDestroyPickup), the body Destroys only when its third argument is set.
     inline bool AFortPickup_GivePickupToTakesDestroyPickup = false;
+    // AFortPickup::OnPickupGivenTo(IFortInventoryOwnerInterface*), the slot after GivePickupTo. 9.00+ only (proven by
+    // AFortGameModePickup_Wax's override); -1 elsewhere.
+    inline int32_t AFortPickup_OnPickupGivenToIndex = -1;
     inline int32_t AFortPlayerController_SpawnDropPickupIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     // The pickup's IFortInteractInterface::CanInteract(const FInteractionType&) slot, in the interface's own vtable.

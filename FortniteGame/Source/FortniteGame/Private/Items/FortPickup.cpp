@@ -47,13 +47,23 @@
 
 namespace
 {
-    std::vector<FFortItemEntry*> GetPickupEntries(AFortPickup* Pickup)
+    // The entries with an item. A game mode pickup holds none: Wick's Bounty's coin (AFortGameModePickup_Wax) is
+    // "1 None", and its give is OnPickupGivenTo's; Core gave the empty entry and tossed it back down as an empty pickup.
+    TArray<FFortItemEntry*> GetPickupEntries(AFortPickup* Pickup)
     {
-        std::vector<FFortItemEntry*> Entries{ &static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry) };
+        TArray<FFortItemEntry*> Entries;
+        FFortItemEntry& PrimaryEntry = Pickup->PrimaryPickupItemEntry;
+        if (static_cast<UFortItemDefinition*>(PrimaryEntry.ItemDefinition))
+        {
+            Entries.Add(&PrimaryEntry);
+        }
         TStructArray<FFortItemEntry>& MultiItemEntries = Pickup->MultiItemPickupEntries;
         for (int32_t Index = 0; Index < MultiItemEntries.Num(); ++Index)
         {
-            Entries.push_back(&MultiItemEntries[Index]);
+            if (static_cast<UFortItemDefinition*>(MultiItemEntries[Index].ItemDefinition))
+            {
+                Entries.Add(&MultiItemEntries[Index]);
+            }
         }
         return Entries;
     }
@@ -1239,6 +1249,7 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner, boo
     {
         GivePickupToPlayer(PlayerController);
     }
+    OnPickupGivenTo(InventoryOwner);
     if (bTellOwner)
     {
         InventoryOwner->OnPickupPostGiven(this);
@@ -1264,7 +1275,7 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner, boo
 void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
 {
 #if WITH_SERVER_CODE
-    std::vector<FFortItemEntry*> Entries = GetPickupEntries(this);
+    TArray<FFortItemEntry*> Entries = GetPickupEntries(this);
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     int32_t SwappedSlot = -1;
@@ -1404,6 +1415,22 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         FQuickBar& PrimaryQuickBar = Bars->GetQuickBar(Primary);
         Log::Info(L"Battle Royale: after {}'s swap, quickbar slot {} is focused (previously {})", PlayerController->GetName().ToStdString(), static_cast<int32_t>(PrimaryQuickBar.CurrentFocusedSlot), static_cast<int32_t>(PrimaryQuickBar.PreviousFocusedSlot));
     }
+#endif
+}
+
+void AFortPickup::OnPickupGivenTo(IFortInventoryOwnerInterface* InventoryOwner)
+{
+#if WITH_SERVER_CODE
+    const int32_t Index = Natives::AFortPickup_OnPickupGivenToIndex;
+    const uintptr_t Override = Index >= 0 ? reinterpret_cast<uintptr_t>((*reinterpret_cast<void***>(this))[Index]) : 0;
+    if (!Override || Finder::IsStubFunction(Override))
+    {
+        return;
+    }
+    UObject* OwnerObject = InventoryOwner->_getUObject();
+    Log::Info(L"Pickup: {} went to {}, its class's OnPickupGivenTo (+0x{:X}) is told", GetName().ToStdString(), OwnerObject ? OwnerObject->GetName().ToStdString() : L"None",
+        Override - Finder::ImageBase());
+    CallVirtual<void>(this, Index, InventoryOwner);
 #endif
 }
 

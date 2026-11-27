@@ -7738,6 +7738,23 @@ bool Finder::ResolvePickupGiveLive()
     Natives::AFortPickup_SetPickupTarget = reinterpret_cast<decltype(Natives::AFortPickup_SetPickupTarget)>(SetPickupTarget);
     Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}{}, SetPickupTarget +0x{:X}", GiveIndex,
         Natives::AFortPickup_GivePickupToTakesDestroyPickup ? L" (takes bDestroyPickup)" : L"", SetPickupTarget - Finder::ImageBase());
+
+    // AFortPickup::OnPickupGivenTo(InventoryOwner), the slot after GivePickupTo (21.40's order), is empty in AFortPickup and
+    // the stripped give no longer calls it. Wick's Bounty's coin overrides it (AFortGameModePickup_Wax, 9.01 CL-6428087
+    // 0x105F340, 9.21 CL-6922310 0x1108820: "test rdx, rdx; jz", the owner's slot 5 pawn, then the Wax mutator's add of
+    // AmountOfTokens, 9.21 0x11F5930 -> SetTokens 0x11ECBF0). The slot is only taken where that override proves it.
+    void** WaxPickupVTable = CdoVTable(L"/Script/FortniteGame.FortGameModePickup_Wax");
+    const uintptr_t BaseGivenTo = WaxPickupVTable ? VTableEntry(PickupVTable, GiveIndex + 1) : 0;
+    const uintptr_t WaxGivenTo = BaseGivenTo ? VTableEntry(WaxPickupVTable, GiveIndex + 1) : 0;
+    if (WaxGivenTo && WaxGivenTo != BaseGivenTo && Finder::IsStubFunction(BaseGivenTo) && Byte(WaxGivenTo) == 0x48 && Byte(WaxGivenTo + 1) == 0x85 && Byte(WaxGivenTo + 2) == 0xD2)
+    {
+        Natives::AFortPickup_OnPickupGivenToIndex = GiveIndex + 1;
+        Log::Info(L"Finder: AFortPickup::OnPickupGivenTo is slot 0x{:X} (AFortGameModePickup_Wax's 0x{:X})", GiveIndex + 1, WaxGivenTo - Finder::ImageBase());
+    }
+    else if (WaxPickupVTable)
+    {
+        Log::Warning(L"Finder: AFortPickup::OnPickupGivenTo not found after GivePickupTo's slot 0x{:X}, Wick's Bounty coins add no tokens", GiveIndex);
+    }
     return true;
 }
 

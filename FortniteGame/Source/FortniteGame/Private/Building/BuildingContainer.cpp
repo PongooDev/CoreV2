@@ -35,7 +35,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortBuilding, Log, All);
 
@@ -229,10 +228,22 @@ namespace
         FName TierGroup;
         FGameplayTagContainer Tags;
         float DurabilityModifier = 1.0f;
-        std::vector<FWeakObjectPtr> Pickups;
+        TArray<FWeakObjectPtr> Pickups;
     };
 
-    std::vector<FFloorLootSpot> FloorLootSpots;
+    TArray<FFloorLootSpot> FloorLootSpots;
+
+    // The spots of an earlier world are gone with it.
+    void ForgetFloorLootSpotsOfOtherWorlds(UWorld* World)
+    {
+        for (int32_t Index = FloorLootSpots.Num() - 1; Index >= 0; --Index)
+        {
+            if (FloorLootSpots[Index].World.Get() != World)
+            {
+                FloorLootSpots.RemoveAt(Index);
+            }
+        }
+    }
 
     void GetFloorLootLocations(const FFloorLootSpot& Spot, int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
     {
@@ -249,8 +260,13 @@ namespace
         OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Spot.Height);
     }
 
-    void SpawnFloorLootAt(FFloorLootSpot& Spot, UWorld* World, int32_t WorldLevel)
+    // By index, not reference: the roll's synchronous loads (item definitions, the pickup) can flush the streaming, and a
+    // level streamed in then has its foundations PostUpdate their containers, whose own SpawnFloorLoot adds spots and can
+    // move the array (9.21 headless BR boot: bad_array_new_length on the old spot's Pickups).
+    void SpawnFloorLootAt(int32_t SpotIndex, UWorld* World, int32_t WorldLevel)
     {
+        const FFloorLootSpot Spot = FloorLootSpots[SpotIndex];
+        TArray<FWeakObjectPtr> SpawnedPickups;
         FName LootTierKey;
         int32_t LootTier = -1;
         UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, Spot.TierGroup, WorldLevel, -1, Spot.Tags);
@@ -280,11 +296,12 @@ namespace
             if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
             {
                 Pickup->TossPickup(FinalLocation, nullptr, 0);
-                Spot.Pickups.emplace_back(Pickup);
+                SpawnedPickups.Emplace(Pickup);
                 ++FloorLootPickups;
             }
         }
         LootDrops.Empty();
+        FloorLootSpots[SpotIndex].Pickups.Append(SpawnedPickups);
     }
 }
 
@@ -374,10 +391,9 @@ void ABuildingContainer::SpawnFloorLoot()
     const int32_t WorldLevel = GetWorldManager() ? GetWorldLevel() : -1;
     LogAthenaLootLevel(this, WorldLevel);
 
-    // The spots of an earlier world are gone with it.
-    std::erase_if(FloorLootSpots, [World](const FFloorLootSpot& Spot) { return Spot.World.Get() != World; });
+    ForgetFloorLootSpotsOfOtherWorlds(World);
     const FTransform ContainerTransform = GetTransform();
-    FFloorLootSpot& Spot = FloorLootSpots.emplace_back();
+    FFloorLootSpot Spot;
     Spot.World = World;
     Spot.Base = ContainerTransform.GetLocation();
     Spot.Forward = GetAthenaTossForward();
@@ -385,7 +401,7 @@ void ABuildingContainer::SpawnFloorLoot()
     Spot.TierGroup = GetSearchLootTierGroup();
     Spot.Tags.AppendTags(StaticGameplayTags);
     Spot.DurabilityModifier = LootedWeaponsDurabilityModifier;
-    SpawnFloorLootAt(Spot, World, WorldLevel);
+    SpawnFloorLootAt(FloorLootSpots.Add(std::move(Spot)), World, WorldLevel);
 }
 
 void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
@@ -444,8 +460,11 @@ void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
     FloorLootPickups = 0;
     FloorLootLoadedWeapons = 0;
     int32_t Removed = 0;
-    for (FFloorLootSpot& Spot : FloorLootSpots)
+    // The spots there are now: one a roll streams in has just rolled with these tables.
+    const int32_t SpotCount = FloorLootSpots.Num();
+    for (int32_t SpotIndex = 0; SpotIndex < SpotCount; ++SpotIndex)
     {
+        FFloorLootSpot& Spot = FloorLootSpots[SpotIndex];
         if (Spot.World.Get() != World)
         {
             continue;
@@ -458,8 +477,8 @@ void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
                 ++Removed;
             }
         }
-        Spot.Pickups.clear();
-        SpawnFloorLootAt(Spot, World, WorldLevel);
+        Spot.Pickups.Reset();
+        SpawnFloorLootAt(SpotIndex, World, WorldLevel);
     }
     UE_LOG(LogFortBuilding, Log, TEXT("Loot rolled again (loot level %d): %d containers' tiers (%d drop nothing now, searched and hidden); floor loot: %d pickups removed, %d containers spawned %d pickups (%d loaded weapons)"),
         WorldLevel, Containers, Emptied, Removed, FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);    FloorLootContainers = 0;

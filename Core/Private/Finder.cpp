@@ -485,6 +485,94 @@ uintptr_t Finder::FunctionEnd(uintptr_t Start)
     return Memcury::Scanner(Memcury::PE::Address(Start)).FindFunctionEnd().Get();
 }
 
+namespace
+{
+    // Whether forward-decoding from Begin lands exactly on Site: Site is a real instruction boundary of the block at Begin.
+    bool DecodeReaches(uintptr_t Begin, uintptr_t Site)
+    {
+        for (uintptr_t Address = Begin; Address <= Site;)
+        {
+            if (Address == Site)
+            {
+                return true;
+            }
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            Address += Length;
+        }
+        return false;
+    }
+
+    // The start of the moved-code block holding Site: the instruction just after the nearest preceding unconditional
+    // terminator (jmp rel8/rel32, ret, ret imm16) whose block decodes forward onto Site. Moved blocks are chained by such
+    // terminators, so the entry the owning body jumps to is this address. 0 when none is found within the window.
+    uintptr_t MovedBlockStart(uintptr_t Site)
+    {
+        constexpr size_t MaxBack = 64;
+        for (size_t Back = 1; Back <= MaxBack; ++Back)
+        {
+            const uintptr_t Terminator = Site - Back;
+            if (!IsExecutable(Terminator))
+            {
+                break;
+            }
+            const uint8_t* const Bytes = reinterpret_cast<const uint8_t*>(Terminator);
+            uintptr_t Block = 0;
+            switch (Bytes[0])
+            {
+            case 0xE9: Block = Terminator + 5; break; // jmp rel32
+            case 0xEB: Block = Terminator + 2; break; // jmp rel8
+            case 0xC3: Block = Terminator + 1; break; // ret
+            case 0xC2: Block = Terminator + 3; break; // ret imm16
+            default: continue;
+            }
+            if (Block <= Site && DecodeReaches(Block, Site))
+            {
+                return Block;
+            }
+        }
+        return 0;
+    }
+
+    void ResolveOwningFunctions(uintptr_t Address, int32_t Depth, std::vector<uintptr_t>& Out)
+    {
+        if (!Address || Depth > 8)
+        {
+            return;
+        }
+        if (const uintptr_t Start = Finder::FunctionStart(Address))
+        {
+            if (std::find(Out.begin(), Out.end(), Start) == Out.end())
+            {
+                Out.push_back(Start);
+            }
+            return;
+        }
+        // Address has no .pdata of its own: it's in a relocated block. Follow the rel32 jmp that enters the block back to
+        // the owning body (which lives in the first .text, where CallsTo scans).
+        const uintptr_t Block = MovedBlockStart(Address);
+        if (!Block)
+        {
+            return;
+        }
+        for (const uintptr_t Enter : Finder::CallsTo(Block, true))
+        {
+            ResolveOwningFunctions(Enter, Depth + 1, Out);
+        }
+    }
+}
+
+std::vector<uintptr_t> Finder::OwningFunctions(uintptr_t Address)
+{
+    std::vector<uintptr_t> Result;
+    ResolveOwningFunctions(Address, 0, Result);
+    return Result;
+}
+
 std::vector<std::pair<uintptr_t, uintptr_t>> Finder::FunctionChunks(uintptr_t Start)
 {
     std::vector<std::pair<uintptr_t, uintptr_t>> Chunks;

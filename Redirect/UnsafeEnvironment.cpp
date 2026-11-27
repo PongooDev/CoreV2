@@ -15,12 +15,31 @@ namespace
     // whatever else the scan turned up would take working code with it.
     constexpr size_t MaxFunctions = 2;
 
-    void Add(std::vector<uintptr_t>& Functions, uintptr_t Address)
+    void Push(std::vector<uintptr_t>& Functions, uintptr_t Function)
     {
-        const uintptr_t Function = Finder::FunctionStart(Address);
         if (Function && std::find(Functions.begin(), Functions.end(), Function) == Functions.end())
         {
             Functions.push_back(Function);
+        }
+    }
+
+    void Add(std::vector<uintptr_t>& Functions, uintptr_t Address)
+    {
+        Push(Functions, Finder::FunctionStart(Address));
+    }
+
+    // Like Add, but for a site that may sit in moved code (9.20+ hoists the handler's lea into the second .text, where it
+    // has no .pdata and FunctionStart returns 0): resolve the owning function through the jmp that enters the block.
+    void AddOwner(std::vector<uintptr_t>& Functions, uintptr_t Address)
+    {
+        if (const uintptr_t Function = Finder::FunctionStart(Address))
+        {
+            Push(Functions, Function);
+            return;
+        }
+        for (const uintptr_t Owner : Finder::OwningFunctions(Address))
+        {
+            Push(Functions, Owner);
         }
     }
 }
@@ -47,10 +66,13 @@ void UnsafeEnvironment::Null()
     std::vector<uintptr_t> Handlers;
     for (const uintptr_t Notification : Notifications)
     {
-        // The notification is bound into a delegate rather than called, so its address is taken with a lea.
+        // The notification is bound into a delegate rather than called, so its address is taken with a lea. From 9.20
+        // (CL-6822798) the packer hoists that lea into the second .text, a relocated piece with no .pdata, so the owning
+        // handler is reached through the jmp that enters the piece (AddOwner); 2.2 to 9.10 keep the lea in the first .text
+        // and resolve exactly as before.
         for (const uintptr_t Ref : Finder::AddressRefs(Notification))
         {
-            Add(Handlers, Ref);
+            AddOwner(Handlers, Ref);
         }
         for (const uintptr_t Call : Finder::CallsTo(Notification, true))
         {

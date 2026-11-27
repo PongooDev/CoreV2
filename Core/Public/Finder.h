@@ -136,6 +136,12 @@ namespace Finder
     uintptr_t FindReadOnlyAfter(const void* Bytes, size_t Size, uintptr_t After);
 
     uintptr_t FunctionStart(uintptr_t Address);
+    // The real function(s) owning a code address, FunctionStart for an ordinary one. On a packed exe (Finder::HasMovedCode)
+    // a piece of a function can be relocated into the second .text with no .pdata of its own, so FunctionStart returns 0
+    // there; the piece is reached by a rel32 jmp from the owning body, so this walks that jmp back (CallsTo) to the
+    // pdata-covered function. 9.20 (CL-6822798) hoists the lea that binds the unsafe-environment handler into such a
+    // piece. Empty when Address isn't owned by any function.
+    std::vector<uintptr_t> OwningFunctions(uintptr_t Address);
     uintptr_t FunctionEnd(uintptr_t FunctionStart);
     // The [begin, end) ranges of the function's separated pieces: the .pdata entries whose unwind info chains back to
     // the one starting at FunctionStart (UNW_FLAG_CHAININFO). FunctionEnd only covers the first piece.

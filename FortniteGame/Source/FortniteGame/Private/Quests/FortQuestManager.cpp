@@ -796,35 +796,42 @@ namespace
         return bAdd ? &SavesInFlight.emplace_back(FSaveRequests{ Weak, {} }) : nullptr;
     }
 
-    // The objectives of bAthenaUpdateObjectiveOncePerMatch quests (5.40) a quest manager moved in the current match, the
-    // match being its world's game mode (a server reloads its map for the next match, and a player who plays it again
-    // may keep the quest manager).
-    struct FObjectivesUpdatedThisMatch
+    // The bAthenaUpdateObjectiveOncePerMatch quests (5.40) a quest manager moved in the current match, by definition
+    // name, the match being its world's game mode (a server reloads its map for the next match, and a player who plays
+    // it again may keep the quest manager).
+    struct FQuestsUpdatedThisMatch
     {
         FWeakObjectPtr QuestManager;
         FWeakObjectPtr GameMode;
-        std::vector<FName> BackendNames;
+        TArray<FName> QuestNames;
     };
-    std::vector<FObjectivesUpdatedThisMatch> ObjectivesUpdatedThisMatch;
+    TArray<FQuestsUpdatedThisMatch> QuestsUpdatedThisMatch;
 
-    std::vector<FName>& ObjectivesUpdatedThisMatchOf(UFortQuestManager* QuestManager, UObject* GameMode)
+    TArray<FName>& QuestsUpdatedThisMatchOf(UFortQuestManager* QuestManager, UObject* GameMode)
     {
-        std::erase_if(ObjectivesUpdatedThisMatch, [](const FObjectivesUpdatedThisMatch& Entry) { return !Entry.QuestManager.Get(); });
+        for (int32_t Index = QuestsUpdatedThisMatch.Num() - 1; Index >= 0; --Index)
+        {
+            if (!QuestsUpdatedThisMatch[Index].QuestManager.Get())
+            {
+                QuestsUpdatedThisMatch.RemoveAtSwap(Index);
+            }
+        }
         const FWeakObjectPtr WeakQuestManager(QuestManager);
         const FWeakObjectPtr WeakGameMode(GameMode);
-        for (FObjectivesUpdatedThisMatch& Entry : ObjectivesUpdatedThisMatch)
+        for (FQuestsUpdatedThisMatch& Entry : QuestsUpdatedThisMatch)
         {
             if (Entry.QuestManager == WeakQuestManager)
             {
                 if (!(Entry.GameMode == WeakGameMode))
                 {
                     Entry.GameMode = WeakGameMode;
-                    Entry.BackendNames.clear();
+                    Entry.QuestNames.Reset();
                 }
-                return Entry.BackendNames;
+                return Entry.QuestNames;
             }
         }
-        return ObjectivesUpdatedThisMatch.emplace_back(FObjectivesUpdatedThisMatch{ WeakQuestManager, WeakGameMode, {} }).BackendNames;
+        const int32_t Index = QuestsUpdatedThisMatch.Add(FQuestsUpdatedThisMatch{ WeakQuestManager, WeakGameMode, {} });
+        return QuestsUpdatedThisMatch[Index].QuestNames;
     }
 
     // 1.9.1 0x8BC420.
@@ -1140,7 +1147,7 @@ namespace
             : Type == EFortQuestObjectiveStatEvent::GetCollect() ? static_cast<uint8_t>(EFortQuestObjectiveItemEvent::GetCollect()) : NoItemEvent;
         std::optional<FConditionContext> Conditions;
         static std::unordered_set<std::wstring> ReportedConditions;
-        std::vector<FName>* UpdatedThisMatch = nullptr;
+        TArray<FName>* UpdatedThisMatch = nullptr;
 
         std::vector<FName> Processed;
         const TArray<UFortQuestItem*>& Quests = This->CurrentQuests;
@@ -1157,11 +1164,14 @@ namespace
             const std::wstring DefinitionName = Definition->GetName().ToStdString();
             const int32_t CurrentStage = Quest->CurrentStage;
             // 5.40's "... in different matches" challenges (bAthenaUpdateObjectiveOncePerMatch, 6.00's "Pickup a Legendary
-            // Item in different matches"): an objective moves by one the first time an event matches it in a match, and no
-            // further in that match. Epic's check isn't in any build on hand (SendStatEventWithTags and SaveStatEvents are
-            // stripped from 6.00, 7.00 and 8.30 alike), so this follows the flag's name. Epic's server held a match's
-            // Battle Royale progress until the match's end; Core saves it during the match (SendStatEventWithTagsHK), so
-            // it keeps which objectives the quest manager moved in this match.
+            // Item in different matches"): the quest moves by one the first time an event matches one of its objectives in a
+            // match, and no further in that match. Epic's check isn't in any build on hand (SendStatEventWithTags and
+            // SaveStatEvents are stripped from 6.00, 7.00 and 8.30 alike), so this follows the flag's name. Epic's server held
+            // a match's Battle Royale progress until the match's end; Core saves it during the match
+            // (SendStatEventWithTagsHK), so it keeps which quests the quest manager moved in this match, by quest rather
+            // than by objective: 7.40's Quest_BR_OT_RegainHealth_Campfire_DifferentMatches has one count-1 objective per
+            // stage (1-3) on the same stat row, and the stage moves on as soon as the profile answers, so the next heal tick
+            // of the same match would otherwise complete the next stage (#717).
             const bool bOncePerMatch = UFortQuestItemDefinitionObjectives::HasUpdateObjectiveOncePerMatch() && static_cast<bool>(Definition->bAthenaUpdateObjectiveOncePerMatch);
             TStructArray<FFortMcpQuestObjectiveInfo>& Objectives = Definition->Objectives;
             for (int32_t ObjectiveIndex = 0; ObjectiveIndex < Objectives.Num(); ++ObjectiveIndex)
@@ -1225,11 +1235,11 @@ namespace
                         if (!UpdatedThisMatch)
                         {
                             UWorld* World = PlayerController->GetWorld();
-                            UpdatedThisMatch = &ObjectivesUpdatedThisMatchOf(This, World ? reinterpret_cast<UObject*>(World->GetAuthGameMode()) : nullptr);
+                            UpdatedThisMatch = &QuestsUpdatedThisMatchOf(This, World ? reinterpret_cast<UObject*>(World->GetAuthGameMode()) : nullptr);
                         }
-                        if (std::find(UpdatedThisMatch->begin(), UpdatedThisMatch->end(), BackendName) != UpdatedThisMatch->end())
+                        if (UpdatedThisMatch->Contains(Definition->GetFName()))
                         {
-                            Log::Info(L"SendStatEvent for {}: {}'s {} already moved this match (bAthenaUpdateObjectiveOncePerMatch)", This->GetName().ToStdString(), DefinitionName,
+                            Log::Info(L"SendStatEvent for {}: {} already moved this match, {} waits for the next (bAthenaUpdateObjectiveOncePerMatch)", This->GetName().ToStdString(), DefinitionName,
                                 BackendName.ToString().ToStdString());
                             continue;
                         }
@@ -1252,7 +1262,7 @@ namespace
                     Entry->Count = Entry->Count + (bOncePerMatch ? 1 : Count);
                     if (bOncePerMatch && UpdatedThisMatch)
                     {
-                        UpdatedThisMatch->push_back(BackendName);
+                        UpdatedThisMatch->Add(Definition->GetFName());
                     }
                 }
                 if (!Entry)

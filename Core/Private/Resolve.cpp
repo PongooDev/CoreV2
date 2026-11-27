@@ -20010,6 +20010,15 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
                     }
                 }
             }
+            // 9.30 CL-7095426: the same knock at 0x11C0B7C writes DeathCause and bDBNO relative to rbp.
+            if (bClearsFlag && DeathInfoDBNOOffset + 1 == DeathCauseOffset && Byte(CauseStore) == 0x88 && Byte(CauseStore + 1) == 0x45
+                && Byte(CauseStore + 2) > 0 && FindInstruction(CauseStore + 3, std::min(End, CauseStore + 0x24),
+                    { 0xC6, 0x45, Byte(CauseStore + 2) - 1, 0x01 }))
+            {
+                GetDeathCause = Finder::RelativeTarget(Site, 1, 5);
+                bStaticDeathCause = true;
+                return true;
+            }
         }
         return false;
     });
@@ -20270,6 +20279,7 @@ bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathC
     uintptr_t SetDeathInfo = 0;
     uintptr_t GetDeathCircumstance = 0;
     int32_t InfoSlot = -1;
+    bool bInfoUsesRbp = false;
     void** PawnVTable = ToDeathCause && DeathInfoOffset > 0 && InitializedOffset > DeathInfoOffset && CauseInInfo > 0 && CauseInInfo < 0x40 ? CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena") : nullptr;
     FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
     {
@@ -20283,19 +20293,30 @@ bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathC
             // mov rcx, r64 (the pawn, for the circumstance's call), then the cause's store on the stack.
             const bool bMovesPawn = (Byte(Site + 5) & 0xFE) == 0x48 && Byte(Site + 6) == 0x8B && (Byte(Site + 7) & 0xF8) == 0xC8;
             const uintptr_t CauseStore = Site + 5 + (bMovesPawn ? 3 : 0);
-            const int32_t Slot = Byte(CauseStore) == 0x88 && Byte(CauseStore + 1) == 0x44 && Byte(CauseStore + 2) == 0x24 && Byte(CauseStore + 3) < 0x80
-                ? static_cast<int32_t>(Byte(CauseStore + 3)) - static_cast<int32_t>(CauseInInfo) : -1;
-            if (Slot < 0)
+            const bool bRsp = Byte(CauseStore + 1) == 0x44 && Byte(CauseStore + 2) == 0x24;
+            const bool bRbp = Byte(CauseStore + 1) == 0x45;
+            if (Byte(CauseStore) != 0x88 || (!bRsp && !bRbp))
             {
                 continue;
             }
-            // lea rdx, [rsp + Info]; (mov rcx, r64;) call
-            uintptr_t Store = 0;
-            for (uintptr_t Lea = FindInstruction(CauseStore + 4, std::min(End, CauseStore + 0x400), { 0x48, 0x8D, 0x54, 0x24, Slot }); Lea && !Store;
-                Lea = FindInstruction(Lea + 1, std::min(End, CauseStore + 0x400), { 0x48, 0x8D, 0x54, 0x24, Slot }))
+            const int32_t Disp = Byte(CauseStore + (bRsp ? 3 : 2));
+            const int32_t Slot = Disp - static_cast<int32_t>(CauseInInfo);
+            if (Disp >= 0x80 || Slot < 0)
             {
-                const bool bMovesState = (Byte(Lea + 5) & 0xFE) == 0x48 && Byte(Lea + 6) == 0x8B && (Byte(Lea + 7) & 0xF8) == 0xC8;
-                const uintptr_t Call = Lea + 5 + (bMovesState ? 3 : 0);
+                continue;
+            }
+            // 9.30's knock passes the same rbp-local FDeathInfo to SetDeathInfo at 0x11C0D10.
+            const std::initializer_list<int32_t> RspLea = { 0x48, 0x8D, 0x54, 0x24, Slot };
+            const std::initializer_list<int32_t> RbpLea = { 0x48, 0x8D, 0x55, Slot };
+            const auto& LeaPattern = bRsp ? RspLea : RbpLea;
+            uintptr_t Store = 0;
+            const uintptr_t AfterCause = CauseStore + (bRsp ? 4 : 3);
+            for (uintptr_t Lea = FindInstruction(AfterCause, std::min(End, CauseStore + 0x400), LeaPattern); Lea && !Store;
+                Lea = FindInstruction(Lea + 1, std::min(End, CauseStore + 0x400), LeaPattern))
+            {
+                const uintptr_t AfterLea = Lea + LeaPattern.size();
+                const bool bMovesState = (Byte(AfterLea) & 0xFE) == 0x48 && Byte(AfterLea + 1) == 0x8B && (Byte(AfterLea + 2) & 0xF8) == 0xC8;
+                const uintptr_t Call = AfterLea + (bMovesState ? 3 : 0);
                 const uintptr_t Callee = Call + 5 <= End && Byte(Call) == 0xE8 ? Finder::RelativeTarget(Call, 1, 5) : 0;
                 Store = Callee && IsStore(Callee) ? Callee : 0;
             }
@@ -20306,8 +20327,9 @@ bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathC
             Handling = Entry;
             SetDeathInfo = Store;
             InfoSlot = Slot;
+            bInfoUsesRbp = bRbp;
             // call; mov [rsp + Info.DeathCircumstance], eax
-            const uintptr_t CircumstanceCall = CauseStore + 4;
+            const uintptr_t CircumstanceCall = AfterCause;
             const uintptr_t Circumstance = bMovesPawn && CircumstanceInInfo > 0 && Byte(CircumstanceCall) == 0xE8 ? Finder::RelativeTarget(CircumstanceCall, 1, 5) : 0;
             if (Circumstance && Circumstance != ToDeathCause && IsInText(Circumstance) && IsInText(Circumstance + 0x40) && Byte(CircumstanceCall + 5) == 0x89 && Byte(CircumstanceCall + 6) == 0x44
                 && Byte(CircumstanceCall + 7) == 0x24 && Byte(CircumstanceCall + 8) < 0x80 && static_cast<int32_t>(Byte(CircumstanceCall + 8)) == Slot + static_cast<int32_t>(CircumstanceInInfo)
@@ -20327,8 +20349,8 @@ bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathC
     }
     Natives::AFortPlayerStateAthena_SetDeathInfo = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_SetDeathInfo)>(SetDeathInfo);
     Natives::AFortPlayerPawnAthena_GetDeathCircumstance = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_GetDeathCircumstance)>(GetDeathCircumstance);
-    Log::Info(L"Finder: the player state's death store is 0x{:X} (the pawn's DBNO handling 0x{:X} hands it the FDeathInfo at rsp+0x{:X}; it sets bInitialized +0x{:X}), the death circumstance 0x{:X}",
-        Rva(SetDeathInfo), Rva(Handling), InfoSlot, InitializedOffset, Rva(GetDeathCircumstance));
+    Log::Info(L"Finder: the player state's death store is 0x{:X} (the pawn's DBNO handling 0x{:X} hands it the FDeathInfo at {}+0x{:X}; it sets bInitialized +0x{:X}), the death circumstance 0x{:X}",
+        Rva(SetDeathInfo), Rva(Handling), bInfoUsesRbp ? L"rbp" : L"rsp", InfoSlot, InitializedOffset, Rva(GetDeathCircumstance));
     if (!GetDeathCircumstance && CircumstanceInInfo > 0)
     {
         Log::Warning(L"Finder: the death circumstance's function not found, a death is stored with the circumstance it had");

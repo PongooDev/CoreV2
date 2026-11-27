@@ -1722,13 +1722,46 @@ namespace
             // first too): the settings class is the one CreateGameModeForURL's GetGlobalDefaultGameMode starts with, a
             // getter other than GetGameDefaultMap (the false pair's function is called from both).
             Matches = 0;
+            std::vector<std::pair<uintptr_t, uintptr_t>> Paired;
             for (const auto& [Target, TargetFirst] : Candidates)
             {
                 if (const uintptr_t GlobalGetter = FindGlobalDefaultGameMode(TargetFirst); GlobalGetter && GlobalGetter != Target)
                 {
                     StaticClass = TargetFirst;
                     GameDefaultMap = Target;
+                    Paired.emplace_back(Target, TargetFirst);
                     ++Matches;
+                }
+            }
+            // 9.30 (CL-7095426) pairs a destructor too: StartGameInstance's 0x148F150 starts with the FMemory::Free it
+            // called just before, as CreateGameModeForURL's 0x69FB00 does. GetGameDefaultMap is GetDefault<UGameMapsSettings>()
+            // ->GameDefaultMap: its first call (the class's StaticClass) is followed by the class's ClassDefaultObject read
+            // (0x2784FB0: call; mov rdi, rax; mov rcx, [rax+0F8h]).
+            const auto ReadsDefaultObject = [](uintptr_t Getter)
+            {
+                const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Getter, Finder::FunctionEnd(Getter));
+                const uintptr_t After = Calls.empty() ? 0 : Calls.front().first + 5;
+                for (uintptr_t At = After; At && At + 7 <= After + 0x10; ++At)
+                {
+                    if ((Byte(At) & 0xFB) == 0x48 && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xC7) == 0x80
+                        && *reinterpret_cast<const int32_t*>(At + 3) == ObjectLayout::Current.UClass_ClassDefaultObject)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (Matches > 1)
+            {
+                Matches = 0;
+                for (const auto& [Target, TargetFirst] : Paired)
+                {
+                    if (ReadsDefaultObject(Target))
+                    {
+                        StaticClass = TargetFirst;
+                        GameDefaultMap = Target;
+                        ++Matches;
+                    }
                 }
             }
         }
@@ -4352,7 +4385,12 @@ namespace
             Log::Warning(L"Finder: UNetDriver::DestroyedStartupOrDormantActors holds 0x{:X} byte values, FActorDestructionInfo is 0x{:X}", DestroyedActorValueSize, Natives::FActorDestructionInfo_Size);
         }
 
-        const uintptr_t ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == NULL");
+        // 9.30 (CL-7095426, 0x2E6AC00) logs "Object == nullptr".
+        uintptr_t ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == NULL");
+        if (!ReplicateProperties)
+        {
+            ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == nullptr");
+        }
         const uintptr_t ReplicatePropertiesEnd = Finder::FunctionEnd(ReplicateProperties);
         ptrdiff_t ReplicationFrame = 0;
         int32_t ReplicationFrameReads = 0;

@@ -152,12 +152,16 @@ namespace
         {
             return true;
         }
-        // The null-checked world: call [r+GetWorld]; test rax, rax; jz ...; mov rcx, rax; [mov [rsp+disp8], r64;] call
+        // The null-checked world: call [r+GetWorld]; test rax, rax; jz ...; mov rcx, rax; [mov [rsp+disp8|disp32], r64;] call
         // GetCurrent. 8.20 (CL-5625478) AFortMission_RiftSpawners' rift removal (0x1359B50, 8.30 0x1419360) saves rbp to its
-        // home slot between the two.
-        const uintptr_t Saved = Site - 5;
-        const uint8_t* Save = reinterpret_cast<const uint8_t*>(Saved);
-        const uintptr_t MoveRcx = (Save[0] == 0x48 || Save[0] == 0x4C) && Save[1] == 0x89 && (Save[2] & 0xC7) == 0x44 && Save[3] == 0x24 ? Saved - 3 : Site - 3;
+        // home slot between the two. 9.20/9.21 save with a disp32 (mov [rsp+90h], rsi) in the mission's rift overlap handler,
+        // which starts the rift's encounter as a player comes in range (9.21 CL-6922310 0x165C6C0, site 0x165C765; 9.20
+        // 0x166AF10, 0x166AFB5): unclassified, a Creature Spawner's rift never started its encounter (#721).
+        const uint8_t* Save8 = reinterpret_cast<const uint8_t*>(Site - 5);
+        const uint8_t* Save32 = reinterpret_cast<const uint8_t*>(Site - 8);
+        const bool bSave8 = (Save8[0] == 0x48 || Save8[0] == 0x4C) && Save8[1] == 0x89 && (Save8[2] & 0xC7) == 0x44 && Save8[3] == 0x24;
+        const bool bSave32 = (Save32[0] == 0x48 || Save32[0] == 0x4C) && Save32[1] == 0x89 && (Save32[2] & 0xC7) == 0x84 && Save32[3] == 0x24;
+        const uintptr_t MoveRcx = bSave8 ? Site - 8 : bSave32 ? Site - 11 : Site - 3;
         const uint8_t* Move = reinterpret_cast<const uint8_t*>(MoveRcx);
         if (Move[0] == 0x48 && Move[1] == 0x8B && Move[2] == 0xC8)
         {

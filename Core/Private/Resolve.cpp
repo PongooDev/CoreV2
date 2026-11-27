@@ -19437,7 +19437,9 @@ int32_t Finder::StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset)
                 Calls.erase(Calls.begin(), Calls.begin() + 2);
             }
         }
-        if (PawnTimerHandleOffset < 0 && AthenaEnd - Athena > 0x120)
+        // 9.20 (CL-6822798, slot 0x3C5, 0x113FD00, 0x12D bytes) drops 9.00's pawn timer and 9.10's stand-in tail again:
+        // the 8.40 body, longer only by its prologue and the four stack arguments it passes on to Zone's handler.
+        if (PawnTimerHandleOffset < 0 && AthenaEnd - Athena > 0x140)
         {
             Calls.clear();
         }

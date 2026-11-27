@@ -84,10 +84,16 @@ public:
     // build's UFunction has it).
     // PickupInstigatorHandle from 9.10: the IFortPickupInstigator's tracked index in its UFortPickupInstigatorRegistryComponent
     // (INDEX_NONE for none), which the pickup's item entry carries.
-    static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss = true, bool bRandomRotation = false, bool bBlockedFromAutoPickup = false, int32_t PickupInstigatorHandle = -1);
+    // SourceType (EFortPickupSourceTypeFlag) and Source (EFortPickupSpawnSource) from 9.30: the pickup's
+    // FFortCreatePickupData fields. -1 where the build's UFunction has no SourceType (CreatePickup's own default).
+    static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss = true, bool bRandomRotation = false, bool bBlockedFromAutoPickup = false, int32_t PickupInstigatorHandle = -1,
+        int32_t SourceType = -1, uint8_t Source = 0);
+    // The game's own calls of the stripped native (6.01 Disco, 6.30 Barrier, 6.31 ItemDropOnDeath) pass these ten.
+    static AFortPickup* K2_SpawnPickupInWorldCall(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle);
     // From 6.00: K2_SpawnPickupInWorld with the pickup's class (null: the game's own pickup class). 9.00's (CL-6337466)
     // Creative Item Spawner (Minigame_Spawner_Component's Spawn) spawns its items through it as FortPickupCreative.
-    static AFortPickup* K2_SpawnPickupInWorldWithClass(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss = true, bool bRandomRotation = false, bool bBlockedFromAutoPickup = false, int32_t PickupInstigatorHandle = -1);
+    static AFortPickup* K2_SpawnPickupInWorldWithClass(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss = true, bool bRandomRotation = false, bool bBlockedFromAutoPickup = false, int32_t PickupInstigatorHandle = -1,
+        int32_t SourceType = -1, uint8_t Source = 0);
     static bool PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
     // The game's own GetSafeZoneLocation (6.30 0xFA82D0, in the build): the Battle Royale game mode's SafeZoneLocations
     // entry for SafeZoneIndex, the centre the storm's circle of that phase closes on. False outside Battle Royale, before

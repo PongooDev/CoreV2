@@ -478,13 +478,20 @@ void UFortKismetLibrary::K2_GiveBuildingResource(AFortPlayerController* Controll
 #endif
 }
 
-AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle)
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle,
+    int32_t SourceType, uint8_t Source)
 {
     return K2_SpawnPickupInWorldWithClass(WorldContextObject, ItemDefinition, nullptr, NumberToSpawn, Position, Direction, OverrideMaxStackCount, bToss, bRandomRotation, bBlockedFromAutoPickup,
-        PickupInstigatorHandle);
+        PickupInstigatorHandle, SourceType, Source);
 }
 
-AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldWithClass(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle)
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldCall(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle)
+{
+    return K2_SpawnPickupInWorld(WorldContextObject, ItemDefinition, NumberToSpawn, Position, Direction, OverrideMaxStackCount, bToss, bRandomRotation, bBlockedFromAutoPickup, PickupInstigatorHandle);
+}
+
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldWithClass(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, UClass* PickupClass, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup, int32_t PickupInstigatorHandle,
+    int32_t SourceType, uint8_t Source)
 {
     // bBlockedFromAutoPickup (5.30): 5.30's native is cut (the exec calls a return-0 stub) and its AFortPickup has no
     // member the flag lands on, so it's taken for the call's sake and left unused.
@@ -519,7 +526,7 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldWithClass(UObject* WorldCo
     }
 
     const FRotator SpawnRotation = Direction.Rotation();
-    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation, nullptr, PickupClass);
+    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation, nullptr, PickupClass, SourceType, Source);
     EntryStruct->DestroyStruct(ItemEntry);
 
     // 3.0 replicates the choice on the pickup (AFortPickup::bRandomRotation).
@@ -538,7 +545,7 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorldWithClass(UObject* WorldCo
     // (#485) spawns its items with bToss false, and players never got them.
     if (Pickup)
     {
-        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount, bToss);
+        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount, bToss, SourceType >= 0 ? static_cast<uint8_t>(SourceType) : 0);
     }
 
     // 7.00+ Creative (#485): an Item Spawner's Minigame_Spawner_Component spawns its items here (its Spawn event, from
@@ -876,18 +883,31 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
         P_GET_PROPERTY(UIntProperty, Z_Param_PickupInstigatorHandleParam);
         Z_Param_PickupInstigatorHandle = Z_Param_PickupInstigatorHandleParam;
     }
+    // 9.30 added SourceType and Source after it (CL-7095426's exec, 0x1CE2EE0, reads twelve).
+    static const bool bHasSource = StaticFunction_K2_SpawnPickupInWorld()->FindPropertyByName(FName(L"SourceType", FNAME_Find)) != nullptr;
+    int32_t Z_Param_SourceType = -1;
+    uint8_t Z_Param_Source = 0;
+    if (bHasSource)
+    {
+        P_GET_PROPERTY(UByteProperty, Z_Param_SourceTypeParam);
+        P_GET_PROPERTY(UByteProperty, Z_Param_SourceParam);
+        Z_Param_SourceType = Z_Param_SourceTypeParam;
+        Z_Param_Source = Z_Param_SourceParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
     *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount, Z_Param_bToss, Z_Param_bRandomRotation, Z_Param_bBlockedFromAutoPickup,
-        Z_Param_PickupInstigatorHandle);
+        Z_Param_PickupInstigatorHandle, Z_Param_SourceType, Z_Param_Source);
     P_NATIVE_END;
 }
 
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorldWithClass)
 {
     // 6.00 to 9.01 have these ten parameters; 9.00's exec (0x1B0FCD0) reads them and returns the shared return-0 stub's
-    // result. 9.10 adds PickupInstigatorHandle (CL-6639283's exec, 0x1BAB640, reads eleven).
+    // result. 9.10 adds PickupInstigatorHandle (CL-6639283's exec, 0x1BAB640, reads eleven); 9.30 SourceType and Source
+    // (CL-7095426's exec, 0x1CE3230, reads thirteen into the return-zero stub).
     static const bool bHasPickupInstigatorHandle = StaticFunction_K2_SpawnPickupInWorldWithClass()->FindPropertyByName(FName(L"PickupInstigatorHandle", FNAME_Find)) != nullptr;
+    static const bool bHasSource = StaticFunction_K2_SpawnPickupInWorldWithClass()->FindPropertyByName(FName(L"SourceType", FNAME_Find)) != nullptr;
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
     P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
     P_GET_OBJECT(UClass, Z_Param_PickupClass);
@@ -904,10 +924,19 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorldWithClass)
         P_GET_PROPERTY(UIntProperty, Z_Param_PickupInstigatorHandleParam);
         Z_Param_PickupInstigatorHandle = Z_Param_PickupInstigatorHandleParam;
     }
+    int32_t Z_Param_SourceType = -1;
+    uint8_t Z_Param_Source = 0;
+    if (bHasSource)
+    {
+        P_GET_PROPERTY(UByteProperty, Z_Param_SourceTypeParam);
+        P_GET_PROPERTY(UByteProperty, Z_Param_SourceParam);
+        Z_Param_SourceType = Z_Param_SourceTypeParam;
+        Z_Param_Source = Z_Param_SourceParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
     *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorldWithClass(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_PickupClass, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction,
-        Z_Param_OverrideMaxStackCount, Z_Param_bToss, Z_Param_bRandomRotation, Z_Param_bBlockedFromAutoPickup, Z_Param_PickupInstigatorHandle);
+        Z_Param_OverrideMaxStackCount, Z_Param_bToss, Z_Param_bRandomRotation, Z_Param_bBlockedFromAutoPickup, Z_Param_PickupInstigatorHandle, Z_Param_SourceType, Z_Param_Source);
     P_NATIVE_END;
 }
 
@@ -996,9 +1025,8 @@ void UFortKismetLibrary::HookNatives()
     // the stub from it.
     if (uint8_t* SpawnPickupCall = Finder::DiscoPawnDeathSpawnPickupCall(StaticFunction_K2_SpawnPickupInWorld()))
     {
-        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool, int32_t);
         Hooks::RedirectCall(L"AFortAthenaMutator_Disco::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
-            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+            reinterpret_cast<void*>(&K2_SpawnPickupInWorldCall));
     }
 
     // 6.31's Team Rumble. A dead player leaves some of their ammo and a stack of wood, stone or metal: the
@@ -1006,9 +1034,8 @@ void UFortKismetLibrary::HookNatives()
     // K2_SpawnPickupInWorld call, and gives each pickup it gets back its despawn time.
     for (uint8_t* SpawnPickupCall : Finder::ItemDropOnDeathSpawnPickupCalls(StaticFunction_K2_SpawnPickupInWorld()))
     {
-        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool, int32_t);
         Hooks::RedirectCall(L"AFortAthenaMutator_ItemDropOnDeath::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
-            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+            reinterpret_cast<void*>(&K2_SpawnPickupInWorldCall));
     }
 
     // 6.30's Food Fight. A player who dies while their team still respawns leaves Barrier.PercentAmmoToDrop of each ammo
@@ -1018,9 +1045,8 @@ void UFortKismetLibrary::HookNatives()
     // native's nine parameters, as Disco's does.
     for (uint8_t* SpawnPickupCall : Finder::BarrierPawnDeathSpawnPickupCalls(StaticFunction_K2_SpawnPickupInWorld()))
     {
-        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool, int32_t);
         Hooks::RedirectCall(L"AFortAthenaMutator_Barrier::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
-            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+            reinterpret_cast<void*>(&K2_SpawnPickupInWorldCall));
     }
 #endif
 

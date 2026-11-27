@@ -707,6 +707,14 @@ DEFINE_FUNCTION(UFortKismetLibrary::execGiveItemToInventoryOwner)
         P_GET_PROPERTY(UIntProperty, Z_Param_ItemLevelParam);
         Z_Param_ItemLevel = Z_Param_ItemLevelParam;
     }
+    // 9.20 (CL-6822798) adds PickupInstigatorHandle after it, so the same crash came back. The stripped native's use of
+    // it is unknown (nothing left in the build reads it on a give): it is read and not used.
+    static const bool bHasPickupInstigatorHandle = StaticFunction_GiveItemToInventoryOwner()->FindPropertyByName(FName(L"PickupInstigatorHandle", FNAME_Find)) != nullptr;
+    if (bHasPickupInstigatorHandle)
+    {
+        P_GET_PROPERTY(UIntProperty, Z_Param_PickupInstigatorHandle);
+        (void)Z_Param_PickupInstigatorHandle;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
     GiveItemToInventoryOwner(Z_Param_InventoryOwner, Z_Param_ItemDefinition, Z_Param_NumberToGive, Z_Param_bNotifyPlayer, Z_Param_ItemLevel);

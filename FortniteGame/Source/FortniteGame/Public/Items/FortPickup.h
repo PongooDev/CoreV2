@@ -64,6 +64,17 @@ public:
     static bool HasPickupTarget() { return Member_PickupTarget.IsAvailable() && Member_LootFinalPosition.IsAvailable(); }
 };
 
+// From 9.20 (CL-6822798): AFortPlayerController::TossSpecificItem's toss distance and cone (reflected, 0x10 on 9.20 and
+// 9.21).
+struct FFortPickupTossOverrideData
+{
+    bool bIsValid = false;
+    float MinTossDist = 0.0f;
+    float MaxTossDist = 0.0f;
+    float SpawnDirectionConeHalfAngle = 0.0f;
+};
+static_assert(sizeof(FFortPickupTossOverrideData) == 0x10);
+
 // 4.1 (CL-4053532) on: what AFortPickup::CreateFromData (21.40's STAT_CreatePickupFromData; 4.1 0xD73420) takes in
 // place of CreatePickup's arguments. Native only, so the layout is 4.1's, read from CreateFromData and its callers
 // (SpawnMissionItemPickup 0xDB6190, SetPickupTarget 0xD8D3A0, SpawnDropPickup 0xF97E50); the PDB has no type for it,

@@ -32,6 +32,7 @@ class UAthenaSprayItemDefinition;
 class UFortWorldItem;
 class UStatManager;
 struct FFortItemEntry;
+struct FFortPickupTossOverrideData;
 struct FItemDefinitionAndCount;
 struct FItemAndCount;
 struct FRotator;
@@ -187,6 +188,8 @@ public:
     DefineUFunction(DropAllItems)
     // From 7.00: a Blueprint drops one item of the player's by its definition (GA_Athena_Booty_Active's ForceDrop).
     DefineUFunction(DropSpecificItem)
+    // From 9.20: the same with the toss's distance and cone (GA_Flag_Drop, the Creative flag's throw).
+    DefineUFunction(TossSpecificItem)
     // From 5.10 (CL-4240749): the inventory's quick bar slotting puts a stack onto a slot that holds the same item.
     DefineUFunction(ServerCombineInventoryItems)
     DefineUFunction(ServerRemoveInventoryStateValue)
@@ -282,15 +285,17 @@ public:
     // The stripped drop's body, Core's split of it: DropInventoryItem takes Count of the item out of the inventory and
     // tosses it, bIgnoreCanBeDropped skipping the definition's bCanBeDropped (cheat forcedrop); TossDropPickup is the
     // part after the item has left the inventory, a pickup of DropEntry tossed from the pawn as the player's drop
-    // (cheat spawnpickup, which never puts the item in the inventory).
-    bool DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped);
-    AFortPickup* TossDropPickup(const FFortItemEntry& DropEntry);
+    // (cheat spawnpickup, which never puts the item in the inventory). A valid TossOverrideData sets the toss's
+    // distance and cone (TossSpecificItem).
+    bool DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped, const FFortPickupTossOverrideData* TossOverrideData = nullptr);
+    AFortPickup* TossDropPickup(const FFortItemEntry& DropEntry, const FFortPickupTossOverrideData* TossOverrideData = nullptr);
     // A gadget with bDropAllOnEquip (4.1's Infinity Gauntlet) makes its taker drop everything else (#297): the pickup's
     // LocalOnAttemptInteract sends ServerDropAllItems(the gadget) before ServerHandlePickup, and the gadget's
     // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.
     void DropAllItems(const UFortItemDefinition* IgnoreItemDef, bool bIgnoreBuildingMaterials = false);
     void ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef);
     void DropSpecificItem(const UFortItemDefinition* DropItemDef);
+    void TossSpecificItem(const UFortItemDefinition* DropItemDef, const FFortPickupTossOverrideData& TossOverrideData);
     void ServerCombineInventoryItems_Implementation(const FGuid& TargetItemGuid, const FGuid& SourceItemGuid);
     // The game's own virtual (from 6.01, CL-4424678 slot 0x31D; the mutators' side of it is 21.40's
     // FortGameStateAthena_ShouldDropItem): whether the player's death drops an item of this definition, bShouldDrop
@@ -400,6 +405,7 @@ public:
     DECLARE_FUNCTION(execActivateSlot);
     DECLARE_FUNCTION(execGivePlayerAmmo);
     DECLARE_FUNCTION(execDropSpecificItem);
+    DECLARE_FUNCTION(execTossSpecificItem);
     DECLARE_FUNCTION(execDropAllItems);
     DECLARE_FUNCTION(execSwapQuickBarFocus);
     DECLARE_FUNCTION(execCheat);

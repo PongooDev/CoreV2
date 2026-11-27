@@ -264,15 +264,19 @@ namespace
     // came down in one spot, 136 to 143 out (#108): the toss falls short (TossOntoFloor), and its random fly time hardly
     // moves it. The cone's up and down is left out, as a drop aimed higher lands further out (up to 290 when measured),
     // which would carry two drops made from one spot facing different ways out of each other's CombineRadius.
-    FVector GetDropTossLocation(const FTransform& PawnTransform)
+    //
+    // A valid TossOverrideData (9.20's TossSpecificItem, GA_Flag_Drop's throw) replaces the distance with one between its
+    // MinTossDist and MaxTossDist and the cone with its SpawnDirectionConeHalfAngle (degrees).
+    FVector GetDropTossLocation(const FTransform& PawnTransform, const FFortPickupTossOverrideData* TossOverrideData = nullptr)
     {
         constexpr float Pi = 3.1415926535897932f;
-        constexpr float TossDistance = 512.0f;
-        constexpr float ConeHalfAngle = 20.0f * Pi / 180.0f;
+        const bool bOverride = TossOverrideData && TossOverrideData->bIsValid;
+        const float TossDistance = bOverride ? TossOverrideData->MinTossDist + (TossOverrideData->MaxTossDist - TossOverrideData->MinTossDist) * FMath::FRand() : 512.0f;
+        const float ConeHalfAngle = (bOverride ? TossOverrideData->SpawnDirectionConeHalfAngle : 20.0f) * Pi / 180.0f;
 
         // VRandCone's direction: Phi from Dir (wrapped into the cone), turned Theta round it; its side part is sin(Theta).
         const float Theta = 2.0f * Pi * FMath::FRand();
-        const float Phi = std::fmod(std::acos(FMath::Clamp(2.0f * FMath::FRand() - 1.0f, -1.0f, 1.0f)), ConeHalfAngle);
+        const float Phi = ConeHalfAngle > 0.0f ? std::fmod(std::acos(FMath::Clamp(2.0f * FMath::FRand() - 1.0f, -1.0f, 1.0f)), ConeHalfAngle) : 0.0f;
         const float Yaw = PawnTransform.Rotation.Rotator().Yaw * (Pi / 180.0f) + std::atan2(std::sin(Phi) * std::sin(Theta), std::cos(Phi));
         const FVector Location = PawnTransform.GetLocation();
         return FVector(Location.X + std::cos(Yaw) * TossDistance, Location.Y + std::sin(Yaw) * TossDistance, Location.Z);
@@ -1843,7 +1847,7 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
 #endif
 }
 
-bool AFortPlayerController::DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped)
+bool AFortPlayerController::DropInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bIgnoreCanBeDropped, const FFortPickupTossOverrideData* TossOverrideData)
 {
 #if WITH_SERVER_CODE
     AFortInventory* Inventory = WorldInventory;
@@ -1876,7 +1880,7 @@ bool AFortPlayerController::DropInventoryItem(const FGuid& ItemGuid, int32_t Cou
     bool bDropped = false;
     if (RemoveInventoryItem(ItemGuid, DropCount, false, true))
     {
-        bDropped = TossDropPickup(*DropEntry) != nullptr;
+        bDropped = TossDropPickup(*DropEntry, TossOverrideData) != nullptr;
     }
     EntryStruct->DestroyStruct(DropEntry);
     return bDropped;
@@ -1885,7 +1889,7 @@ bool AFortPlayerController::DropInventoryItem(const FGuid& ItemGuid, int32_t Cou
 #endif
 }
 
-AFortPickup* AFortPlayerController::TossDropPickup(const FFortItemEntry& DropEntry)
+AFortPickup* AFortPlayerController::TossDropPickup(const FFortItemEntry& DropEntry, const FFortPickupTossOverrideData* TossOverrideData)
 {
 #if WITH_SERVER_CODE
     AFortPawn* Pawn = MyFortPawn;
@@ -1906,7 +1910,7 @@ AFortPickup* AFortPlayerController::TossDropPickup(const FFortItemEntry& DropEnt
     // set here. Creative's Item Spawner (Trap_Floor_Minigame_Spawner) only takes a pickup that lands in its DropBox
     // when BlueprintCanInteract(GetPawnWhoDroppedPickup()) passes.
     Pickup->PawnWhoDroppedPickup = Pawn;
-    Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
+    Pickup->TossPickup(GetDropTossLocation(PawnTransform, TossOverrideData), Pawn, 0);
     // Said, so a drop the player didn't make (#344: ammo "appearing" at a player) shows in the server log.
     Log::Info(L"Drop: {} drops {} {} as {}", GetName().ToStdString(), static_cast<int32_t>(DropEntry.Count), ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
     // 8.20 (CL-5625478) registers Athena.NotifyPickupSpawned as a native tag (FFortGameplayTags +0x1718, set up
@@ -1951,6 +1955,33 @@ void AFortPlayerController::DropSpecificItem(const UFortItemDefinition* DropItem
         {
             const FGuid ItemGuid = ItemEntry->ItemGuid;
             ServerSpawnInventoryDrop_Implementation(ItemGuid, static_cast<int32_t>(ItemEntry->Count));
+            return;
+        }
+    }
+#endif
+}
+
+// From 9.20. GA_Flag_Drop (the Creative flag's SecondaryFireAbility, right click) calls it as the ability ends, to throw
+// AGID_Flag_Melee ThrowDistance (AthenaGameData Default.Creative.Flag.ThrowDistance, levels 0 and 1) out. 9.21's exec
+// (CL-6922310 0x1CE17F0) steps DropItemDef and TossOverrideData and calls the shared empty 0x3528D0, so the flag stayed
+// in the hand (#716).
+void AFortPlayerController::TossSpecificItem(const UFortItemDefinition* DropItemDef, const FFortPickupTossOverrideData& TossOverrideData)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    if (!Inventory || !DropItemDef)
+    {
+        return;
+    }
+
+    TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        if (ItemEntry && static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition) == DropItemDef && ItemEntry->Count > 0)
+        {
+            const FGuid ItemGuid = ItemEntry->ItemGuid;
+            DropInventoryItem(ItemGuid, static_cast<int32_t>(ItemEntry->Count), false, &TossOverrideData);
             return;
         }
     }
@@ -2527,6 +2558,19 @@ void AFortPlayerController::HookVTables()
             Log::Info(L"Hook AFortPlayerController::DropSpecificItem: native");
         }
     }
+    if (UFunction* TossSpecificFunction = FindStaticFunction_TossSpecificItem(); TossSpecificFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        const uint8_t* TossCall = Finder::ImplementationCall(TossSpecificFunction);
+        if (TossCall && !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(TossCall), 1, 5)))
+        {
+            Log::Info(L"Hook AFortPlayerController::TossSpecificItem: the build's own (not stripped)");
+        }
+        else
+        {
+            TossSpecificFunction->SetNativeFunc(&execTossSpecificItem);
+            Log::Info(L"Hook AFortPlayerController::TossSpecificItem: native");
+        }
+    }
     // DropAllItems (#633): only where its exec ends in a stub. 8.50's tail-jumps to the empty function (CL-6058028
     // 0x19572D0 -> jmp 0x1957382) instead of calling it, so the exec's jumps are read as well as its call.
     if (UFunction* DropAllFunction = FindStaticFunction_DropAllItems(); DropAllFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
@@ -2970,6 +3014,16 @@ DEFINE_FUNCTION(AFortPlayerController::execDropSpecificItem)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<AFortPlayerController*>(Context)->DropSpecificItem(Z_Param_DropItemDef);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execTossSpecificItem)
+{
+    P_GET_OBJECT(UFortItemDefinition, Z_Param_DropItemDef);
+    P_GET_STRUCT(FFortPickupTossOverrideData, Z_Param_TossOverrideData);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->TossSpecificItem(Z_Param_DropItemDef, Z_Param_TossOverrideData);
     P_NATIVE_END;
 }
 

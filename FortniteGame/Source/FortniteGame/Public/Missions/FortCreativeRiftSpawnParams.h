@@ -13,7 +13,9 @@ class UFortCreativeRiftSpawnParams : public UObject
 
 public:
     DefineUProperty(ABuildingRift*, RiftSpawn)
+    DefineUProperty(bool, bResumeRift)
 
+    static bool ResolveSetParams(uintptr_t BeginPlay);
     // Native only (8.20 0x10BC670): the rift and a pointer to its settings, the member 21.40's layout has right after
     // RiftSpawn (FortEncounterSettings), which nothing reflects. False where the class isn't laid out that way.
     bool SetParams(ABuildingRift* InRiftSpawn, FFortEncounterSettings* InFortEncounterSettings);

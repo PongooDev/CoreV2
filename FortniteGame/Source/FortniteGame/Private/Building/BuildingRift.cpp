@@ -111,6 +111,11 @@ void AAthenaCreativeRift::HookVTables()
     }
 
     void* Original = VTable[BeginPlayIndex];
+    if (!UFortCreativeRiftSpawnParams::ResolveSetParams(reinterpret_cast<uintptr_t>(Original)))
+    {
+        Log::Error(L"Finder: UFortCreativeRiftSpawnParams::SetParams with bResumeRift not found; creative rifts cannot send RiftCreated");
+        return;
+    }
     BeginPlayOG = reinterpret_cast<decltype(BeginPlayOG)>(Original);
     int32_t Swapped = 0;
     for (TObjectIterator<UClass> It; It; ++It)

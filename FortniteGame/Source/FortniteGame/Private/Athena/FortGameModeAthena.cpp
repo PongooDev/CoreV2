@@ -3244,26 +3244,6 @@ void AFortGameModeAthena::ReportGamePhaseStep(const wchar_t* Event)
                 Bus += std::format(L"; a bus's drop starts {} and ends {}", Against(Aircraft->DropStartTime), Against(Aircraft->DropEndTime));
             }
         }
-        // #708 (temporary, 9.01 players never jump): what the jump's checks read. The client sends
-        // ServerAttemptAircraftJump only while the replicated bAircraftIsLocked is clear; the server's
-        // _Implementation (9.01 0x17BBAF0) needs the controller in the aircraft, then ServerRestartPlayer asks
-        // PlayerCanRestart, which sends a player with bHasEverSkydivedFromBus to the respawn check instead.
-        if (AFortGameStateAthena::HasAircraftIsLocked())
-        {
-            Bus += GameState->bAircraftIsLocked ? L"; the aircraft is locked" : L"; the aircraft is unlocked";
-        }
-        if (AFortPlayerStateAthena::HasInAircraft() && AFortPlayerStateZone::HasEverSkydivedFromBus())
-        {
-            for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
-            {
-                AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
-                if (AthenaState && !AthenaState->bIsABot)
-                {
-                    Bus += std::format(L"; {} {} the aircraft, {}skydived from the bus before", AthenaState->GetName().ToStdString(), AthenaState->bInAircraft ? L"is in" : L"isn't in",
-                        static_cast<AFortPlayerStateZone*>(AthenaState)->bHasEverSkydivedFromBus ? L"" : L"never ");
-                }
-            }
-        }
     }
 
     UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
@@ -3846,6 +3826,24 @@ void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller
     if (PlayerController)
     {
         PlayerController->ResetToStartingItems();
+    }
+
+    // Nobody has left this match's bus yet (#708). 9.01 (CL-6428087) sets bHasEverSkydivedFromBus at every landing, the
+    // warmup spawn's walking included (0x17422A0), and any build's EndSkydiving sets it after a warmup glide, so the bus
+    // jump's ServerRestartPlayer reached PlayerCanRestart's respawn check (0x10215C0 -> 0x102AE20), refused without
+    // respawns: every 9.01 player stayed in the bus to its drop end. Nothing left in the build clears the flags before the
+    // bus, so they are cleared here, as each player boards.
+    AFortPlayerStateZone* ZoneState = PlayerController && AFortPlayerStateZone::HasEverSkydivedFromBus()
+        ? Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState)))
+        : nullptr;
+    if (ZoneState && ZoneState->bHasEverSkydivedFromBus)
+    {
+        ZoneState->bHasEverSkydivedFromBus = false;
+        if (AFortPlayerStateZone::HasEverSkydivedFromBusAndLanded())
+        {
+            ZoneState->bHasEverSkydivedFromBusAndLanded = false;
+        }
+        Log::Info(L"Battle Royale: {} boards the aircraft with bHasEverSkydivedFromBus set from the warmup, it is cleared so the jump isn't a respawn", ZoneState->GetName().ToStdString());
     }
 
     // Where the call was ActivateSlot's (2.2), the harvesting tool's slot is still activated, once the warmup items are gone.

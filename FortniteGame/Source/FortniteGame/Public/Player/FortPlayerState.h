@@ -209,11 +209,15 @@ public:
     DefineUProperty(float, MaxShield)
     static bool HasHealthAndShield() { return Member_CurrentHealth.IsAvailable() && Member_MaxShield.IsAvailable(); }
 
-    // Set (with bHasEverSkydivedFromBusAndLanded) by the pawn's skydive and landing code (9.01 0x17422A0, 0x1742730,
-    // 0x1771DE0). In the aircraft phase AFortGameModeAthena::PlayerCanRestart (0x10215C0) lets a player who has it jump
-    // only through the respawn check (0x102AE20), which a playlist without respawns refuses.
+    // Both set by the pawn's EndSkydiving (9.01 CL-6428087 0x1746DF0; 9.00 0x17432F0) and 0x1771DE0 (the bus jump's
+    // and the launches'), and on 9.01 only also by every landing and walking movement mode (0x17422A0, from Landed
+    // 0x175C170 and OnMovementModeChanged 0x1760250; 9.00's 0x173E840 and 9.10's 0x17BE7C0 don't set them). In the
+    // aircraft phase AFortGameModeAthena::PlayerCanRestart (9.01 0x10215C0) lets a player with bHasEverSkydivedFromBus
+    // jump only through the respawn check (0x102AE20), which a playlist without respawns refuses.
     DefineUProperty(bool, bHasEverSkydivedFromBus)
+    DefineUProperty(bool, bHasEverSkydivedFromBusAndLanded)
     static bool HasEverSkydivedFromBus() { return Member_bHasEverSkydivedFromBus.IsAvailable(); }
+    static bool HasEverSkydivedFromBusAndLanded() { return Member_bHasEverSkydivedFromBusAndLanded.IsAvailable(); }
 
     // 4.0+ (NetMulticast): every client plays the gadget's OnDestroyParticleSystem and OnDestroySound on the player's
     // pawn, as its item goes for a tracked attribute used up. False where the build has no such function.

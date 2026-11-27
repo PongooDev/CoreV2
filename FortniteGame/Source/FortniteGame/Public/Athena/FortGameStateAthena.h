@@ -269,12 +269,6 @@ public:
     DefineUProperty(TArray<AFortAthenaAircraft*>, Aircrafts)
     static bool HasAircrafts() { return Member_AirCraftBehavior.IsAvailable() && Member_Aircrafts.IsAvailable(); }
     static bool HasAirCraftBehavior() { return Member_AirCraftBehavior.IsAvailable(); }
-    // The aircraft's jump is refused while it is set: AddAircraft (9.01 0x1066280) sets it with the first aircraft, and
-    // SetAircraftIsLocked(false) (0x1064E60) clears it from OnAircraftEnteredDropZone once every aircraft is in its drop
-    // zone. ServerAttemptAircraftJump_Validate (0x17BBCE0), the client's jump (slot 650, 0x1075920) and
-    // PlayerCanRestart (0x10215C0) read it.
-    DefineBitfieldUProperty(bAircraftIsLocked)
-    static bool HasAircraftIsLocked() { return Member_bAircraftIsLocked.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 

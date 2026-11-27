@@ -22342,6 +22342,28 @@ bool Finder::ResolveCreativeMoveToolLive(const FCreativeMoveToolAnchors& Anchors
             Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor = Target;
         }
     }
+    // 9.20 (CL-6822798) inlines it into DetermineActorMoveMode (0x1A3BB50; the behaviours' check is now their virtual,
+    // call [rax+3C0h]) and into HandleCopyPickupPressed_Implementation (0x1A31DE0). One other caller of
+    // DetermineActorMoveMode (0x1A32230, as 9.10's 0x19B67C0) still calls it (0x1A3BCA0): the only callee of those
+    // callers, besides DetermineActorMoveMode, that reads InteractionBehaviors.
+    std::vector<uintptr_t> BehaviorGetters;
+    for (const uintptr_t DetermineCall : !Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor && Natives::AFortCreativeMoveTool_DetermineActorMoveMode
+        ? Finder::CallsTo(Natives::AFortCreativeMoveTool_DetermineActorMoveMode, false) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Caller = Finder::FunctionStart(DetermineCall);
+        for (const auto& [Call, Target] : Caller && Caller != CopyPickup ? Finder::DecodedDirectCalls(Caller) : FCalls{})
+        {
+            if (Target != Natives::AFortCreativeMoveTool_DetermineActorMoveMode && std::find(BehaviorGetters.begin(), BehaviorGetters.end(), Target) == BehaviorGetters.end()
+                && Finder::ReadsMemberAt(Target, BehaviorsOffset))
+            {
+                BehaviorGetters.push_back(Target);
+            }
+        }
+    }
+    if (BehaviorGetters.size() == 1)
+    {
+        Natives::AFortCreativeMoveTool_GetInteractionBehaviorForActor = BehaviorGetters.front();
+    }
 
     // The overlap check (0x193CF20) is the only code that loads CreativeMoveTool.Spawning_OverlapCloseEnoughValue's float
     // (movss xmm, [rip+X]); the variable's registration (0x159500) takes the float's address.

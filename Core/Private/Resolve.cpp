@@ -18789,6 +18789,14 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
         }
         const bool bVirtualTailJump = MostCallsToOne == 2 && ExecuteCalls.size() == 2 && ExecuteEnd - Execute < 0x60
             && FindInstruction(ExecuteCalls.back().first, ExecuteEnd, { 0x48, 0xFF, -1 }) != 0;
+        // 9.20 (CL-6822798; vtable 0x4488E80, Execute slot 9 0x124CA60) strips the controller's virtual too: Execute gets
+        // the item (+0x20) and tail-jumps to FWeakObjectPtr::Get for the controller (+0x18), nothing after.
+        const bool bStrippedWeakTail = ExecuteCalls.size() == 1 && ExecuteEnd - Execute < 0x60 && TailJumpsTo(ExecuteCalls.front().second) == 1;
+        if (bStrippedWeakTail)
+        {
+            bWeakLambda = true;
+            return true;
+        }
         if (MostCallsToOne == 3 || bVirtualTailJump)
         {
             bWeakLambda = MostCallsToOne != 3;

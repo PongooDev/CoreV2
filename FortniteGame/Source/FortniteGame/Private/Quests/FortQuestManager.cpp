@@ -1692,7 +1692,12 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     }
     // The warmup island moves no challenge (CanMakeQuestProgression, #475): a weapon picked up, a chest opened or a player
     // eliminated there before the aircraft goes nowhere, not to the profile and not to the client's quest display.
-    if (!This->CanMakeQuestProgression())
+    // Custom events are exempt (#700): they name their stat row (SendCustomStatEvent), sent by the Blueprint that owns
+    // the challenge, which decides itself when it counts. 7.10's B_Toy_Snowball_Base checks the quest (Athena_CheckQuestAndObjectiveCompletion)
+    // and Creative (Athena_CheckCreativeMode) but no game phase, sends hit_player_with_snowball through
+    // AthenaQuestFunctionLibrary's Athena_GiveQuestUpdateToPlayers and plays its quest success sound and glow; the
+    // 14 Days of Fortnite snowball hit counted on the spawn island in the live game.
+    if (Type != EFortQuestObjectiveStatEvent::GetCustom() && !This->CanMakeQuestProgression())
     {
         static FWeakObjectPtr LoggedFor;
         if (!(LoggedFor == FWeakObjectPtr(GameMode)))

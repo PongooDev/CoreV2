@@ -197,7 +197,13 @@ void Boot::Initialize()
 #endif
 
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
-    // into it, so hand the rest over to a watcher that runs once the stub has finished.
+    // into it, so hand the rest over to a watcher that runs once the stub has finished. The command line whitelist is in
+    // .rdata, which the stub leaves alone, and the engine filters its command line soon after the handover, so it goes
+    // in now.
+    if (Packed::IsPacked())
+    {
+        FCommandLine::ApproveServerSwitchesBeforeStub();
+    }
     if (Packed::RunAfterStub(&Start))
     {
         return;

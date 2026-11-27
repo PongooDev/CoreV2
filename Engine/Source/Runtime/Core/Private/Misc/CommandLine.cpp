@@ -15,6 +15,49 @@ namespace
 
     // ApproveServerSwitches found no whitelist string to change.
     bool bWhitelistNotFound = false;
+    // ApproveServerSwitchesBeforeStub made the swap.
+    bool bSwappedBeforeStub = false;
+
+    constexpr wchar_t ClientWhitelist[] = L"-invitesession -invitefrom -party_joininfo_token -replay";
+    constexpr wchar_t RebootWhitelist[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
+    constexpr wchar_t ServerWhitelist[] = L"-log -nosplash -nosound -nullrhi -saveddirsuffix -unatt ";
+    static_assert(sizeof(ClientWhitelist) == sizeof(ServerWhitelist) && sizeof(RebootWhitelist) == sizeof(ServerWhitelist),
+        "the swap must keep the whitelist's length");
+    constexpr size_t WhitelistSize = sizeof(ServerWhitelist) - sizeof(wchar_t);
+
+    enum class EWhitelistSwap
+    {
+        AlreadyServer,
+        Swapped,
+        NotFound,
+        WriteFailed,
+    };
+
+    // Puts the server's four switches in the place of the client's (or Reboot's) in the whitelist.
+    EWhitelistSwap SwapWhitelist()
+    {
+        if (Finder::FindReadOnly(ServerWhitelist, WhitelistSize))
+        {
+            return EWhitelistSwap::AlreadyServer;
+        }
+        wchar_t* Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(ClientWhitelist, WhitelistSize));
+        if (!Whitelist)
+        {
+            Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(RebootWhitelist, WhitelistSize));
+        }
+        if (!Whitelist)
+        {
+            return EWhitelistSwap::NotFound;
+        }
+        DWORD Protection = 0;
+        if (!VirtualProtect(Whitelist, WhitelistSize, PAGE_READWRITE, &Protection))
+        {
+            return EWhitelistSwap::WriteFailed;
+        }
+        std::memcpy(Whitelist, ServerWhitelist, WhitelistSize);
+        VirtualProtect(Whitelist, WhitelistSize, Protection, &Protection);
+        return EWhitelistSwap::Swapped;
+    }
 
     bool HasSwitch(const wchar_t* CommandLine, const wchar_t* Switch)
     {
@@ -59,40 +102,48 @@ void FCommandLine::ApproveServerSwitches()
     // (#109). The last place, "-unatt", lets -unattended through (a switch is kept when it starts with a whitelisted
     // one): without it a server shows the engine's message boxes, such as "Default Property warnings and errors", on the
     // host's desktop and waits for someone to close them. 1.1 and 1.2 have no whitelist.
-    static constexpr wchar_t Client[] = L"-invitesession -invitefrom -party_joininfo_token -replay";
-    static constexpr wchar_t Reboot[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
-    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -saveddirsuffix -unatt ";
-    static_assert(sizeof(Client) == sizeof(Server) && sizeof(Reboot) == sizeof(Server), "the swap must keep the whitelist's length");
-    constexpr size_t Size = sizeof(Server) - sizeof(wchar_t);
-
-    if (Finder::FindReadOnly(Server, Size))
+    switch (SwapWhitelist())
     {
-        Log::Info(L"FCommandLine: the exe already lets the server's switches through");
+    case EWhitelistSwap::AlreadyServer:
+        if (bSwappedBeforeStub)
+        {
+            Log::Info(L"FCommandLine: the whitelist Core changed before the packer's stub ran still lets the server's switches through");
+        }
+        else
+        {
+            Log::Info(L"FCommandLine: the exe already lets the server's switches through");
+        }
         return;
-    }
-    wchar_t* Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Client, Size));
-    if (!Whitelist)
-    {
-        Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Reboot, Size));
-    }
-    if (!Whitelist)
-    {
+    case EWhitelistSwap::NotFound:
         // 6.21 (CL-4526925) is built without the whitelist: its startup log prints "%sCommand Line: %s" with a constant
         // empty prefix (0x173EF86) where 6.20 picked "Filtered " (0x1728FA7), and FCommandLine keeps every switch. The
         // engine's command line, once set, tells which (CheckServerSwitches).
         bWhitelistNotFound = true;
         Log::Info(L"FCommandLine: no whitelist to change in this exe; the engine's command line is checked for -nullrhi once it is set");
         return;
-    }
-    DWORD Protection = 0;
-    if (!VirtualProtect(Whitelist, Size, PAGE_READWRITE, &Protection))
-    {
+    case EWhitelistSwap::WriteFailed:
         Log::Error(L"FCommandLine: can't write the whitelist ({})", GetLastError());
         return;
+    case EWhitelistSwap::Swapped:
+        Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix -unattended");
+        return;
     }
-    std::memcpy(Whitelist, Server, Size);
-    VirtualProtect(Whitelist, Size, Protection, &Protection);
-    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix -unattended");
+}
+
+void FCommandLine::ApproveServerSwitchesBeforeStub()
+{
+    // A packed exe (1.9.1+) runs FCommandLine::Set soon after its stub hands over to the CRT, so the swap made after the
+    // handover (ApproveServerSwitches, from Core's watcher) raced it: on a busy PC the swap came 0.3 to 3 s after the
+    // handover and the engine had already dropped -nullrhi and -saveddirsuffix (9.21 CL-6922310, 8 of 22 test boots on
+    // 2026-11-27, swaps 0.34 to 3.1 s late: a D3D11 device, the game's window on the desktop, logs in Saved instead of
+    // Saved_CoreServer); every boot whose swap came within 0.31 s kept NullRHI. The stub decrypts only the first .text and leaves .rdata as the file
+    // has it (9.21's whitelist is plain text at file offset 0x4967CF6), so the swap is made now, before the stub runs.
+    // Where the whitelist isn't readable yet, the watcher's ApproveServerSwitches makes the swap after the handover.
+    if (SwapWhitelist() == EWhitelistSwap::Swapped)
+    {
+        bSwappedBeforeStub = true;
+        Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix -unattended before the packer's stub runs");
+    }
 }
 
 void FCommandLine::CheckServerSwitches()

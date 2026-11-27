@@ -235,12 +235,17 @@ void AFortGameModeAthena::SendOutliveStatEvents(AFortPawn* DeadPawn)
 // GameplayTagContainer. AthenaRank is the event of a player's finished match, and 7.10 keeps no sender of it: none of
 // its 16 SendStatEventWithTags call sites (each a call of the stripped nullsub) passes AthenaRank (0x1A). Battle
 // Royale's are counted by Core-Backend from the match's results, which a Creative match never has (no place), so the
-// event is sent here, as the player's match ends by their leaving the server, flushed while their controller is still
-// there (AController::Destroyed's CleanupPlayerState destroys the player state before the controller goes).
-void AFortGameModeAthena::SendCreativeRankStatEvent(AFortPlayerStateAthena* PlayerState)
+// event is sent as the player's match ends by their leaving the server.
+// It has to go before the game mode's Logout: 7.10's AFortGameMode unregisters the player there (0xEFCFE0 ->
+// 0xEE4100 -> UFortRegisteredPlayerInfo::StartUnregistration 0xFC2ED0), whose UnbindFromPlayerController (0xFC80A0)
+// clears the controller's MyPlayerInfo (+0x1618) before the player state is destroyed, and the last player's Logout
+// restarts the session, which unloads the Creative playlist (#696). The leave's first step is
+// APlayerController::Destroyed (0x29B9E40) calling PawnLeavingGame (slot 0xC70, 0x12E2150), which kills the pawn while
+// the player is still registered; AFortPlayerController's Destroyed (0x12B8B90) has set bIsDisconnecting just before.
+void AFortGameModeAthena::SendCreativeRankStatEvent(AFortPlayerControllerAthena* Controller)
 {
 #if WITH_SERVER_CODE
-    if (!PlayerState || !AFortPlayerControllerAthena::IsCreativeMatch(this))
+    if (!Controller || !AFortPlayerControllerAthena::IsCreativeMatch(this))
     {
         return;
     }
@@ -249,14 +254,14 @@ void AFortGameModeAthena::SendCreativeRankStatEvent(AFortPlayerStateAthena* Play
     {
         return;
     }
-    AFortPlayerController* Controller = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(PlayerState->GetOwner()));
-    UFortRegisteredPlayerInfo* PlayerInfo = Controller ? static_cast<UFortRegisteredPlayerInfo*>(Controller->MyPlayerInfo) : nullptr;
+    UFortRegisteredPlayerInfo* PlayerInfo = static_cast<UFortRegisteredPlayerInfo*>(reinterpret_cast<AFortPlayerController*>(Controller)->MyPlayerInfo);
     UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
     if (!QuestManager)
     {
-        Log::Info(L"Quests: a player left Creative without a quest manager, no AthenaRank event");
+        Log::Info(L"Quests: {} left Creative without a quest manager, no AthenaRank event", Controller->GetName().ToStdString());
         return;
     }
+    Log::Info(L"Quests: {} leaves Creative, their match's AthenaRank event goes to {}", Controller->GetName().ToStdString(), QuestManager->GetName().ToStdString());
     const FGameplayTagContainer NoTargetTags;
     FGameplayTagContainer SourceTags;
     FGameplayTagContainer ContextTags;

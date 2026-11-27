@@ -229,8 +229,9 @@ public:
     // EFortQuestObjectiveStatEvent::AthenaOutlive event for each, as 1.8's game mode sends one per death (0x599DA0).
     void SendOutliveStatEvents(AFortPawn* DeadPawn);
     // A player's Creative match is over as they leave the server: their EFortQuestObjectiveStatEvent::AthenaRank event
-    // (complete_athena_creative_mode, "Start or join a Creative server", CoreV2 #676).
-    void SendCreativeRankStatEvent(AFortPlayerStateAthena* PlayerState);
+    // (complete_athena_creative_mode, "Start or join a Creative server", CoreV2 #676, #696), sent as their pawn dies
+    // leaving the game, while they are still registered.
+    void SendCreativeRankStatEvent(AFortPlayerControllerAthena* Controller);
     // Core's: a death on the warmup island where it hurts (bAllowDamageInWarmup), kept out of the match's results (#452).
     void NoteWarmupDeath(AFortPlayerStateAthena* PlayerState);
     // Core's: a death the playlist brings the player back from (Team Rumble, Playground). It isn't the player's

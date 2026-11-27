@@ -3528,7 +3528,6 @@ void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
     }
     MatchEventsOf(this).bPlayerLeft = true;
     HandlePawnDied();
-    SendCreativeRankStatEvent(State);
     // Creative (7.00): the leaving player's island is saved and checked in, and their rift is free again.
     AFortPlayerControllerAthena::ReleaseCreativePortal(reinterpret_cast<AFortPlayerState*>(State));
 #endif

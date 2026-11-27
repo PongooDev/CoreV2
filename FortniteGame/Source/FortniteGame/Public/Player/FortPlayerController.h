@@ -103,6 +103,10 @@ public:
     DefineBitfieldUProperty(bHasInitializedWorldInventory)
     DefineBitfieldUProperty(bHasInitializedHeroInventory)
     static bool HasInitializedInventoryFlags() { return Member_bHasInitializedWorldInventory.IsAvailable() && Member_bHasInitializedHeroInventory.IsAvailable(); }
+    // Set as the controller is destroyed on the server (AFortPlayerController::SetIsDisconnecting, 7.10 0x12F10F0, from its
+    // Destroyed 0x12B8B90), before APlayerController::Destroyed's PawnLeavingGame kills the pawn.
+    DefineBitfieldUProperty(bIsDisconnecting)
+    bool IsDisconnecting() const { return Member_bIsDisconnecting.IsAvailable() && bIsDisconnecting; }
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)

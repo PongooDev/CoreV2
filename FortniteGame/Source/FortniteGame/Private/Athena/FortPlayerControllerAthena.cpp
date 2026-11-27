@@ -632,6 +632,12 @@ void AFortPlayerControllerAthena::PawnDiedInventoryDropCall(AFortPlayerControlle
     {
         AthenaController->DropInventoryOnDeath(DeadPawn);
         AthenaController->PlaceAtDeathLocation(DeadPawn);
+        // The pawn dies because its player leaves (PawnLeavingGame): a Creative match is over for them (#696).
+        AFortGameModeAthena* GameMode = AthenaController->IsDisconnecting() ? AFortGameModeAthena::GetCurrent(AthenaController) : nullptr;
+        if (GameMode)
+        {
+            GameMode->SendCreativeRankStatEvent(AthenaController);
+        }
     }
 }
 

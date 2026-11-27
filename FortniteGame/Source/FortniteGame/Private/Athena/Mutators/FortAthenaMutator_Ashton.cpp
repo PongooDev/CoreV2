@@ -203,12 +203,25 @@ void AFortAthenaMutator_Ashton::HookNatives()
         Log::Info(L"Endgame: the gauntlet's give and the death removals are not restored; stone capture {}, team loadouts {}", bPickupGiven ? L"on" : L"off", bStartingItems ? L"on" : L"off");
         return;
     }
-    if (Sites.PickupSpawnedAndReadyLea && FAshtonStoneState::StaticStruct() && FAshtonStoneData::StaticStruct() && Member_StoneList.IsAvailable() && Member_StoneDataList.IsAvailable())
+    // 9.20 (CL-6822798) binds the handler by name only, with no lea of its address (BeginPlay 0x11864C0): the exec
+    // (0x1B46790) calling the stub (0x352C30) shows it stripped.
+    UFunction* PickupSpawnedAndReady = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Ashton:OnPickupSpawnedAndReady");
+    bool bPickupSpawnedAndReadyStripped = Sites.PickupSpawnedAndReadyLea != nullptr;
+    for (const auto& [Site, Target] : !bPickupSpawnedAndReadyStripped && PickupSpawnedAndReady && PickupSpawnedAndReady->GetNativeFunc()
+        ? Finder::DecodedDirectCalls(reinterpret_cast<uintptr_t>(PickupSpawnedAndReady->GetNativeFunc())) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
     {
-        Hooks::RedirectAddress(L"AFortAthenaMutator_Ashton::BeginPlay's OnPickupSpawnedAndReady binding", Sites.PickupSpawnedAndReadyLea, reinterpret_cast<void*>(&OnPickupSpawnedAndReadyHK));
-        if (UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Ashton:OnPickupSpawnedAndReady"))
+        bPickupSpawnedAndReadyStripped = bPickupSpawnedAndReadyStripped || Finder::IsStubFunction(Target);
+    }
+    if (bPickupSpawnedAndReadyStripped && FAshtonStoneState::StaticStruct() && FAshtonStoneData::StaticStruct() && Member_StoneList.IsAvailable() && Member_StoneDataList.IsAvailable())
+    {
+        if (Sites.PickupSpawnedAndReadyLea)
         {
-            Function->SetNativeFunc(&execOnPickupSpawnedAndReady);
+            Hooks::RedirectAddress(L"AFortAthenaMutator_Ashton::BeginPlay's OnPickupSpawnedAndReady binding", Sites.PickupSpawnedAndReadyLea, reinterpret_cast<void*>(&OnPickupSpawnedAndReadyHK));
+        }
+        if (PickupSpawnedAndReady)
+        {
+            PickupSpawnedAndReady->SetNativeFunc(&execOnPickupSpawnedAndReady);
+            Log::Info(L"Endgame: AFortAthenaMutator_Ashton::OnPickupSpawnedAndReady is stripped, restored{}", Sites.PickupSpawnedAndReadyLea ? L" (and its binding's address)" : L" (bound by name)");
         }
     }
     Hooks::RedirectCall(L"AFortAthenaMutator_Ashton promotion -> UFortKismetLibrary::K2_GiveItemToPlayer (VillainLeaderItemDef)", Sites.LeaderGiveCall, reinterpret_cast<void*>(&GiveVillainLeaderItemCall));

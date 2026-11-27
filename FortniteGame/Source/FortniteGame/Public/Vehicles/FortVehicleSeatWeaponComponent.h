@@ -69,12 +69,19 @@ public:
     void OnPawnEnterSeat(const IFortVehicleInterface* Vehicle, int32_t SeatIdx, bool bFlag);
     // Gives the pawn the seat's weapon as a temporary item and equips it (UnEquipVehicleWeapon, intact, takes it back).
     void EquipVehicleWeapon(AFortPawn* FortPawn, FWeaponSeatDefinition& WeaponSeatDefinition, int32_t ItemLevel);
+    // The build's own (9.10 CL-6573057 slot 0x7B, 0x1155090): UnEquipVehicleWeapon for each of the seat's definitions.
+    void OnPawnExitSeat(const IFortVehicleInterface* Vehicle, AFortPawn* Pawn, int32_t SeatIdx);
 
     static void HookVTables();
+    // OnPawnEnterSeat's and OnPawnExitSeat's slots once HookVTables restored EquipVehicleWeapon, else -1.
+    static int32_t OnPawnEnterSeatSlot() { return OnPawnEnterSeatIndex; }
+    static int32_t OnPawnExitSeatSlot() { return OnPawnEnterSeatIndex >= 0 ? OnPawnEnterSeatIndex + 1 : -1; }
 
 private:
     using FOnPawnEnterSeatFunction = void (*)(UFortVehicleSeatWeaponComponent* This, const IFortVehicleInterface* Vehicle, int32_t SeatIdx, bool bFlag);
     // Each class's own: UFortVehicleAimingWeaponComp overrides it (9.10 0x1154ED0, the base's body inlined, then its aiming).
     static inline TMap<void**, FOnPawnEnterSeatFunction> OnPawnEnterSeatOGs;
+    // 21.40 has OnPawnExitSeat right after OnPawnEnterSeat (slots 146, 147), as 9.10 and 9.20 do (0x7A, 0x7B).
+    static inline int32_t OnPawnEnterSeatIndex = -1;
     static void OnPawnEnterSeatHK(UFortVehicleSeatWeaponComponent* This, const IFortVehicleInterface* Vehicle, int32_t SeatIdx, bool bFlag);
 };

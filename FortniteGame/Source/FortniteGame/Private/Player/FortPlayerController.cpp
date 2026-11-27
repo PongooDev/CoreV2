@@ -54,6 +54,7 @@
 #include "UObject/UObjectIterator.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/UnrealType.h"
+#include "Vehicles/FortVehicleSeatWeaponComponent.h"
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
@@ -3464,4 +3465,68 @@ void AFortPlayerController::Hook()
 bool AFortPlayerController::InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete)
 {
     return This->InitializeMcpProfile(OnComplete);
+}
+
+// Stripped in 9.10 and 9.20 (CL-6573057 slot 0x2C2 and CL-6822798 slot 0x2C5 are a return-zero stub in every controller
+// class). Its callers have just taken the held weapon away or found a tool in hand: UnEquipVehicleWeapon (0x1160F80)
+// after it unequips the seat's weapon and before it removes the item, the ability weapon cleanup (0xE15070), and a
+// controller step that finds a deco or building tool held (0x186DD80). Core's: the pawn's last weapon (EquipLastWeapon,
+// which 9.10 reads from TempWeaponsStack, then LastEquippedWeaponOrGadgetGUID; the seat's weapon is not bValidForLastEquipped),
+// else its default weapon, the pickaxe.
+bool AFortPlayerController::ForceEquipValidWeapon()
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawn* const PlayerPawn = Cast<AFortPlayerPawn>(static_cast<AFortPawn*>(MyFortPawn));
+    if (!PlayerPawn || PlayerPawn->Role != ROLE_Authority)
+    {
+        return false;
+    }
+    if (PlayerPawn->EquipLastWeapon())
+    {
+        return true;
+    }
+    const bool bEquipped = PlayerPawn->EquipDefaultWeapon();
+    AFortWeapon* const Held = static_cast<AFortWeapon*>(PlayerPawn->CurrentWeapon);
+    Log::Info(L"ForceEquipValidWeapon: {} has no last weapon to go back to, so it holds {}", PlayerPawn->GetName().ToStdString(),
+        Held ? Held->GetName().ToStdString() : std::wstring(L"nothing"));
+    return bEquipped;
+#else
+    return false;
+#endif
+}
+
+bool AFortPlayerController::ForceEquipValidWeaponHK(AFortPlayerController* This)
+{
+    return This->ForceEquipValidWeapon();
+}
+
+void AFortPlayerController::HookForceEquipValidWeaponVTables()
+{
+#if WITH_SERVER_CODE
+    if (UFortVehicleSeatWeaponComponent::OnPawnExitSeatSlot() < 0)
+    {
+        return;
+    }
+    const int32_t Index = Finder::ForceEquipValidWeaponSlot();
+    UObject* const Default = StaticClass()->GetDefaultObject(false);
+    void** const DefaultVTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
+    void* const Stub = DefaultVTable && Index >= 0 ? DefaultVTable[Index] : nullptr;
+    if (!Stub || !Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Stub)))
+    {
+        Log::Error(L"Finder: AFortPlayerController::ForceEquipValidWeapon (slot {}) isn't the stub Core expects, so a seat's weapon leaves the hands empty", Index);
+        return;
+    }
+    int32_t Swapped = 0;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UObject* const ClassDefault = It->IsChildOf(StaticClass()) ? It->GetDefaultObject(false) : nullptr;
+        void** const VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Stub)
+        {
+            Hooks::SwapVTable(L"AFortPlayerController::ForceEquipValidWeapon", VTable, Index, reinterpret_cast<void*>(&ForceEquipValidWeaponHK));
+            ++Swapped;
+        }
+    }
+    Log::Info(L"Finder: AFortPlayerController::ForceEquipValidWeapon (slot 0x{:X}) is stripped, restored in {} controller classes", Index, Swapped);
+#endif
 }

@@ -9,9 +9,13 @@
 #include "Math/Rotator.h"
 #include "Math/Transform.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
 #include "ReflectionParams.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "Vehicles/FortVehicleSeatWeaponComponent.h"
 
 #include <algorithm>
 #include <cmath>
@@ -252,6 +256,98 @@ void AFortAthenaVehicle::ServerMove_ImplementationHK(AFortAthenaVehicle* This, c
 void AFortAthenaVehicle::ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState)
 {
     This->ServerUpdateInputParams_Implementation(InState);
+}
+
+// 9.10's body (CL-6573057 interface slot 12, 0x105A970; 9.20 CL-6822798 slot 14, 0x109F620 -> 0x153EAF0) plays the
+// seat's exit sound and updates the vehicle; the step that tells the seat's weapon component is compiled out, while
+// OnEnterVehicle still calls its OnPawnEnterSeat and AFortCharacterVehicle's OnExitVehicle (9.10 0x108B4C0) still calls
+// its OnPawnExitSeat. So UnEquipVehicleWeapon never ran: the seat's weapon item stayed in the inventory and its weapon in
+// hand after the player got out, and getting back in gave nothing new (#698).
+void AFortAthenaVehicle::OnExitVehicle(AFortPawn* Pawn, int32_t SeatIdx)
+{
+#if WITH_SERVER_CODE
+    UFortVehicleSeatWeaponComponent* const WeaponComponent = Role == ROLE_Authority ? GetSeatWeaponComponent(SeatIdx) : nullptr;
+    if (WeaponComponent)
+    {
+        const IFortVehicleInterface* const Vehicle = reinterpret_cast<const IFortVehicleInterface*>(reinterpret_cast<uint8_t*>(this) + VehicleInterfaceOffset);
+        WeaponComponent->OnPawnExitSeat(Vehicle, Pawn, SeatIdx);
+        Log::Info(L"Vehicle weapon: {} leaves seat {} of {}; its {} takes back what the seat gave", Pawn ? Pawn->GetName().ToStdString() : std::wstring(L"nobody"), SeatIdx,
+            GetName().ToStdString(), WeaponComponent->GetName().ToStdString());
+    }
+#endif
+}
+
+UFortVehicleSeatWeaponComponent* AFortAthenaVehicle::GetSeatWeaponComponent(int32_t SeatIndex) const
+{
+    Reflection::FParams Params(FindStaticFunction_GetSeatWeaponComponent(), true);
+    if (!Params.Set<int32_t>(L"SeatIndex", SeatIndex) || !Params.Call(const_cast<AFortAthenaVehicle*>(this)))
+    {
+        return nullptr;
+    }
+    UObject** const Result = Params.Get<UObject*>(L"ReturnValue");
+    return Result ? Cast<UFortVehicleSeatWeaponComponent>(*Result) : nullptr;
+}
+
+void AFortAthenaVehicle::OnExitVehicleHK(IFortVehicleInterface* This, AFortPawn* Pawn, int32_t SeatIdx)
+{
+    if (const FOnExitVehicleFunction* Original = OnExitVehicleOGs.Find(*reinterpret_cast<void***>(This)))
+    {
+        (*Original)(This, Pawn, SeatIdx);
+    }
+    reinterpret_cast<AFortAthenaVehicle*>(reinterpret_cast<uint8_t*>(This) - VehicleInterfaceOffset)->OnExitVehicle(Pawn, SeatIdx);
+}
+
+void AFortAthenaVehicle::HookVehicleInterfaceVTables()
+{
+#if WITH_SERVER_CODE
+    const int32_t SeatEnterSlot = UFortVehicleSeatWeaponComponent::OnPawnEnterSeatSlot();
+    const int32_t SeatExitSlot = UFortVehicleSeatWeaponComponent::OnPawnExitSeatSlot();
+    if (SeatEnterSlot < 0 || !StaticClass())
+    {
+        return;
+    }
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        Finder::ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
+    }
+    UClass* const VehicleInterface = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortVehicleInterface");
+    UObject* const Default = StaticClass()->GetDefaultObject(false);
+    uint8_t* const Interface = Default && VehicleInterface && Natives::UObject_GetInterfaceAddress
+        ? static_cast<uint8_t*>(Natives::UObject_GetInterfaceAddress(Default, VehicleInterface)) : nullptr;
+    const int32_t Index = Interface && FindStaticFunction_GetSeatWeaponComponent() ? Finder::VehicleOnExitVehicleSlot(*reinterpret_cast<void***>(Interface), SeatEnterSlot) : -1;
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortAthenaVehicle::OnExitVehicle (interface {}, slot {}) or GetSeatWeaponComponent wasn't found, so vehicle seats keep their weapon in the player's hands",
+            Interface != nullptr, Index);
+        return;
+    }
+    VehicleInterfaceOffset = Interface - reinterpret_cast<uint8_t*>(Default);
+
+    int32_t Swapped = 0;
+    int32_t Intact = 0;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UObject* const ClassDefault = It->IsChildOf(StaticClass()) ? It->GetDefaultObject(false) : nullptr;
+        uint8_t* const ClassInterface = ClassDefault ? static_cast<uint8_t*>(Natives::UObject_GetInterfaceAddress(ClassDefault, VehicleInterface)) : nullptr;
+        void** const VTable = ClassInterface && ClassInterface - reinterpret_cast<uint8_t*>(ClassDefault) == VehicleInterfaceOffset ? *reinterpret_cast<void***>(ClassInterface) : nullptr;
+        void* const ClassExit = VTable ? VTable[Index] : nullptr;
+        if (!ClassExit || ClassExit == reinterpret_cast<void*>(&OnExitVehicleHK) || OnExitVehicleOGs.Contains(VTable))
+        {
+            continue;
+        }
+        // A class whose own OnExitVehicle still tells the weapon component keeps it.
+        if (Finder::ReachesVirtualSlot(reinterpret_cast<uintptr_t>(ClassExit), SeatExitSlot))
+        {
+            ++Intact;
+            continue;
+        }
+        OnExitVehicleOGs.Add(VTable, reinterpret_cast<FOnExitVehicleFunction>(ClassExit));
+        Hooks::SwapVTable(L"AFortAthenaVehicle::OnExitVehicle", VTable, Index, reinterpret_cast<void*>(&OnExitVehicleHK));
+        ++Swapped;
+    }
+    Log::Info(L"Finder: AFortAthenaVehicle::OnExitVehicle (interface slot {}) doesn't tell the seat's weapon component: restored in {} interface vtables, {} still do",
+        Index, Swapped, Intact);
+#endif
 }
 
 bool AFortAthenaVehicle::IsAsleep() const

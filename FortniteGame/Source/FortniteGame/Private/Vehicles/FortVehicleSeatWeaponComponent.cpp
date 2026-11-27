@@ -59,10 +59,10 @@ bool FWeaponSeatDefinition::HasGrantedWeapon()
 // that equipped the seat's weapon is compiled out: EquipVehicleWeapon's exec (0x1CFBD00) calls the shared empty
 // function and nothing else in the image calls it. 9.10 moved the Pirate Cannon's weapons here (FortVehicleAimingWeaponComp
 // names ShipCannon_Weapon for seat 0 and ShipCannon_Weapon_InCannon for seat 1), and GA_ShipCannon_Enter no longer
-// calls EquipAbilityWeapon, so a player in the cannon kept their pickaxe (#693). The exit is intact: OnPawnExitSeat
-// (0x1155090) calls UnEquipVehicleWeapon (0x1160F80), which takes the granted item and weapon back.
-// UFortVehicleAimingWeaponComp's override (0x1154ED0) inlines this body and has no equip either; each class runs its own
-// first.
+// calls EquipAbilityWeapon, so a player in the cannon kept their pickaxe (#693). OnPawnExitSeat (0x1155090) is intact
+// and calls UnEquipVehicleWeapon (0x1160F80), which takes the granted item and weapon back, but AFortAthenaVehicle's
+// OnExitVehicle no longer calls it (see AFortAthenaVehicle::OnExitVehicle). UFortVehicleAimingWeaponComp's override
+// (0x1154ED0) inlines this body and has no equip either; each class runs its own first.
 void UFortVehicleSeatWeaponComponent::OnPawnEnterSeat(const IFortVehicleInterface* Vehicle, int32_t SeatIdx, bool bFlag)
 {
     if (const FOnPawnEnterSeatFunction* Original = OnPawnEnterSeatOGs.Find(*reinterpret_cast<void***>(this)))
@@ -93,8 +93,14 @@ void UFortVehicleSeatWeaponComponent::EquipVehicleWeapon(AFortPawn* FortPawn, FW
 {
 #if WITH_SERVER_CODE
     UFortWeaponItemDefinition* const WeaponDefinition = WeaponSeatDefinition.VehicleWeaponOverride ? WeaponSeatDefinition.VehicleWeaponOverride : WeaponSeatDefinition.VehicleWeapon;
-    if (!FortPawn || FortPawn->Role != ROLE_Authority || !WeaponDefinition || WeaponSeatDefinition.GetVehicleGrantedWeaponItem().IsValid())
+    if (!FortPawn || FortPawn->Role != ROLE_Authority || !WeaponDefinition)
     {
+        return;
+    }
+    if (UFortWorldItem* const Granted = WeaponSeatDefinition.GetVehicleGrantedWeaponItem().Get())
+    {
+        Log::Warning(L"Vehicle weapon: {} gives {} no {} for seat {}: the seat's last one ({}) was never taken back", GetName().ToStdString(),
+            FortPawn->GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(), WeaponSeatDefinition.SeatIndex, Granted->GetName().ToStdString());
         return;
     }
     AFortPlayerController* const PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(FortPawn->Controller)));
@@ -136,6 +142,14 @@ void UFortVehicleSeatWeaponComponent::EquipVehicleWeapon(AFortPawn* FortPawn, FW
     Log::Info(L"Vehicle weapon: {} gives {} {} for seat {}{}", GetName().ToStdString(), FortPawn->GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(),
         WeaponSeatDefinition.SeatIndex, Weapon ? L"" : L", but the pawn equipped nothing");
 #endif
+}
+
+void UFortVehicleSeatWeaponComponent::OnPawnExitSeat(const IFortVehicleInterface* Vehicle, AFortPawn* Pawn, int32_t SeatIdx)
+{
+    if (OnPawnExitSeatSlot() >= 0)
+    {
+        CallVirtual<void>(this, OnPawnExitSeatSlot(), Vehicle, Pawn, SeatIdx);
+    }
 }
 
 void UFortVehicleSeatWeaponComponent::OnPawnEnterSeatHK(UFortVehicleSeatWeaponComponent* This, const IFortVehicleInterface* Vehicle, int32_t SeatIdx, bool bFlag)
@@ -190,6 +204,7 @@ void UFortVehicleSeatWeaponComponent::HookVTables()
             ++Swapped;
         }
     }
+    OnPawnEnterSeatIndex = Index;
     Log::Info(L"Finder: UFortVehicleSeatWeaponComponent::EquipVehicleWeapon is stripped: OnPawnEnterSeat (slot 0x{:X}) equips the seat's weapon after the build's, in {} vtables", Index, Swapped);
 #endif
 }

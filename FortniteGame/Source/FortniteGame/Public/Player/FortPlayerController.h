@@ -341,6 +341,9 @@ public:
     // Personal vehicles (FortPlayerControllerPersonalVehicle.cpp): 3.0 strips the hoverboard's server RPC; Core's grants
     // and activates the vehicle's ability.
     void TogglePersonalVehicle_Implementation(bool bOn);
+    // 9.10+ (21.40's name and signature; stripped): puts a usable weapon in the pawn's hands when the held one goes, as
+    // UFortVehicleSeatWeaponComponent::UnEquipVehicleWeapon asks once it takes the seat's weapon back.
+    bool ForceEquipValidWeapon();
     UFortPersonalVehicleItem* GetCurrentlySelectedPersonalVehicle() const;
     // bForceRemoval (3.2 added it to IFortInventoryOwnerInterface::RemoveInventoryItem) takes an item whose definition
     // persists it at 0 (UFortWorldItemDefinition::ShouldPersistInInventoryWhenFinalStackEmpty) out of the inventory too.
@@ -387,6 +390,8 @@ public:
     static void HookSprayVTables();
     static void HookToyNatives();
     static void HookPersonalVehicleVTables();
+    // After UFortVehicleSeatWeaponComponent::HookVTables: only where it restored EquipVehicleWeapon.
+    static void HookForceEquipValidWeaponVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox, and with the
     // player's open microphone setting (3.0 on) the microphone is open while the server asks for it.
     static void HookVoice();
@@ -411,6 +416,7 @@ private:
     using FPossessFunction = void (*)(AFortPlayerController* This, APawn* InPawn);
     static inline TMap<void**, FPossessFunction> ZonePossessOGs;
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
+    static bool ForceEquipValidWeaponHK(AFortPlayerController* This);
     static void PushToTalkPressedHK(AFortPlayerController* This);
     static void PushToTalkReleasedHK(AFortPlayerController* This);
     // Client, every frame, from the voice interface's tick.

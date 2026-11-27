@@ -261,6 +261,15 @@ namespace Finder
     // 9.10+: UFortVehicleSeatWeaponComponent::OnPawnEnterSeat's slot, the one short function that walks WeaponSeatDefinitions and
     // stores ActiveSeatIdx. -1 when none or several do.
     int32_t VehicleSeatWeaponOnPawnEnterSeatSlot(ptrdiff_t WeaponSeatDefinitionsOffset, ptrdiff_t ActiveSeatIdxOffset);
+    // 9.10+: IFortVehicleInterface::OnExitVehicle's slot in a vehicle's interface vtable, the slot after OnEnterVehicle
+    // (the one that reaches the seat weapon component's OnPawnEnterSeat, SeatWeaponEnterSlot) sharing a helper with it.
+    // -1 when not found.
+    int32_t VehicleOnExitVehicleSlot(void** InterfaceVTable, int32_t SeatWeaponEnterSlot);
+    // Whether the function, or one it calls or jumps to directly, calls virtual slot Slot ([reg+Slot*8]).
+    bool ReachesVirtualSlot(uintptr_t Function, int32_t Slot);
+    // 9.10+: AFortPlayerController::ForceEquipValidWeapon's slot, the one after SetFirstPersonCamera's (21.40 slots 724
+    // and 725; 9.10 0x2C1 and 0x2C2, 9.20 0x2C4 and 0x2C5). -1 without the UFunction.
+    int32_t ForceEquipValidWeaponSlot();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
     // The call or tail jump to the stripped AFortPickup::GivePickupTo in a class's own native override of it

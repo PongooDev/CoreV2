@@ -15941,6 +15941,97 @@ int32_t Finder::VehicleSeatWeaponOnPawnEnterSeatSlot(ptrdiff_t WeaponSeatDefinit
     return Index;
 }
 
+bool Finder::ReachesVirtualSlot(uintptr_t Function, int32_t Slot)
+{
+    if (!IsInText(Function) || Slot < 0)
+    {
+        return false;
+    }
+    const auto Calls = [Slot](uintptr_t Body)
+    {
+        const std::vector<int32_t> Displacements = Finder::DecodedVirtualCallDisplacements(Body);
+        return std::find(Displacements.begin(), Displacements.end(), Slot * 8) != Displacements.end();
+    };
+    if (Calls(Function))
+    {
+        return true;
+    }
+    for (const auto& [Site, Target] : Finder::DecodedDirectBranches(Function))
+    {
+        if (IsInText(Target) && Finder::FunctionStart(Target) == Target && Calls(Target))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+int32_t Finder::VehicleOnExitVehicleSlot(void** InterfaceVTable, int32_t SeatWeaponEnterSlot)
+{
+    // OnEnterVehicle: 9.10 (CL-6573057) AFortAthenaVehicle's interface slot 11 (0x105A5E0) calls the seat's
+    // WeaponComponent->OnPawnEnterSeat ([rax+3D0h]); 9.20 (CL-6822798) slot 13 (0x109F510) reaches it through 0x153E600.
+    // OnExitVehicle is the next slot (9.10 0x105A970, 9.20 0x109F620; 21.40 puts UpdateContextTracker between them), and
+    // both call the same vehicle helper (9.10 0x1635A10, 9.20 0x16A4710).
+    const auto Helpers = [](uintptr_t Function, TSet<uintptr_t>& OutTargets)
+    {
+        for (const auto& [Site, Target] : Finder::DecodedDirectBranches(Function))
+        {
+            OutTargets.Add(Target);
+            for (const auto& [InnerSite, InnerTarget] : IsInText(Target) && Finder::FunctionStart(Target) == Target ? Finder::DecodedDirectBranches(Target) : decltype(Finder::DecodedDirectBranches(0)){})
+            {
+                OutTargets.Add(InnerTarget);
+            }
+        }
+    };
+    int32_t EnterIndex = -1;
+    for (int32_t Index = 2; InterfaceVTable && Index < 0x40; ++Index)
+    {
+        if (Finder::ReachesVirtualSlot(VTableEntry(InterfaceVTable, Index), SeatWeaponEnterSlot))
+        {
+            if (EnterIndex >= 0)
+            {
+                Log::Error(L"Finder: IFortVehicleInterface::OnEnterVehicle: slots {} and {} both reach the seat weapon's OnPawnEnterSeat", EnterIndex, Index);
+                return -1;
+            }
+            EnterIndex = Index;
+        }
+    }
+    const uintptr_t Enter = EnterIndex >= 0 ? VTableEntry(InterfaceVTable, EnterIndex) : 0;
+    TSet<uintptr_t> EnterHelpers;
+    if (Enter)
+    {
+        Helpers(Enter, EnterHelpers);
+    }
+    for (int32_t Index = EnterIndex + 1; Enter && Index <= EnterIndex + 2; ++Index)
+    {
+        const uintptr_t Exit = VTableEntry(InterfaceVTable, Index);
+        if (!Exit || Finder::IsStubFunction(Exit))
+        {
+            continue;
+        }
+        TSet<uintptr_t> ExitHelpers;
+        Helpers(Exit, ExitHelpers);
+        for (const uintptr_t Helper : ExitHelpers)
+        {
+            if (Helper != Enter && EnterHelpers.Contains(Helper))
+            {
+                Log::Info(L"Finder: IFortVehicleInterface::OnEnterVehicle is slot {}, OnExitVehicle slot {}", EnterIndex, Index);
+                return Index;
+            }
+        }
+    }
+    Log::Error(L"Finder: IFortVehicleInterface::OnExitVehicle not found (OnEnterVehicle slot {})", EnterIndex);
+    return -1;
+}
+
+int32_t Finder::ForceEquipValidWeaponSlot()
+{
+    UClass* const ControllerClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortPlayerController");
+    UFunction* const SetFirstPersonCamera = ControllerClass ? ControllerClass->FindFunctionByName(FName(L"SetFirstPersonCamera", FNAME_Find)) : nullptr;
+    const int32_t Index = SetFirstPersonCamera ? Finder::ImplementationIndex(SetFirstPersonCamera) : -1;
+    return Index >= 0 ? Index + 1 : -1;
+}
+
 uint8_t* Finder::AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset)
 {
     const uintptr_t EndAbility = Finder::FunctionStart(OnlyRef(L"%s EndAbility"));

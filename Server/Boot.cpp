@@ -500,6 +500,9 @@ static void InstallHooks()
             AFortWeaponRangedMountedCannon::HookVTables();
             // 9.10's vehicle seat weapons (the Pirate Cannon's): EquipVehicleWeapon, stripped, after OnPawnEnterSeat (#693).
             UFortVehicleSeatWeaponComponent::HookVTables();
+            // ... and taking it back on the way out: OnExitVehicle's step and ForceEquipValidWeapon, both stripped (#698).
+            AFortAthenaVehicle::HookVehicleInterfaceVTables();
+            AFortPlayerController::HookForceEquipValidWeaponVTables();
             AFortOctopusVehicle::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();

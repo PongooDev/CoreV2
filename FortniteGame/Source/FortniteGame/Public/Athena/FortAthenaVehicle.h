@@ -3,7 +3,12 @@
 #include "GameFramework/Pawn.h"
 #include "Math/Quat.h"
 #include "Math/Vector.h"
+#include "Containers/Map.h"
 #include "UObject/ScriptDelegates.h"
+
+class AFortPawn;
+class IFortVehicleInterface;
+class UFortVehicleSeatWeaponComponent;
 
 // The physics state a vehicle's driver sends the server (4.2-5.0: 0x40 bytes). The driver's client fills it from its
 // body (4.1 0xA381C0): Translation and Rotation are the body's ComponentToWorld, LinearVelocity is
@@ -39,6 +44,7 @@ class AFortAthenaVehicle : public APawn
     DefineUFunction(ServerUpdateInputParams)
     DefineUStructProperty(FReplicatedAthenaVehicleInputState, ReplicatedInputParams)
     DefineUFunction(IsAsleep)
+    DefineUFunction(GetSeatWeaponComponent)
 
 public:
     // Broadcast when the vehicle runs out of health (DeadVehicle, InTags, EventInstigator, DamageCauser), and when its
@@ -53,9 +59,22 @@ public:
     void ServerMove_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);
     void ServerUpdateInputParams_Implementation(const FReplicatedAthenaVehicleInputState& InState);
 
+    // IFortVehicleInterface::OnExitVehicle (21.40's name and signature), restored where its seat weapon step is stripped
+    // (9.10+): the seat's weapon component takes back the weapon its seat gave.
+    void OnExitVehicle(AFortPawn* Pawn, int32_t SeatIdx);
+    UFortVehicleSeatWeaponComponent* GetSeatWeaponComponent(int32_t SeatIndex) const;
+
     static void HookVTables();
+    // After UFortVehicleSeatWeaponComponent::HookVTables, which finds the seat weapon's slots.
+    static void HookVehicleInterfaceVTables();
 
 private:
+    using FOnExitVehicleFunction = void (*)(IFortVehicleInterface* This, AFortPawn* Pawn, int32_t SeatIdx);
+    // Each class's own, by its interface vtable.
+    static inline TMap<void**, FOnExitVehicleFunction> OnExitVehicleOGs;
+    // IFortVehicleInterface's offset in the vehicle (9.10 and 9.20: +0x3B8).
+    static inline ptrdiff_t VehicleInterfaceOffset = 0;
+    static void OnExitVehicleHK(IFortVehicleInterface* This, AFortPawn* Pawn, int32_t SeatIdx);
     static void ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState);
     static void ServerMove_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState);
     static void ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState);

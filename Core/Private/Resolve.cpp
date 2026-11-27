@@ -8139,13 +8139,15 @@ uint8_t* Finder::ImplementationCall(UFunction* Function)
     return reinterpret_cast<uint8_t*>(Implementation);
 }
 
-uint8_t* Finder::StrippedComplexCustomStatEventCall(UFunction* SendComplexCustomStatEvent)
+uint8_t* Finder::StrippedComplexCustomStatEvent(UFunction* SendComplexCustomStatEvent)
 {
     // 7.20's exec (0x1795C60; 7.40 0x17F6950) steps over the parameters, copies the two tag containers and calls the
-    // native (7.20 0x1457270, 7.40 0x14A7B50), whose first call is GetSourceAndContextTags' native (7.20 0x1444C20) and
-    // which then appends AdditionalSourceTags and destroys its containers: no call is left of the send
-    // (SendStatEventWithTags is stripped, Natives::UFortQuestManager_bStatEventsStripped). Its call is the exec's call to
-    // the function whose first call is that one.
+    // native (7.20 0x1457270, 7.40 0x14A7B50; 7.10 0x1372BD0 from its exec 0x16AF600), whose first call is
+    // GetSourceAndContextTags' native (7.20 0x1444C20; 7.10 0x135D500) and which then appends AdditionalSourceTags and
+    // destroys its containers: no call is left of the send (SendStatEventWithTags is stripped,
+    // Natives::UFortQuestManager_bStatEventsStripped). The native is the target of the exec's call to the function whose
+    // first call is that one. C++ calls it too (7.10's AFortPlayerControllerAthena::ServerThankBusDriver_Implementation,
+    // 0xC861E0, at 0xC862AA), so the native itself is what Core replaces, not the exec's call.
     const uintptr_t SourceAndContextTags = Natives::UFortQuestManager_bStatEventsStripped ? ExecImplementation(L"/Script/FortniteGame.FortQuestManager:GetSourceAndContextTags") : 0;
     const uintptr_t Exec = SendComplexCustomStatEvent && SourceAndContextTags ? reinterpret_cast<uintptr_t>(SendComplexCustomStatEvent->GetNativeFunc()) : 0;
     const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
@@ -8165,7 +8167,7 @@ uint8_t* Finder::StrippedComplexCustomStatEventCall(UFunction* SendComplexCustom
             {
                 bCallsStub = Finder::RelativeTarget(Inner, 1, 5) == reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
             }
-            Found = bCallsStub ? nullptr : reinterpret_cast<uint8_t*>(Call);
+            Found = bCallsStub ? nullptr : reinterpret_cast<uint8_t*>(Implementation);
             ++Matches;
         }
     }

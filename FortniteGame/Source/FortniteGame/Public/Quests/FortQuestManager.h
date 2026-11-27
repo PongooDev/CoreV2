@@ -29,7 +29,7 @@ class EFortQuestObjectiveStatEvent
     DefineUEnumValue(Ability)
     DefineUEnumValue(WaveComplete)
     DefineUEnumValue(Custom)
-    // 7.20 on (after Custom): what UFortQuestManager::SendComplexCustomStatEvent sends.
+    // 7.10 on (after Custom): what UFortQuestManager::SendComplexCustomStatEvent sends.
     DefineUEnumValue(ComplexCustom)
     DefineUEnumValue(Client)
     DefineUEnumValue(NumGameplayEvents)
@@ -145,6 +145,8 @@ class UFortQuestManager : public UObject
     DefineUFunction(GetSourceAndContextTags)
     DefineUFunction(GetQuestWithDefinition)
     DefineUFunction(SendComplexCustomStatEvent)
+    // 7.10's name for it (Epic's spelling; 7.20 has both).
+    DefineUFunction(SendComplexCustomStatEven)
     // 8.00 on: sends the quest owner's client Client_DisplayQuestUpdate_Self, which shows the challenge toast.
     DefineUFunction(SelfCompletedUpdatedQuest)
 
@@ -170,8 +172,8 @@ public:
     int32_t AdvanceObjective(AFortPlayerController* PlayerController, UFortQuestItem* Quest, UFortQuestObjectiveInfo* Objective, int32_t Count);
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     void SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count);
-    // 7.20 on (Final, BlueprintAuthorityOnly, Blueprint-callable): a ComplexCustom stat event at TargetObject with
-    // TargetTags, from the player's own source tags and AdditionalSourceTags, in the player's context. 7.30 adds the
+    // 7.10 on (Final, BlueprintAuthorityOnly, Blueprint-callable; 7.10's SendComplexCustomStatEven): a ComplexCustom
+    // stat event at TargetObject with TargetTags, from the player's own source tags and AdditionalSourceTags, in the player's context. 7.30 adds the
     // out parameters QuestActive and QuestCompleted. The build's native keeps only the tags' gathering (Core restores the
     // send, Hook).
     void SendComplexCustomStatEvent(UObject* TargetObject, const FGameplayTagContainer& AdditionalSourceTags, const FGameplayTagContainer& TargetTags, bool& QuestActive, bool& QuestCompleted, int32_t Count);
@@ -193,8 +195,8 @@ private:
     // the instigating controller's team.
     static void SendTeamStatEvent(uint8_t Type, AFortPlayerController* PlayerController, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     static void SendCustomStatEventHK(UFortQuestManager* This, const void* ObjectiveStat, int32_t Count, bool bForceFlush);
-    // The exec's call to the native (the containers by value, which the callee destroys, as the build's native does):
-    // 7.20's five arguments, and 7.30's with the out parameters' addresses.
+    // The native (the containers by value, which the callee destroys, as the build's native does):
+    // 7.10's and 7.20's five arguments, and 7.30's with the out parameters' addresses.
     static void SendComplexCustomStatEventHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, int32_t Count);
     static void SendComplexCustomStatEventWithResultsHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, bool* QuestActive, bool* QuestCompleted,
         int32_t Count);

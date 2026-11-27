@@ -1394,7 +1394,7 @@ void UFortQuestManager::SendComplexCustomStatEvent(UObject* TargetObject, const 
     int32_t Count)
 {
 #if WITH_SERVER_CODE
-    // What the build's native keeps (7.20 0x1457270, 7.40 0x14A7B50): the player's source and context tags
+    // What the build's native keeps (7.10 0x1372BD0, 7.20 0x1457270, 7.40 0x14A7B50): the player's source and context tags
     // (GetSourceAndContextTags, its first call) and AdditionalSourceTags appended to the source tags. The event itself
     // went with the stripped SendStatEventWithTags: a ComplexCustom one at TargetObject with TargetTags, which the
     // challenges' ComplexCustom objectives listen to (7.20's destroy_biplanes_in_air and use_zipline, 7.30's
@@ -1563,21 +1563,29 @@ void UFortQuestManager::Hook()
     }
     Hooks::Detour(L"UFortQuestManager::SendCustomStatEvent (stripped)", reinterpret_cast<void*>(Natives::UFortQuestManager_SendCustomStatEvent), &SendCustomStatEventHK, nullptr);
 
-    // 7.20 on: SendComplexCustomStatEvent's native gathers the event's tags and sends nothing (its send went with
-    // SendStatEventWithTags). The exec's call to it comes to Core's, with 7.30's QuestActive and QuestCompleted where the
-    // UFunction has them.
-    if (UFunction* ComplexCustom = FindStaticFunction_SendComplexCustomStatEvent())
+    // 7.10 on: SendComplexCustomStatEvent's native gathers the event's tags and sends nothing (its send went with
+    // SendStatEventWithTags). The native is Core's, with 7.30's QuestActive and QuestCompleted where the UFunction has
+    // them. Its execs call it (7.20 has both execSendComplexCustomStatEvent, 0x1795C60, and 7.10's misspelt
+    // execSendComplexCustomStatEven, 0x1795A40), and so does C++:
+    // AFortPlayerControllerAthena::ServerThankBusDriver_Implementation (7.10 0xC861E0, 7.20 0xD62E40) sends
+    // Gameplay.Action.Player.ThankBusDriver through it, which 14 Days of Fortnite's thank_location_bus_driver counts (#703).
+    UFunction* ComplexCustom = FindStaticFunction_SendComplexCustomStatEvent();
+    if (!ComplexCustom)
     {
-        uint8_t* Call = Finder::StrippedComplexCustomStatEventCall(ComplexCustom);
+        ComplexCustom = FindStaticFunction_SendComplexCustomStatEven();
+    }
+    if (ComplexCustom)
+    {
+        uint8_t* Native = Finder::StrippedComplexCustomStatEvent(ComplexCustom);
         const bool bWithResults = ComplexCustom->FindPropertyByName(FName(L"QuestActive", FNAME_Find)) && ComplexCustom->FindPropertyByName(FName(L"QuestCompleted", FNAME_Find));
-        if (!Call)
+        if (!Native)
         {
-            Log::Error(L"Finder: UFortQuestManager::SendComplexCustomStatEvent's call to its native not found, so the challenges' ComplexCustom events from Blueprints move nothing");
+            Log::Error(L"Finder: UFortQuestManager::SendComplexCustomStatEvent's native not found, so the challenges' ComplexCustom events move nothing");
         }
         else
         {
-            Hooks::RedirectCall(L"UFortQuestManager::SendComplexCustomStatEvent (stripped send)", Call,
-                bWithResults ? reinterpret_cast<void*>(&SendComplexCustomStatEventWithResultsHK) : reinterpret_cast<void*>(&SendComplexCustomStatEventHK));
+            Hooks::Detour(L"UFortQuestManager::SendComplexCustomStatEvent (stripped send)", Native,
+                bWithResults ? reinterpret_cast<void*>(&SendComplexCustomStatEventWithResultsHK) : reinterpret_cast<void*>(&SendComplexCustomStatEventHK), nullptr);
         }
     }
 #endif

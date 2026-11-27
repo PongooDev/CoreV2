@@ -3470,25 +3470,30 @@ bool AFortPlayerController::InitializeMcpProfileHK(AFortPlayerController* This, 
 // Stripped in 9.10 and 9.20 (CL-6573057 slot 0x2C2 and CL-6822798 slot 0x2C5 are a return-zero stub in every controller
 // class). Its callers have just taken the held weapon away or found a tool in hand: UnEquipVehicleWeapon (0x1160F80)
 // after it unequips the seat's weapon and before it removes the item, the ability weapon cleanup (0xE15070), and a
-// controller step that finds a deco or building tool held (0x186DD80). Core's: the pawn's last weapon (EquipLastWeapon,
-// which 9.10 reads from TempWeaponsStack, then LastEquippedWeaponOrGadgetGUID; the seat's weapon is not bValidForLastEquipped),
-// else its default weapon, the pickaxe.
+// controller step that finds a deco or building tool held (0x186DD80). Core's: the server equips the pawn's last weapon
+// (LastEquippedWeaponOrGadgetGUID; the seat's weapon is not bValidForLastEquipped), else its default weapon, the pickaxe.
+// Not EquipLastWeapon: it equips through ExecuteInventoryItem (0x180E8C0), which refuses while the pawn is still in its
+// seat ("Cannot execute inventory item - due to blocked ActionPlayerChangeEquipment tag or operating a turret"), and
+// UnEquipVehicleWeapon runs before the seat lets the pawn go; the owning client then never heard of a new weapon and kept
+// the seat's in hand (#698).
 bool AFortPlayerController::ForceEquipValidWeapon()
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawn* const PlayerPawn = Cast<AFortPlayerPawn>(static_cast<AFortPawn*>(MyFortPawn));
+    AFortInventory* const Inventory = WorldInventory;
     if (!PlayerPawn || PlayerPawn->Role != ROLE_Authority)
     {
         return false;
     }
-    if (PlayerPawn->EquipLastWeapon())
-    {
-        return true;
-    }
-    const bool bEquipped = PlayerPawn->EquipDefaultWeapon();
-    AFortWeapon* const Held = static_cast<AFortWeapon*>(PlayerPawn->CurrentWeapon);
-    Log::Info(L"ForceEquipValidWeapon: {} has no last weapon to go back to, so it holds {}", PlayerPawn->GetName().ToStdString(),
-        Held ? Held->GetName().ToStdString() : std::wstring(L"nothing"));
+    const FGuid LastGuid = *reinterpret_cast<const FGuid*>(reinterpret_cast<const uint8_t*>(PlayerPawn) + AFortPlayerPawn::LastEquippedWeaponGUIDOffset());
+    UFortWorldItem* const LastItem = Inventory && LastGuid.IsValid() ? Inventory->FindWorldItem(LastGuid) : nullptr;
+    FFortItemEntry* const LastEntry = LastItem ? &LastItem->ItemEntry : nullptr;
+    const UFortWeaponItemDefinition* const LastDefinition = LastEntry ? Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(LastEntry->ItemDefinition)) : nullptr;
+    AFortWeapon* Held = LastDefinition ? PlayerPawn->EquipWeaponDefinition(LastDefinition, LastGuid) : nullptr;
+    const bool bEquipped = Held || PlayerPawn->EquipDefaultWeapon();
+    Held = static_cast<AFortWeapon*>(PlayerPawn->CurrentWeapon);
+    Log::Info(L"ForceEquipValidWeapon: {} now holds {}{}", PlayerPawn->GetName().ToStdString(), Held ? Held->GetName().ToStdString() : std::wstring(L"nothing"),
+        LastDefinition ? L"" : L" (no last weapon to go back to)");
     return bEquipped;
 #else
     return false;

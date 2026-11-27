@@ -77,6 +77,23 @@ void UFortVehicleSeatWeaponComponent::OnPawnEnterSeat(const IFortVehicleInterfac
     }
     AFortPawn* const Pawn = GetPawnAtSeat(VehicleActor, SeatIdx);
     TStructArray<FWeaponSeatDefinition>& Definitions = GetMember_WeaponSeatDefinitions();
+    // A seat change (AFortPlayerControllerZone::ServerRequestSeatChange_Implementation, 9.10 0x1879780 -> 0x12F6A30; 9.20
+    // 0x18F6570 -> 0x1355F70 and the interface's slot 103) empties the old seat and seats the pawn in the new one without
+    // OnExitVehicle, so nothing takes the old seat's weapon back. Core's: an empty seat whose weapon is still in this
+    // pawn's inventory gets the pawn's OnPawnExitSeat first.
+    AFortPlayerController* const PlayerController = Pawn ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Pawn->Controller))) : nullptr;
+    AFortInventory* const Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    for (int32_t Index = 0; Inventory && Index < Definitions.Num(); ++Index)
+    {
+        FWeaponSeatDefinition& Definition = Definitions[Index];
+        UFortWorldItem* const Granted = Definition.SeatIndex != SeatIdx ? Definition.GetVehicleGrantedWeaponItem().Get() : nullptr;
+        if (Granted && !GetPawnAtSeat(VehicleActor, Definition.SeatIndex) && Inventory->FindWorldItem(Granted->ItemEntry.ItemGuid) == Granted)
+        {
+            Log::Info(L"Vehicle weapon: {} moves from seat {} to seat {}; {} takes back what seat {} gave", Pawn->GetName().ToStdString(), Definition.SeatIndex, SeatIdx,
+                GetName().ToStdString(), Definition.SeatIndex);
+            OnPawnExitSeat(Vehicle, Pawn, Definition.SeatIndex);
+        }
+    }
     for (int32_t Index = 0; Pawn && Index < Definitions.Num(); ++Index)
     {
         FWeaponSeatDefinition& Definition = Definitions[Index];

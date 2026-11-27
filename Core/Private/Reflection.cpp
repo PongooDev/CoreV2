@@ -80,8 +80,8 @@ UScriptStruct* Reflection::FTypeInfo::GetScriptStruct()
     return Kind == ETypeKind::ScriptStruct ? static_cast<UScriptStruct*>(Get()) : nullptr;
 }
 
-Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct, size_t InSoftPathGrowth)
-    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct), SoftPathGrowth(InSoftPathGrowth)
+Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct, size_t InSoftPathGrowth, const wchar_t* InFormerName)
+    : Owner(InOwner), Name(InName), FormerName(InFormerName), Size(InSize), Kind(InKind), StructType(InStruct), SoftPathGrowth(InSoftPathGrowth)
 {
     Members().push_back(this);
 }
@@ -95,6 +95,10 @@ bool Reflection::FMemberInfo::Resolve()
     }
 
     const UProperty* Property = Struct->FindPropertyByName(FName(Name, FNAME_Find));
+    if (!Property && FormerName)
+    {
+        Property = Struct->FindPropertyByName(FName(FormerName, FNAME_Find));
+    }
     if (!Property)
     {
         Offset = MissingOffset;

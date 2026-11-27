@@ -65,7 +65,8 @@ namespace Reflection
     class FMemberInfo
     {
     public:
-        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr, size_t InSoftPathGrowth = 0);
+        // InFormerName: the name older builds reflect the member by, for a member Epic renamed (nullptr when it never was).
+        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr, size_t InSoftPathGrowth = 0, const wchar_t* InFormerName = nullptr);
 
         int32_t GetOffsetChecked();
         // Whether the build reflects this member, for members a build may not have (no error once checked).
@@ -80,6 +81,7 @@ namespace Reflection
 
         FOwnerGetter Owner;
         const wchar_t* Name;
+        const wchar_t* FormerName;
         size_t Size;
         EMemberKind Kind;
         FOwnerGetter StructType;
@@ -216,6 +218,15 @@ public: \
 #define DefineUProperty(Type, Name) \
 private: \
     static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \
+public: \
+    Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
+    void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
+    __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
+
+// A member Epic renamed: Name is its current name (as 21.40 has it), FormerName the one older builds reflect it by.
+#define DefineRenamedUProperty(Type, Name, FormerName) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type>, TEXT(#FormerName) }; \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
     void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \

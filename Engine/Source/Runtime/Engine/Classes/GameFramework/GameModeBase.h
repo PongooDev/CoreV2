@@ -5,6 +5,7 @@
 
 class AController;
 class AGameSession;
+class APlayerController;
 class UClass;
 
 class AGameModeBase : public AInfo
@@ -16,6 +17,8 @@ class AGameModeBase : public AInfo
 public:
     DefineUProperty(TSubclassOf<AGameSession>, GameSessionClass)
     DefineUProperty(AGameSession*, GameSession)
+    // The class of the players' controllers (Athena_PlayerController_C in Battle Royale).
+    DefineUProperty(TSubclassOf<APlayerController>, PlayerControllerClass)
 
     UClass* GetDefaultPawnClassForController(AController* InController);
     void RestartPlayer(AController* NewPlayer);

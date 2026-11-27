@@ -23,7 +23,7 @@ struct FPlayerBannerInfo
     DefineUProperty(int32_t, Level)
 };
 
-// What killed a Battle Royale player (FDeathInfo's DeathCause, from 1.8).
+// What killed a Battle Royale player (FDeathInfo's DeathCause, from 1.7.2).
 class EDeathCause
 {
     DefineUnrealEnum(EDeathCause, FortniteGame)
@@ -36,20 +36,21 @@ class EDeathCause
 
 // How a Battle Royale player was last downed or eliminated, which the death screen shows (OnRep_DeathInfo). The death
 // handler (1.7.2 0x437D2F, 1.8 0x43BAFE) sets it when the player is eliminated: not DBNO, and the eliminator's player
-// state, or the player's own when nobody eliminated them (the storm, a fall). Its first member is Killer up to 1.7.2,
-// FinisherOrDowner from 1.8; only 1.8's is read (GetEliminator, for AFortGameModeAthena's results). FinisherOrDowner
-// is an AFortPlayerStateAthena up to 6.10 and an AActor from 6.20 (21.40's too): 6.20's DBNO handling (0xCE8D20) stores
-// the finisher's player state, else its pawn (an AI with none, a Cube monster), else the player's own.
+// state, or the player's own when nobody eliminated them (the storm, a fall). FinisherOrDowner is an
+// AFortPlayerStateAthena up to 6.10 and an AActor from 6.20 (21.40's too): 6.20's DBNO handling (0xCE8D20) stores the
+// finisher's player state, else its pawn (an AI with none, a Cube monster), else the player's own.
 struct FDeathInfo
 {
     DefineUnrealStruct(FDeathInfo, FortniteGame)
-    DefineUProperty(AActor*, FinisherOrDowner)
+    // 1.7.2 (CL-3700114) reflects it as Killer, an AFortPlayerStateAthena* (FDeathInfo is Killer +0, bDBNO +8,
+    // DeathCause +9: 0x11B1430). Its OnRep_DeathInfo (0x439B70) writes the kill feed line only while Killer is set.
+    DefineRenamedUProperty(AActor*, FinisherOrDowner, Killer)
     // Who downed the player (from 9.00): the knock (9.01's DBNO handling 0x10BA540) stores the downer's player state as
     // FinisherOrDowner and Downer both. Wick's Bounty's CommonDeadPawn (9.01 0x10FED40) pays the dead player's tokens to
     // it, and clears it on the other player states naming the dead one (0x10B7610).
     DefineUProperty(AActor*, Downer)
     DefineUProperty(bool, bDBNO)
-    // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
+    // EDeathCause (from 1.7.2): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
     DefineUProperty(uint8_t, DeathCause)
     // How far the eliminator's pawn was from the player, in cm (AActor::GetDistanceTo), or for a fall how far the player
     // fell (AFortPlayerPawnAthena::LastFallDistance, from 4.0), else 0. The client's OnRep_DeathInfo (3.5.1 0xA617C0)

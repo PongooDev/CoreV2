@@ -1619,6 +1619,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     UObject* HeroObject = nullptr;
     // The outfit's own parts, as SetHeroType gives them to the player state.
     std::vector<UCustomCharacterPart*> HeroParts;
+    UFortHeroType* HeroType = nullptr;
     if (Pawn->HasCustomizationLoadout())
     {
         FFortAthenaLoadout& Loadout = *Pawn->GetCosmeticLoadout();
@@ -1644,18 +1645,32 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
         {
             Loadout.Backpack = BackpackDefinition;
         }
-        AFortPlayerStateAthena* State = GetPlayerState();
-        UFortHeroType* HeroType = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
-        if (State && HeroType && AFortPlayerState::CanSetHeroType())
+        HeroType = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
+    }
+    else if (UClass* ControllerClass = GameMode->PlayerControllerClass)
+    {
+        // 1.7.2 has no loadout: a player plays the next of Athena_PlayerController_C's DefaultHeroes
+        // (HID_Commando_Athena_*), which GetOrInitializeHero (0x42E5E0) picks with a counter over every controller
+        // ((Next + 1) % DefaultHeroes.Num()). Without one the bot's player state had no parts and its pawn no body.
+        AFortPlayerControllerAthena* DefaultController = Cast<AFortPlayerControllerAthena>(ControllerClass->GetDefaultObject(false));
+        if (DefaultController && DefaultController->HasDefaultHeroes())
         {
-            if (UFortHero* Hero = UFortCheatManager::CreateLookHero(HeroType))
+            const TArray<UFortHeroType*>& DefaultHeroes = DefaultController->DefaultHeroes;
+            static int32_t NextDefaultHero = 0;
+            NextDefaultHero = (NextDefaultHero + 1) % DefaultHeroes.Num();
+            HeroType = DefaultHeroes[NextDefaultHero];
+            HeroObject = reinterpret_cast<UObject*>(HeroType);
+        }
+    }
+    if (AFortPlayerStateAthena* State = GetPlayerState(); State && HeroType && AFortPlayerState::CanSetHeroType())
+    {
+        if (UFortHero* Hero = UFortCheatManager::CreateLookHero(HeroType))
+        {
+            State->SetHeroType(Hero);
+            const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
+            for (uint8_t PartType = 0; NumTypes != Reflection::InvalidEnumValue && PartType < NumTypes; ++PartType)
             {
-                State->SetHeroType(Hero);
-                const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
-                for (uint8_t PartType = 0; NumTypes != Reflection::InvalidEnumValue && PartType < NumTypes; ++PartType)
-                {
-                    HeroParts.push_back(State->GetCharacterPart(EFortCustomPartType{ PartType }));
-                }
+                HeroParts.push_back(State->GetCharacterPart(EFortCustomPartType{ PartType }));
             }
         }
     }
@@ -1758,7 +1773,15 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     // The outfit's parts on the player state and the pawn, as a player's hero gets them (Core runs the stripped
     // AFortPlayerStateAthena override for players in TrySetHeroImplementation; a bot's controller isn't a player's):
     // without them clients drew the bots without their outfit.
-    if (AFortPlayerStateAthena* State = GetPlayerState(); State && AFortPlayerState::CanApplyCharacterCustomization() && Pawn->HasCustomizationLoadout())
+    if (AFortPlayerStateAthena* State = GetPlayerState(); State && !Pawn->HasCustomizationLoadout() && !HeroParts.empty())
+    {
+        // 1.7.2 has no ApplyCharacterCustomization: a player's parts are SetHeroType's alone, set in Possess with the
+        // pawn there (AFortPlayerControllerAthena::SetupHero). The bot's were set before its possession; the possessed
+        // pawn takes them now.
+        State->OnRep_CharacterParts();
+        State->ForceNetUpdate();
+    }
+    else if (State && AFortPlayerState::CanApplyCharacterCustomization() && Pawn->HasCustomizationLoadout())
     {
         State->ApplyCharacterCustomization(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
         // Its hero lookup is a player controller's (GetHero): for a bot's it fails ("Failed initialization, using

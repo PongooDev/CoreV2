@@ -6,6 +6,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Athena/PhysicsObject.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortCreativeMoveTool.h"
 #include "Creative/FortCreativePortalManager.h"
@@ -1392,6 +1393,29 @@ void AFortPlayerControllerAthena::ServerCreativeSetFlightSprint_Implementation(b
 #endif
 }
 
+// The Creative ball rolled back to its spot when pushed (#715): nothing moved the server's ball, so its replicated
+// CurrentServerPhysicsState pulled the client's prediction back. The server applies the hit the client already applied
+// to its own ball (ApplyPredictedImpulseFromPawnHitClient calls ApplyImpulseFromPawnHit with the same velocity and
+// normal). Only the sender's own pawn counts: each client also predicts hits by other players' pawns, whose own clients
+// send those. ClientPing and ClientBallState are not used: nothing in the build shows how the server rewound with them,
+// and SendClientPhysicsBallStateToServer (slot 0x41C, also empty) is left out for the same reason.
+void AFortPlayerControllerAthena::SendPhysicsBallHitToServer_Implementation(APhysicsObject* PhysicsObject, float ClientPing, APawn* HittingPawn, const FVector& VelocityOfHitter,
+    const FVector& HitNormal, const FTimeStampedPhysicsPawnState& ClientBallState)
+{
+#if WITH_SERVER_CODE
+    if (PhysicsObject && PhysicsObject->IsA(APhysicsObject::StaticClass()) && !PhysicsObject->IsPendingKill() && HittingPawn && HittingPawn == GetPawn())
+    {
+        PhysicsObject->ApplyImpulseFromPawnHit(VelocityOfHitter, HitNormal, HittingPawn);
+    }
+#endif
+}
+
+void AFortPlayerControllerAthena::SendPhysicsBallHitToServer_ImplementationHK(AFortPlayerControllerAthena* This, APhysicsObject* PhysicsObject, float ClientPing, APawn* HittingPawn,
+    const FVector& VelocityOfHitter, const FVector& HitNormal, const FTimeStampedPhysicsPawnState& ClientBallState)
+{
+    This->SendPhysicsBallHitToServer_Implementation(PhysicsObject, ClientPing, HittingPawn, VelocityOfHitter, HitNormal, ClientBallState);
+}
+
 void AFortPlayerControllerAthena::ServerCreativeSetFlightSpeedIndex_ImplementationHK(AFortPlayerControllerAthena* This, int32_t Index)
 {
     This->ServerCreativeSetFlightSpeedIndex_Implementation(Index);
@@ -1509,6 +1533,19 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         {
             Log::Error(L"Finder: AFortPlayerControllerAthena's Creative flight OnReps weren't found (OnRep_FlyingModifierIndex {}, OnRep_IsFlightSprinting {}), so flight speed and sprint stay the client's only",
                 FindStaticFunction_OnRep_FlyingModifierIndex() ? L"found" : L"missing", FindStaticFunction_OnRep_IsFlightSprinting() ? L"found" : L"missing");
+        }
+    }
+
+    // 9.00: the physics ball's hit (#715). Earlier builds have neither the RPC nor APhysicsObject.
+    if (FindStaticFunction_SendPhysicsBallHitToServer())
+    {
+        if (APhysicsObject::StaticClass() && APhysicsObject::FindStaticFunction_ApplyImpulseFromPawnHit())
+        {
+            RestoreImplementation(FindStaticFunction_SendPhysicsBallHitToServer(), reinterpret_cast<void*>(&SendPhysicsBallHitToServer_ImplementationHK), L"SendPhysicsBallHitToServer");
+        }
+        else
+        {
+            Log::Error(L"Finder: APhysicsObject::ApplyImpulseFromPawnHit wasn't found, so pushed Creative balls stay still on the server");
         }
     }
 

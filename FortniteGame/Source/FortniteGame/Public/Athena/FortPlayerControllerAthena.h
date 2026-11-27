@@ -26,6 +26,7 @@ class AFortPawn;
 class AFortPlayerPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
+class APhysicsObject;
 class UAthenaMarkerComponent;
 class UAthenaPlayerMatchReport;
 class UFortHero;
@@ -38,6 +39,7 @@ struct FGameplayTagContainer;
 struct FFortItemEntry;
 struct FGuid;
 struct FMcpQueryResult;
+struct FTimeStampedPhysicsPawnState;
 
 // One of a player's Creative islands as the controller replicates it (from 7.00): its name and its plot item's id.
 struct FCreativeIslandData
@@ -466,6 +468,14 @@ public:
     void ServerCreativeSetFlightSpeedIndex_Implementation(int32_t Index);
     void ServerCreativeSetFlightSprint_Implementation(bool bSprint);
 
+    // 9.00's Creative physics ball hit (#715). The ball's blueprint (CreativeBall_C) gives a player pawn's overlap to
+    // ApplyPredictedImpulseFromPawnHitClient only on clients (9.21 0x11D2AE0): the client pushes its own ball and sends
+    // the hit here. The server's own hit handler (0x11D75D0) only queues a player-controlled pawn's hit for this RPC.
+    // Its _Implementation is the shared empty function (9.21 slot 0x41E; _Validate 0x1138570 is the game's).
+    DefineUFunction(SendPhysicsBallHitToServer)
+    void SendPhysicsBallHitToServer_Implementation(APhysicsObject* PhysicsObject, float ClientPing, APawn* HittingPawn, const FVector& VelocityOfHitter, const FVector& HitNormal,
+        const FTimeStampedPhysicsPawnState& ClientBallState);
+
     // 7.10's (CL-4667333) island tools (PongooDev/CoreV2#488; FortPlayerControllerAthenaCreativeIslands.cpp): Publish
     // Island, Backup Island and Restore of the island menu, and an island code entered at a rift. Nothing on builds
     // without them (7.00 has none of these RPCs).
@@ -560,6 +570,8 @@ private:
     static void ServerToggleAutoRestartMinigame_ImplementationHK(AFortPlayerControllerAthena* This);
     static void ServerCreativeSetFlightSpeedIndex_ImplementationHK(AFortPlayerControllerAthena* This, int32_t Index);
     static void ServerCreativeSetFlightSprint_ImplementationHK(AFortPlayerControllerAthena* This, bool bSprint);
+    static void SendPhysicsBallHitToServer_ImplementationHK(AFortPlayerControllerAthena* This, APhysicsObject* PhysicsObject, float ClientPing, APawn* HittingPawn,
+        const FVector& VelocityOfHitter, const FVector& HitNormal, const FTimeStampedPhysicsPawnState& ClientBallState);
     // Whether Core restored ServerLoadPlotForPortal_Implementation (7.20), which LoadPlotForPortal then calls.
     static inline bool bServerLoadPlotForPortalRestored = false;
     // The player's island space: the one they stand in when it is theirs to edit, else their rift's.

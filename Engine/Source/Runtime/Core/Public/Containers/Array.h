@@ -173,6 +173,31 @@ public:
         return false;
     }
 
+    // Epic's Find: the first matching element's index, else INDEX_NONE (-1).
+    int32_t Find(const T& Item) const
+    {
+        for (int32_t Index = 0; Index < ArrayNum; ++Index)
+        {
+            if (Data[Index] == Item)
+            {
+                return Index;
+            }
+        }
+        return -1;
+    }
+
+    // Epic's RemoveSingle: the first matching element goes, the order kept. How many went (0 or 1).
+    int32_t RemoveSingle(const T& Item)
+    {
+        const int32_t Index = Find(Item);
+        if (Index < 0)
+        {
+            return 0;
+        }
+        RemoveAt(Index);
+        return 1;
+    }
+
     void RemoveAt(int32_t Index, int32_t Count = 1)
     {
         if (Count <= 0)

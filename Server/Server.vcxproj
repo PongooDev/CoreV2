@@ -440,6 +440,10 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortCreativeMoveTool.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolume.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortActorOptionsComponent.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayMessageComponentBase.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayMessageDispatcherComponent.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayReceiverMessageComponent.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayTriggerMessageComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolumeTimeOfDayComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortMinigameSettingsBuilding.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h" />
@@ -736,6 +740,10 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortCreativeMoveTool.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolume.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortActorOptionsComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayMessageComponentBase.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayMessageDispatcherComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayReceiverMessageComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayTriggerMessageComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolumeTimeOfDayComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortMinigameSettingsBuilding.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortMutatorListComponent.cpp" />

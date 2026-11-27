@@ -1607,6 +1607,18 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortActorOptionsComponent.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayMessageComponentBase.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayMessageDispatcherComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayReceiverMessageComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortGameplayTriggerMessageComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Creative\FortVolumeTimeOfDayComponent.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Creative</Filter>
     </ClInclude>
@@ -2477,6 +2489,18 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortActorOptionsComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayMessageComponentBase.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayMessageDispatcherComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayReceiverMessageComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortGameplayTriggerMessageComponent.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Creative</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Creative\FortVolumeTimeOfDayComponent.cpp">

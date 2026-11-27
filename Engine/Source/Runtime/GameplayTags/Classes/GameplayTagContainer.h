@@ -14,6 +14,12 @@ struct FGameplayTag
     FName TagName;
 };
 
+// Epic's GetTypeHash(const FGameplayTag&): its name's.
+inline uint32_t GetTypeHash(const FGameplayTag& Tag)
+{
+    return GetTypeHash(Tag.TagName);
+}
+
 struct FGameplayTagContainer
 {
     int32_t Num() const { return GameplayTags.Num(); }

@@ -66,7 +66,7 @@ public:
     // The grid cell at WorldLocation (reflected from 3.5 on; 6.31's exec 0x14C6300 -> 0xE05010): X and Y rounded to the
     // nearest cell centre, GridOrigin plus whole 512 uu cells, so a cell's edges are half a cell off the grid origin's; Z
     // floored to a 384 uu level above GridOrigin. The box is the cell (centre +-256 in X and Y, the level in Z). Its
-    // IsValid is false where the build doesn't reflect it or the call fails.
+    // IsValid is false where the call fails, or before 3.5 (worked out from GridOrigin there) where the grid isn't found.
     struct FBox K2_GetGridBoxFromWorldLoc(const FVector& WorldLocation) const;
     // The grid's cell at WorldLoc, and a cell's world location (both reflected from 3.5). False where the build doesn't
     // reflect them or the grid says the place is off it.

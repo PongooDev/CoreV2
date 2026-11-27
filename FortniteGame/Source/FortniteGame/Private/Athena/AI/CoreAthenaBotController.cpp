@@ -7251,26 +7251,22 @@ namespace
     }
 
     // The building grid's cell at Location, as the game finds a player's piece's: the structural support system's
-    // K2_GetGridBoxFromWorldLoc (3.5.1 0xAF7590) rounds X and Y to the nearest cell centre (the grid origin plus whole
-    // 512 uu cells, so a cell's edges are half a cell off the origin's) and floors Z to a 384 uu level above the origin.
-    // Core's cells from the world origin and the ground under the bot put the bots' pieces off the grid (CoreV2 #264).
+    // K2_GetGridBoxFromWorldLoc (3.5.1 0xAF7590; before 3.5 its unreflected native, from GridOrigin) rounds X and Y to
+    // the nearest cell centre (the grid origin plus whole 512 uu cells, so a cell's edges are half a cell off the
+    // origin's) and floors Z to a 384 uu level above the origin. Core's cells from the world origin and the ground under
+    // the bot put the bots' pieces off the grid (CoreV2 #264, and #706 before 3.5).
     bool GetBuildingGridCell(UWorld* World, const FVector& Location, FVector& OutCellMin)
     {
-        static UFunction* GetGridBox = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridBoxFromWorldLoc");
         UBuildingStructuralSupportSystem* SupportSystem = StructuralSupportSystemOf(World);
+        const FBox Box = SupportSystem ? SupportSystem->K2_GetGridBoxFromWorldLoc(Location) : FBox();
         static bool bLogged = false;
-        if (!GetGridBox || !SupportSystem)
+        if (!Box.IsValid)
         {
             if (!bLogged)
             {
                 bLogged = true;
-                Log::Warning(L"Battle Royale bots: no building grid ({}), the bots build on cells from the world origin", GetGridBox ? L"no structural support system" : L"no K2_GetGridBoxFromWorldLoc");
+                Log::Warning(L"Battle Royale bots: no building grid ({}), the bots build on cells from the world origin", SupportSystem ? L"no grid box" : L"no structural support system");
             }
-            return false;
-        }
-        const FBox Box = SupportSystem->K2_GetGridBoxFromWorldLoc(Location);
-        if (!Box.IsValid)
-        {
             return false;
         }
         OutCellMin = Box.Min;

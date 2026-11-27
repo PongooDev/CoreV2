@@ -9,6 +9,7 @@
 #include "Log.h"
 #include "Math/Box.h"
 #include "Math/Rotator.h"
+#include "Math/UnrealMathUtility.h"
 #include "Math/Vector.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
@@ -91,7 +92,24 @@ FBox UBuildingStructuralSupportSystem::K2_GetGridBoxFromWorldLoc(const FVector& 
     static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridBoxFromWorldLoc");
     if (!Function)
     {
-        return FBox();
+        // Before 3.5 only the native the exec calls is there, unreflected (1.8.2 CL-3741772 0x4CAFE0, 3.5.2 CL-4008490
+        // 0xAFBBF0, the same body; GridOrigin +0x3C4 and +0x2D4): the cell centre is GridOrigin plus
+        // RoundToInt((Loc - GridOrigin) / 512) cells in X and Y, the level GridOrigin.Z plus FloorToInt((Z - GridOrigin.Z) / 384)
+        // levels, the box the cell's 512 x 512 x 384 around it. CoreV2 #706: without it, 1.x-3.3 bots built on cells from
+        // the world origin and the ground's height, half a cell and part of a level off the grid.
+        constexpr float CellSizeXY = 512.0f;
+        constexpr float CellSizeZ = 384.0f;
+        FVector GridOrigin;
+        int32_t GridSize[3] = {};
+        if (!GetGrid(GridOrigin, GridSize))
+        {
+            return FBox();
+        }
+        const FVector Center(GridOrigin.X + static_cast<float>(FMath::RoundToInt((WorldLocation.X - GridOrigin.X) / CellSizeXY)) * CellSizeXY,
+            GridOrigin.Y + static_cast<float>(FMath::RoundToInt((WorldLocation.Y - GridOrigin.Y) / CellSizeXY)) * CellSizeXY,
+            GridOrigin.Z + static_cast<float>(FMath::FloorToInt((WorldLocation.Z - GridOrigin.Z) / CellSizeZ)) * CellSizeZ + CellSizeZ * 0.5f);
+        const FVector HalfCell(CellSizeXY * 0.5f, CellSizeXY * 0.5f, CellSizeZ * 0.5f);
+        return FBox(Center - HalfCell, Center + HalfCell);
     }
     Reflection::FParams Params(Function);
     FBox* Box = Params.Get<FBox>(L"ReturnValue");

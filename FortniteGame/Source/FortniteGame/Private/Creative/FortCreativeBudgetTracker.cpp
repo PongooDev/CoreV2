@@ -205,25 +205,19 @@ bool FFortCreativeBudgetTracker::CanAddActors(const TArray<AActor*>& NewActors, 
     {
         return false;
     }
-    if (ActorsToRemove.Num() == 0)
+    // 9.20 (CL-6822798) drops FCreativeActorId. The phone checks each selected actor at 0x1A4B0B0 and 0x1A4B430
+    // through CanAddActor (0x140C0E0), which calls CanAddActors (0x140C160) without removals. CanAddActors checks
+    // class limits and sums costs from the soft class table, including repeated entries in the supplied array.
+    static const bool bActorIdKeys = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.CreativeActorId") != nullptr;
+    if (ActorsToRemove.Num() == 0 || !bActorIdKeys)
     {
         using FCanAddActors = bool (*)(const FFortCreativeBudgetTracker*, const TArray<AActor*>*);
         return Natives::FFortCreativeBudgetTracker_CanAddActors && reinterpret_cast<FCanAddActors>(Natives::FFortCreativeBudgetTracker_CanAddActors)(this, &NewActors);
     }
-    // A replacement is refused unless it adds an actor of a class at its limit (the build's own rule, 8.20 to 8.51: why
-    // walls and floors can't be copied onto themselves).
+    // 8.20 to 8.51 refuse a replacement unless it adds an actor of a class at its limit.
     if (!ClassTracker.CanAddActors(NewActors, ActorsToRemove))
     {
         return false;
-    }
-    // 9.20 (CL-6822798) drops FCreativeActorId: the cost table (0x57DFDB0) and the instance counts are keyed by the
-    // actor's TSoftClassPtr (56-byte elements, the actor cost 0x141E6B0), which the 8.51 reading below can't walk. The
-    // build has no replacement check of its own, so the new actors go through its CanAddActors (0x140C160) alone.
-    static const bool bActorIdKeys = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.CreativeActorId") != nullptr;
-    if (!bActorIdKeys)
-    {
-        using FCanAddActors = bool (*)(const FFortCreativeBudgetTracker*, const TArray<AActor*>*);
-        return Natives::FFortCreativeBudgetTracker_CanAddActors && reinterpret_cast<FCanAddActors>(Natives::FFortCreativeBudgetTracker_CanAddActors)(this, &NewActors);
     }
 
     TArray<FActorIdCount> NewCounts;

@@ -779,6 +779,7 @@ namespace
         // Of those, the player bots they eliminated (CoreV2 #233): the backend leaves them out of the kill challenges
         // when the admin panel says bot eliminations don't count for quests.
         int32_t BotKills = 0;
+        int32_t PlayersOutlived = -1;
         int32_t SecondsAlive = 0;
         int32_t Place = 0;
         // Who eliminated the player (their account id), on a build whose server doesn't count kills (1.8): empty while
@@ -923,6 +924,10 @@ namespace
             Player.Side = Ashton->IsVillain(AthenaState) ? "villain" : "hero";
         }
         Player.SecondsAlive = AthenaState->SecondsAlive;
+        if (Natives::AFortPlayerStateAthena_PlayersOutlived > 0)
+        {
+            Player.PlayersOutlived = *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(AthenaState) + Natives::AFortPlayerStateAthena_PlayersOutlived);
+        }
         Player.Place = std::max<int32_t>(AthenaState->Place, 0);
         if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty() && !IsStayingDeath(Player, AthenaState))
         {
@@ -1005,8 +1010,9 @@ namespace
             Reported.push_back(AccountId);
             std::string Id;
             std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
-            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"botKills\":{},\"secondsAlive\":{}{}}}", Count++ > 0 ? "," : "",
+            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"botKills\":{},\"secondsAlive\":{}{}{}}}", Count++ > 0 ? "," : "",
                 Id, Player.Place, std::max(Player.Kills, 0), Player.BotKills, std::max(Player.SecondsAlive, 0),
+                Player.PlayersOutlived >= 0 ? std::format(",\"playersOutlived\":{}", Player.PlayersOutlived) : std::string(),
                 Player.Side ? std::format(",\"side\":\"{}\"", Player.Side) : std::string());
             Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
         }

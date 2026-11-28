@@ -10,6 +10,7 @@ class AFortPickup;
 class AFortPlayerController;
 class AFortPlayerControllerAthena;
 class AFortPlayerStateAthena;
+class AFortPlayerPawnAthena;
 class UFortGadgetItemDefinition;
 class UFortWorldItemDefinition;
 class UWorld;
@@ -47,6 +48,10 @@ class AFortAthenaMutator_Ashton : public AFortAthenaMutator
 
 public:
     DefineUProperty(FMulticastScriptDelegate, OnVillainRespawnsRemainingChanged)
+#if WITH_SERVER_CODE
+    DefineUProperty(int32_t, NumVillainRespawnsRemaining)
+    uint8_t AFortGameModeAthena_OnPawnDeathBeforeRespawning(AFortPlayerPawnAthena* Pawn);
+#endif
     DefineUProperty(UFortGadgetItemDefinition*, VillainLeaderItemDef)
     DefineUProperty(TArray<UFortWorldItemDefinition*>, VillainItemDefs)
     DefineUProperty(AFortPlayerControllerAthena*, VillainLeaderPC)

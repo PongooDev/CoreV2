@@ -10233,7 +10233,7 @@ bool Finder::ResolveCheckWinConditionOnPlayerRemovalLive()
     return true;
 }
 
-bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites)
+bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, ptrdiff_t RespawnsRemainingOffset, FAshtonMutatorSites& OutSites)
 {
     // 8.50 (CL-6058028), Endgame. The intact code around three stripped calls:
     // - SelectNextVillainLeader's exec (0x195C970) tail-jumps to its native (0x1072530), which calls the promotion
@@ -10245,6 +10245,7 @@ bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t
     //   VillainLeaderItemDef, 1, true) at 0x106F455, and with (the controller, each of VillainItemDefs, 1, true) at
     //   0x106F60C: K2_RemoveItemFromPlayer, inlined and stripped.
     OutSites = FAshtonMutatorSites();
+    Natives::AFortAthenaMutator_Ashton_OnPawnDeathBeforeRespawningIndex = -1;
     UFunction* Select = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Ashton:SelectNextVillainLeader");
     const uintptr_t Exec = Select ? reinterpret_cast<uintptr_t>(Select->GetNativeFunc()) : 0;
     uintptr_t SelectNext = 0;
@@ -10313,6 +10314,40 @@ bool Finder::ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t
                 }
             }
         }
+    }
+    // Both death overrides call VillainDied. Only the pre-respawn override reads the remaining tickets
+    // (8.50 0x1055D00, 8.51 0x1053A20); the non-respawn override only cleans up the items.
+    if (VillainDied && RespawnsRemainingOffset > 0)
+    {
+        int32_t Found = -1;
+        for (int32_t Index = 0; Index < 0x140; ++Index)
+        {
+            const uintptr_t Own = VTableEntry(AshtonVTable, Index);
+            const uintptr_t Base = VTableEntry(MutatorVTable, Index);
+            if (!Own || !Base || Own == Base || !Finder::ReadsMemberAt(Own, static_cast<int32_t>(RespawnsRemainingOffset)))
+            {
+                continue;
+            }
+            const auto Calls = Finder::DecodedDirectCalls(Own);
+            if (std::any_of(Calls.begin(), Calls.end(), [VillainDied](const auto& Call) { return Call.second == VillainDied; }))
+            {
+                if (Found >= 0)
+                {
+                    Found = -1;
+                    break;
+                }
+                Found = Index;
+            }
+        }
+        Natives::AFortAthenaMutator_Ashton_OnPawnDeathBeforeRespawningIndex = Found;
+        if (Found >= 0)
+        {
+            Log::Info(L"Finder: Ashton's AFortGameModeAthena_OnPawnDeathBeforeRespawning is slot 0x{:X} (0x{:X})", Found, VTableEntry(AshtonVTable, Found) - Finder::ImageBase());
+        }
+    }
+    if (Natives::AFortAthenaMutator_Ashton_OnPawnDeathBeforeRespawningIndex < 0)
+    {
+        Log::Info(L"Finder: Ashton's AFortGameModeAthena_OnPawnDeathBeforeRespawning slot none");
     }
     int32_t RemoveCalls = 0;
     for (const auto& [Site, Target] : VillainDied ? Finder::DecodedDirectCalls(VillainDied) : std::vector<std::pair<uintptr_t, uintptr_t>>{})

@@ -642,7 +642,7 @@ namespace Finder
     // False (and OutSites empty) where the build has no Air Royale mutator or SpawnPlane has a body.
     bool ResolveGooseMutatorLive(FGooseMutatorSites& OutSites);
     // False (and OutSites empty) where the build has no Endgame mutator or its calls aren't the stripped ones.
-    bool ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, FAshtonMutatorSites& OutSites);
+    bool ResolveAshtonMutatorLive(ptrdiff_t VillainLeaderPCOffset, ptrdiff_t VillainLeaderItemDefOffset, ptrdiff_t VillainItemDefsOffset, ptrdiff_t RespawnsRemainingOffset, FAshtonMutatorSites& OutSites);
     // IFortInventoryOwnerInterface::OnPickupPreGiven and OnPickupPostGiven (Natives::IFortInventoryOwnerInterface_OnPickupPreGivenIndex,
     // _OnPickupPostGivenIndex), from the player controller's interface vtable; needs ResolveInventoryOwnerLive first.
     // AFortAthenaMutator_Ashton's override of FortGameStateAthena_CanInteractWithGameObject: the vtable slot

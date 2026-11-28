@@ -15,6 +15,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
+#include "ObjectLayout.h"
 #include "Templates/Casts.h"
 #include "UObject/UnrealType.h"
 
@@ -38,6 +39,18 @@ AFortAthenaMutator_Ashton* AFortAthenaMutator_Ashton::GetCurrent(UWorld* World)
     }
     return nullptr;
 }
+
+#if WITH_SERVER_CODE
+uint8_t AFortAthenaMutator_Ashton::AFortGameModeAthena_OnPawnDeathBeforeRespawning(AFortPlayerPawnAthena* Pawn)
+{
+    const int32_t Index = Natives::AFortAthenaMutator_Ashton_OnPawnDeathBeforeRespawningIndex;
+    if (Pawn && Index >= 0)
+    {
+        return CallVirtual<uint8_t>(this, Index, Pawn);
+    }
+    return 0; // EFortMutatorReturnValue::Ignore
+}
+#endif
 
 uint8_t AFortAthenaMutator_Ashton::GetVillainTeamNum() const
 {
@@ -198,7 +211,8 @@ void AFortAthenaMutator_Ashton::HookNatives()
     Finder::ResolveCheckWinConditionOnPlayerRemovalLive();
 
     Finder::FAshtonMutatorSites Sites;
-    if (!Finder::ResolveAshtonMutatorLive(Member_VillainLeaderPC.GetOffsetChecked(), Member_VillainLeaderItemDef.GetOffsetChecked(), Member_VillainItemDefs.GetOffsetChecked(), Sites))
+    const ptrdiff_t RespawnsRemaining = Member_NumVillainRespawnsRemaining.IsAvailable() ? Member_NumVillainRespawnsRemaining.GetOffsetChecked() : -1;
+    if (!Finder::ResolveAshtonMutatorLive(Member_VillainLeaderPC.GetOffsetChecked(), Member_VillainLeaderItemDef.GetOffsetChecked(), Member_VillainItemDefs.GetOffsetChecked(), RespawnsRemaining, Sites))
     {
         Log::Info(L"Endgame: the gauntlet's give and the death removals are not restored; stone capture {}, team loadouts {}", bPickupGiven ? L"on" : L"off", bStartingItems ? L"on" : L"off");
         return;

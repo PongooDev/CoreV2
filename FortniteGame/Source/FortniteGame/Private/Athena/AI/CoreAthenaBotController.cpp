@@ -9706,6 +9706,12 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
     if (World && PlayerState && GameMode->IsRespawningAllowed(PlayerState))
     {
+        // The native pawn death path dispatches this only for a player controller. Core's bot already
+        // handles its inventory below; Ashton decides whether this death costs a villain respawn.
+        if (AFortAthenaMutator_Ashton* Ashton = AFortAthenaMutator_Ashton::GetCurrent(World))
+        {
+            Ashton->AFortGameModeAthena_OnPawnDeathBeforeRespawning(Pawn);
+        }
         DropItemsOnDeathBeforeRespawning();
         RespawnTime = World->GetTimeSeconds() + RespawnDelay;
         Log::Info(L"Battle Royale bots: {} respawns in {:.0f} s, the playlist brings its players back", BotName, RespawnDelay);

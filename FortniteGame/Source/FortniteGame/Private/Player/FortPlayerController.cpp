@@ -3233,6 +3233,7 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
+        { L"fiendsenses", &UFortCheatManager::FiendSenses },
         { L"tpactor", &UFortCheatManager::TpActor },
         { L"nocooldown", &UFortCheatManager::NoCooldown },
         { L"togglenocooldown", &UFortCheatManager::NoCooldown },

@@ -833,6 +833,7 @@ namespace
         { L"Save the World", L"ToggleIndestructibleKeep", L"indestructiblekeep", L"objective can't break", ECheatMode::SaveTheWorld },
         { L"Save the World", L"CountPlayerBuiltBuildingActors", L"countplayerbuiltbuildingactors", L"structure count", ECheatMode::SaveTheWorld },
         { L"Other", nullptr, L"progressquest [quest] [amount | all]", L"move a quest on (alone: list them)", ECheatMode::Both },
+        { L"Other", nullptr, L"fiendsenses", L"inspect nearby Athena AI senses and goals for your pawn", ECheatMode::BattleRoyale },
         { L"Other", L"CheatScript", L"cheatscript <section>", L"run a list of cheats", ECheatMode::Both },
         { L"Other", L"ListCheats", L"listcheats", L"every exec function", ECheatMode::Both },
         { L"Other", nullptr, L"corecheats [filter | all]", L"this list", ECheatMode::Both },
@@ -2125,6 +2126,93 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
         bScaled ? *FString::Printf(TEXT(" at scale %s"), *ScaleText) : TEXT(", which has no root component to scale"),
         !StreamedLevel.IsEmpty() ? *FString::Printf(TEXT(", streaming %s"), *StreamedLevel) : TEXT(""),
         !bReplicates ? TEXT("; it doesn't replicate, so only the server has it") : bReplicatedByDefault ? TEXT("") : TEXT("; Core made it replicate, as it didn't")));
+#endif
+}
+
+#if WITH_SERVER_CODE
+namespace
+{
+    FString DescribePerceivedPlayer(UObject* Perception, APawn* Player)
+    {
+        UFunction* Query = Perception ? Perception->FindFunction(FName(L"GetCurrentlyPerceivedActors", FNAME_Find)) : nullptr;
+        UProperty* Configs = Perception ? Perception->GetClass()->FindPropertyByName(FName(L"SensesConfig", FNAME_Find)) : nullptr;
+        UArrayProperty* Array = Cast<UArrayProperty>(Configs);
+        if (!Array || !Cast<UObjectProperty>(Array->Inner) || !Query)
+        {
+            return TEXT("sense query unavailable");
+        }
+
+        // The hearing implementation in Mash is Athena-specific. Ask for the class each live config uses.
+        FString Senses;
+        for (UObject* Config : *Array->ContainerPtrToValuePtr<TArray<UObject*>>(Perception))
+        {
+            UProperty* Impl = Config ? Config->GetClass()->FindPropertyByName(FName(L"Implementation", FNAME_Find)) : nullptr;
+            if (!Cast<UObjectProperty>(Impl))
+            {
+                continue;
+            }
+            UClass* Sense = *Impl->ContainerPtrToValuePtr<UClass*>(Config);
+            Reflection::FParams Params(Query, true);
+            if (Sense && Params.Has(L"OutActors") && Params.Set(L"SenseToUse", Sense) && Params.Call(Perception))
+            {
+                const auto* Actors = Params.Get<TArray<AActor*>>(L"OutActors");
+                Senses += FString::Printf(TEXT(" %s=%s"), *Sense->GetName(), !Actors ? TEXT("?") : Actors->Contains(Player) ? TEXT("yes") : TEXT("no"));
+            }
+        }
+        return Senses.IsEmpty() ? FString(TEXT("no queryable sense configs")) : Senses;
+    }
+}
+#endif
+
+void UFortCheatManager::FiendSenses(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerController* PC = GetPlayerController();
+    APawn* Player = PC ? PC->GetPawn() : nullptr;
+    UClass* ControllerClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.AthenaAIController");
+    if (!Player || !ControllerClass || !UGameplayStatics::FindStaticFunction_GetAllActorsOfClass())
+    {
+        Reply(TEXT("FiendSenses needs a possessed player and Battle Royale AI"));
+        return;
+    }
+
+    struct FSample
+    {
+        AController* Controller;
+        APawn* Pawn;
+        float Distance;
+    };
+    TArray<FSample> Samples;
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Player, ControllerClass))
+    {
+        AController* Controller = Cast<AController>(Actor);
+        APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+        if (Pawn && !Pawn->IsPendingKill())
+        {
+            Samples.Add({Controller, Pawn, (Pawn->GetTransform().GetLocation() - Player->GetTransform().GetLocation()).Size()});
+        }
+    }
+    if (Samples.Num() == 0)
+    {
+        Reply(TEXT("No possessed Athena AI pawns in this world"));
+        return;
+    }
+
+    const int32_t Count = std::min(Samples.Num(), 3);
+    std::partial_sort(Samples.begin(), Samples.begin() + Count, Samples.end(), [](const FSample& A, const FSample& B) { return A.Distance < B.Distance; });
+    for (int32_t Index = 0; Index < Count; ++Index)
+    {
+        const FSample& Sample = Samples[Index];
+        AController* AI = Sample.Controller;
+        Reflection::FParams Component(AI->FindFunction(FName(L"GetAIPerceptionComponent", FNAME_Find)));
+        UObject* Perception = Component.Call(AI) ? Component.Take<UObject*>(L"ReturnValue") : nullptr;
+        Reflection::FParams Goal(AI->FindFunction(FName(L"GetGoalActor", FNAME_Find)));
+        FString GoalName = Goal.Call(AI) ? GetNameSafe(Goal.Take<AActor*>(L"ReturnValue")) : FString(TEXT("unavailable"));
+        Reflection::FParams Move(AI->FindFunction(FName(L"GetMoveStatus", FNAME_Find)));
+        int32_t Status = Move.Call(AI) ? Move.Take<uint8_t>(L"ReturnValue") : -1;
+        Reply(FString::Printf(TEXT("FiendSenses %s (%s), player %s at %.0f cm, goal %s, move status %d, senses:%s"),
+            *Sample.Pawn->GetName(), *AI->GetName(), *Player->GetName(), Sample.Distance, *GoalName, Status, *DescribePerceivedPlayer(Perception, Player)));
+    }
 #endif
 }
 

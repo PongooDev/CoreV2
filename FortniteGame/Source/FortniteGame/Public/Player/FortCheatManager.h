@@ -172,6 +172,7 @@ public:
     // Core's own command, "cheat tpactor <class, name or path> [n]" (#146): the player's pawn goes on top of the nearest
     // (or nth nearest) actor that matches, traced down to what is there so it doesn't land inside it or under the map.
     void TpActor(const FString& Arguments);
+    void FiendSenses(const FString& Arguments);
     // Core's own command, "cheat nocooldown [on | off]" (#148; "cheat ToggleNoCoolDown" too): the player's hero abilities
     // and gadgets have no cooldown until it is turned off, respawns included. The game's ToggleNoCoolDown only sets a flag
     // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied, and keeps the

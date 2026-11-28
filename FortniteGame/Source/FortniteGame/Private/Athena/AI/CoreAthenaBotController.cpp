@@ -4957,9 +4957,10 @@ bool FCoreAthenaBotController::GoForObjectivePickup(float Now)
         Target = nullptr;
     }
     // The nearest one, unless the bot is already on its way to one.
-    if (!Target)
+    const bool bNewTarget = !Target;
+    float Best = 0.0f;
+    if (bNewTarget)
     {
-        float Best = 0.0f;
         for (const FCoreAthenaBotLoot& Entry : Manager->GetLoot())
         {
             AFortPickup* Pickup = Entry.bObjective ? Entry.Pickup.Get() : nullptr;
@@ -4974,18 +4975,25 @@ bool FCoreAthenaBotController::GoForObjectivePickup(float Now)
                 Target = Pickup;
             }
         }
-        if (!Target)
-        {
-            ObjectiveTarget = nullptr;
-            return false;
-        }
+    }
+
+    AFortGameModeAthena* GameMode = Target ? Manager->GetGameMode() : nullptr;
+    const AFortAthenaMutator_Ashton* Ashton = GameMode ? AFortAthenaMutator_Ashton::GetCurrent(GameMode->GetWorld()) : nullptr;
+    if (!Ashton || !AFortAthenaMutator_Ashton::HasVillainMembers() || !Ashton->IsVillain(GetPlayerState()))
+    {
+        ObjectiveTarget = nullptr;
+        return false;
+    }
+
+    const FVector PickupLocation = LocationOf(Target);
+    const float Distance = Dist2D(PickupLocation, Location);
+    if (bNewTarget)
+    {
         ObjectiveTarget = Target;
         ObjectiveClosest = Best;
         ObjectiveClosestTime = Now;
         Log::Info(L"Battle Royale bots: {} goes for {} {:.0f} m away", BotName, NameOf(reinterpret_cast<const UObject*>(Target->PrimaryPickupItemEntry.ItemDefinition)), Best / 100.0f);
     }
-    const FVector PickupLocation = LocationOf(Target);
-    const float Distance = Dist2D(PickupLocation, Location);
     if (Distance < 200.0f && std::fabs(PickupLocation.Z - Location.Z) < 250.0f)
     {
         TakePickup(Target);
@@ -5385,6 +5393,12 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
     const int32_t Stone = Ashton ? Ashton->FindStoneIndex(Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition))) : -1;
     if (Stone >= 0)
     {
+        // The player interaction's check (8.51 CL-6165369, 0x1061080) admits only the villain side. The capture callback assumes that check passed.
+        if (!AFortAthenaMutator_Ashton::HasVillainMembers() || !Ashton->IsVillain(GetPlayerState()))
+        {
+            MarkUnreachable(Pickup);
+            return;
+        }
         AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(GameMode->GetWorld()->GetGameState()));
         AController* BotController = reinterpret_cast<AController*>(Controller.Get());
         if (!GameState || !BotController || !AFortGameStateAthena::HasOnPickupGivenToPlayer())

@@ -1711,6 +1711,19 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
         return;
     }
+    // Both issue captures deliver Collect here during warmup. Enable the native listener log before
+    // filtering warmup events: a later Damage rejected by the native listener never reaches this sender.
+    if (bTraceQuestDamage && Member_bDoQuestStateLogging.IsAvailable() && !This->bDoQuestStateLogging)
+    {
+        if (UFunction* Enable = FindStaticFunction_EnableQuestStateLogging())
+        {
+            This->ProcessEvent(Enable, nullptr);
+            if (This->bDoQuestStateLogging)
+            {
+                Log::Info(L"Quest Damage: {} enabled the game's SendStatEvent(Check) log", *This->GetName());
+            }
+        }
+    }
     // Playground (bIgnoreDefaultQuests): the match advances no challenge, so nothing reaches the profile (CoreV2 #344).
     // Creative (Playlist_PlaygroundV2) sets it too, yet has challenges of its own (#676): 7.10's
     // AFortGameStateAthena::GetAthenaPlaylistContextTags (0xC6A870) gives an ignoring playlist its GameplayTagContainer

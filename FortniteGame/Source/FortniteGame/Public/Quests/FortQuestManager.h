@@ -142,6 +142,8 @@ public:
 class UFortQuestManager : public UObject
 {
     DefineUnrealClass(UFortQuestManager, FortniteGame)
+    DefineUFunction(EnableQuestStateLogging)
+    DefineUProperty(bool, bDoQuestStateLogging)
     DefineUFunction(GetSourceAndContextTags)
     DefineUFunction(GetQuestWithDefinition)
     DefineUFunction(SendComplexCustomStatEvent)

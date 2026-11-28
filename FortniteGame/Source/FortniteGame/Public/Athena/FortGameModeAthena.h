@@ -84,6 +84,9 @@ public:
     DefineUProperty(uint8_t, ForceKickAfterDeathMode)
     DefineUProperty(float, ForceKickAfterDeathTime)
     static bool HasForceKickAfterDeath() { return Member_ForceKickAfterDeathMode.IsAvailable() && Member_ForceKickAfterDeathTime.IsAvailable(); }
+#if WITH_SERVER_CODE
+    DefineUProperty(bool, bEnableMatchAbandonProcess)
+#endif
     // 6.30 (CL-4573096): whether the warmup island hurts. A config bit (DefaultGame.ini sets it true); the game's
     // FinishRestartPlayer (6.30 0xC9F370) turns a warmup pawn's bCanBeDamaged off only while it is false, where earlier
     // builds always did (3.1 0x9B3FD7). A warmup death is no elimination: the player comes back on the island.

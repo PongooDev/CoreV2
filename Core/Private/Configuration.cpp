@@ -45,6 +45,10 @@ void Configuration::Load()
         {
             Current.bBotHotDrop = true;
         }
+        if (EqualsNoCase(Argument, L"-CoreTraceQuestDamage"))
+        {
+            Current.bTraceQuestDamage = true;
+        }
         constexpr std::wstring_view TeamSizeOption = L"-CoreBotTeamSize=";
         if (Argument.size() > TeamSizeOption.size() && EqualsNoCase(Argument.substr(0, TeamSizeOption.size()), TeamSizeOption))
         {

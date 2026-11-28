@@ -72,6 +72,32 @@ namespace
     }
 
 #if WITH_SERVER_CODE
+    bool bTraceQuestDamage = false;
+
+    FString DescribeDamageTags(const FGameplayTagContainer& Tags)
+    {
+        FString Names;
+        for (const FGameplayTag& Tag : Tags.GameplayTags)
+        {
+            if (Names.Len() > 0)
+            {
+                Names += L", ";
+            }
+            Names += Tag.TagName.ToString();
+        }
+        return Names;
+    }
+
+    void TraceQuestDamage(UFortQuestManager* Manager, uint8_t Type, UObject* Target, const FGameplayTagContainer& TargetTags,
+        const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, const wchar_t* Result)
+    {
+        if (bTraceQuestDamage && Type == EFortQuestObjectiveStatEvent::GetDamage())
+        {
+            Log::Info(L"Quest Damage: {} for {}, target {}, amount {}, target tags [{}], source tags [{}], context tags [{}]",
+                Result, *GetNameSafe(Manager), *GetNameSafe(Target), Count, *DescribeDamageTags(TargetTags), *DescribeDamageTags(SourceTags), *DescribeDamageTags(ContextTags));
+        }
+    }
+
     void SaveStatEvents(UFortQuestManager* QuestManager);
     std::vector<std::pair<std::wstring, int32_t>> HoldStatsCountedFromResults(UFortQuestManager* QuestManager);
     void RestoreHeldStats(UFortQuestManager* QuestManager, const std::vector<std::pair<std::wstring, int32_t>>& Held);
@@ -1129,6 +1155,7 @@ namespace
         AFortPlayerController* PlayerController = PlayerInfo ? PlayerControllerOf(PlayerInfo) : nullptr;
         if (!PlayerController || !UFortQuestManager::HasCurrentQuests())
         {
+            TraceQuestDamage(This, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, PlayerController ? L"no current quest list" : L"no player controller");
             return;
         }
 
@@ -1150,6 +1177,7 @@ namespace
         TArray<FName>* UpdatedThisMatch = nullptr;
 
         std::vector<FName> Processed;
+        bool bMatchedObjective = false;
         const TArray<UFortQuestItem*>& Quests = This->CurrentQuests;
         for (int32_t QuestIndex = 0; QuestIndex < Quests.Num(); ++QuestIndex)
         {
@@ -1230,6 +1258,7 @@ namespace
                         continue;
                     }
                     bLastEventMatchedObjective = true;
+                    bMatchedObjective = true;
                     if (bOncePerMatch)
                     {
                         if (!UpdatedThisMatch)
@@ -1280,6 +1309,7 @@ namespace
             }
         }
 
+        TraceQuestDamage(This, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bMatchedObjective ? L"matched" : L"no matching objective");
         if (!Processed.empty())
         {
             Log::Info(L"SendStatEvent for {}: {} objective(s) listening to event {}{}", This->GetName().ToStdString(), Processed.size(),
@@ -1563,6 +1593,11 @@ void UFortQuestManager::Hook()
     // 1.10 strips SendStatEventWithTags and SaveStatEvents: the senders' calls in its place come to Core's, and
     // SendCustomStatEvent, which stops after validating the stat, is Core's.
     SendStatEventWithTagsOG = &SendStatEventWithTagsCore;
+    bTraceQuestDamage = bBattleRoyale && Configuration::Get().bTraceQuestDamage;
+    if (bTraceQuestDamage)
+    {
+        Log::Info(L"Quest Damage: tracing received Damage events and objective matches");
+    }
     for (uint8_t* Call : Finder::StrippedQuestStatEventCalls())
     {
         Hooks::RedirectCall(L"UFortQuestManager::SendStatEventWithTags (stripped)", Call, reinterpret_cast<void*>(&SendStatEventCall));
@@ -1672,6 +1707,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     AFortGameModeAthena* GameMode = PlayerInfo && PlayerInfo->GetAthenaQuestManager() == This ? AFortGameModeAthena::GetCurrent(GWorld) : nullptr;
     if (!GameMode)
     {
+        TraceQuestDamage(This, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, L"forwarded outside the Athena quest path");
         SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
         return;
     }
@@ -1684,6 +1720,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     const bool bIgnoresDefaultQuests = IgnoresDefaultQuests(GameMode);
     if (bIgnoresDefaultQuests && !AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
     {
+        TraceQuestDamage(This, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, L"ignored by playlist");
         static bool bLoggedIgnored = false;
         if (!bLoggedIgnored)
         {
@@ -1717,6 +1754,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     // 14 Days of Fortnite snowball hit counted on the spawn island in the live game.
     if (Type != EFortQuestObjectiveStatEvent::GetCustom() && !This->CanMakeQuestProgression())
     {
+        TraceQuestDamage(This, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, L"ignored during warmup");
         static FWeakObjectPtr LoggedFor;
         if (!(LoggedFor == FWeakObjectPtr(GameMode)))
         {

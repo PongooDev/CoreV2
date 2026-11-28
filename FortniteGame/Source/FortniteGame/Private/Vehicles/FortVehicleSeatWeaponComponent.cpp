@@ -155,6 +155,23 @@ void UFortVehicleSeatWeaponComponent::EquipVehicleWeapon(AFortPawn* FortPawn, FW
         Reflection::FParams Params(OnRep, true);
         Params.Call(VehicleWeapon);
     }
+    else if (AFortWeaponRangedDualForVehicle* const DualWeapon = Cast<AFortWeaponRangedDualForVehicle>(Weapon))
+    {
+        // Mounted turrets use the dual class. CL-6922310's interface slot 8 is a stub (0x3528D0), and the dual
+        // muzzle routine (0x1A9BC40) uses the cached vehicle and seat to resolve the vehicle's firing socket.
+        UFunction* const DualOnRep = AFortWeaponRangedDualForVehicle::FindStaticFunction_OnRep_MountedWeaponInfoRepped();
+        if (DualOnRep && FMountedWeaponInfoRepped::HasHostVehicle() && AFortWeaponRangedDualForVehicle::HasMountedWeaponInfoRepped())
+        {
+            FMountedWeaponInfoRepped& Repped = DualWeapon->MountedWeaponInfoRepped;
+            if (!Repped.HostVehicleCachedActor)
+            {
+                Repped.HostVehicleCachedActor = GetOwner();
+                Repped.HostVehicleSeatIndexCached = WeaponSeatDefinition.SeatIndex;
+                Reflection::FParams Params(DualOnRep, true);
+                Params.Call(DualWeapon);
+            }
+        }
+    }
 
     Log::Info(L"Vehicle weapon: {} gives {} {} for seat {}{}", GetName().ToStdString(), FortPawn->GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(),
         WeaponSeatDefinition.SeatIndex, Weapon ? L"" : L", but the pawn equipped nothing");

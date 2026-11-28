@@ -63,3 +63,8 @@ class AFortWeaponRanged : public AFortWeapon
 {
     DefineUnrealClass(AFortWeaponRanged, FortniteGame)
 };
+
+class AFortWeaponRangedDual : public AFortWeaponRanged
+{
+    DefineUnrealClass(AFortWeaponRangedDual, FortniteGame)
+};

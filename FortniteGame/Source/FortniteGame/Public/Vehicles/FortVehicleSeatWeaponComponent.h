@@ -41,6 +41,7 @@ struct FMountedWeaponInfoRepped
 public:
     DefineUProperty(AActor*, HostVehicleCachedActor)
     DefineUProperty(int32_t, HostVehicleSeatIndexCached)
+    static bool HasHostVehicle() { return Member_HostVehicleCachedActor.IsAvailable() && Member_HostVehicleSeatIndexCached.IsAvailable(); }
 };
 
 // A weapon fired from a vehicle seat (the Pirate Cannon's B_MountedCannonAthena and B_MountedCannonAthena_InCannon).
@@ -51,6 +52,16 @@ class AFortWeaponRangedForVehicle : public AFortWeaponRanged
 
 public:
     DefineUStructProperty(FMountedWeaponInfoRepped, MountedWeaponInfoRepped)
+};
+
+class AFortWeaponRangedDualForVehicle : public AFortWeaponRangedDual
+{
+    DefineUnrealClass(AFortWeaponRangedDualForVehicle, FortniteGame)
+    DefineUFunction(OnRep_MountedWeaponInfoRepped)
+
+public:
+    DefineUStructProperty(FMountedWeaponInfoRepped, MountedWeaponInfoRepped)
+    static bool HasMountedWeaponInfoRepped() { return Member_MountedWeaponInfoRepped.IsAvailable(); }
 };
 
 // A vehicle's seat weapons (9.00+; the Pirate Cannon's FortVehicleAimingWeaponComp from 9.10): WeaponSeatDefinitions

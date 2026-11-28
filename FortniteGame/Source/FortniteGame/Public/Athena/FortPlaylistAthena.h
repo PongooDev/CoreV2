@@ -160,10 +160,6 @@ public:
     DefineUProperty(FName, PlaylistName)
     static bool HasPlaylistName() { return Member_PlaylistName.IsAvailable(); }
     DefineUProperty(int32_t, PlaylistId)
-#if WITH_SERVER_CODE
-    DefineUProperty(bool, bIsTournament)
-    static bool HasIsTournament() { return Member_bIsTournament.IsAvailable(); }
-#endif
     // EAirCraftBehavior (1: OpposingAirCraftForEachTeam), which the game state takes with the playlist.
     DefineUProperty(uint8_t, AirCraftBehavior)
     // The AI of the playlist's match (UAthenaAISettings), which the game mode takes as its AISettings; Battle Royale's

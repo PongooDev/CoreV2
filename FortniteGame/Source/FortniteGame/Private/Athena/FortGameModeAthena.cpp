@@ -64,7 +64,6 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortPartyBeaconHost.h"
-#include "Packed.h"
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
 #include "ReplicationGraph.h"
@@ -306,7 +305,6 @@ namespace
         // ApplyContainerSpawnPercents left the spawn percents to the bus.
         bool bSpawnPercentsWaitForAircraft = false;
         bool bAircraftHandled = false;
-        bool bDisabledMatchAbandonForPlaylist = false;
         // A player left since the last CheckMatchPlayers (HandlePlayerStateDestroyed): the game's Logout took them out of
         // the alive players, which is one of the moments the game checks the win.
         bool bPlayerLeft = false;
@@ -3338,28 +3336,9 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
             Log::Info(L"PLAYLIST: {}'s mutators: {} answer for the game mode, {} for the game state{}", Playlist ? Playlist->PlaylistNameText() : std::wstring(L"the playlist"),
                 ModeMutators, StateMutators, AFortGameStateAthena::HasAllowRespawning() ? (GameState->bAllowRespawning ? L"; bAllowRespawning is set" : L"; bAllowRespawning isn't set") : L"");
         }
-        UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
-        // The missing-teammate decision belongs to Arena and tournament matches. In 9.20 and 9.21,
-        // StartMatchAbandonProcess (0x10E7580 / 0x10D8060) otherwise treats every short party as missing players.
-        const uint32_t Changelist = Packed::Changelist();
-        if ((Changelist == 6822798 || Changelist == 6922310) && Playlist && UFortPlaylistAthena::HasIsTournament() && Member_bEnableMatchAbandonProcess.IsAvailable())
-        {
-            FMatchEvents& Events = MatchEventsOf(this);
-            if (!Playlist->bIsTournament && bEnableMatchAbandonProcess)
-            {
-                bEnableMatchAbandonProcess = false;
-                Events.bDisabledMatchAbandonForPlaylist = true;
-            }
-            else if (Playlist->bIsTournament && Events.bDisabledMatchAbandonForPlaylist)
-            {
-                bEnableMatchAbandonProcess = true;
-                Events.bDisabledMatchAbandonForPlaylist = false;
-            }
-            Log::Info(L"Battle Royale: match abandonment {} for {} (bIsTournament={})", bEnableMatchAbandonProcess ? L"enabled" : L"disabled",
-                Playlist->PlaylistNameText(), static_cast<bool>(Playlist->bIsTournament));
-        }
         // 6.10's in-game tournaments (CoreV2 #418): a Showdown playlist's match is a tournament's, once, as it loads.
-        if (Playlist && AFortPlayerStateAthena::FindStaticFunction_ClientReportTeamKill() && Playlist->IsShowdownPlaylist())
+        UFortPlaylistAthena* Playlist = AFortPlayerStateAthena::FindStaticFunction_ClientReportTeamKill() && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+        if (Playlist && Playlist->IsShowdownPlaylist())
         {
             Log::Info(L"Tournament: {} is a tournament's playlist: each team's eliminations go to its players as they grow (ClientReportTeamKill), its stats once "
                 L"its match is reported ({}), and its placement as the game state's TeamsLeft and the players' Place replicate",

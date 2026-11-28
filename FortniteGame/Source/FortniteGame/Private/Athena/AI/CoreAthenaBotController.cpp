@@ -1228,9 +1228,9 @@ namespace
     //   BeginSkydiving 0x136F620), whose glider the game opens over the ground as it does after the bus. Without it the
     //   rift's event found no ability and the bot fell from the rift's height with no skydive and no glider (#446).
     // The others of the set (death, the other interactions) are Core's for a bot.
-    const std::vector<UClass*>& PlayerAbilityClasses()
+    const TArray<UClass*>& PlayerAbilityClasses()
     {
-        static std::vector<UClass*> Found;
+        static TArray<UClass*> Found;
         static bool bSearched = false;
         if (bSearched)
         {
@@ -1248,7 +1248,27 @@ namespace
                 if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C" || Name == L"GA_DefaultPlayer_InteractSearch_C"
                     || Name == L"GA_Rift_Athena_Skydive_C" || Name == L"GA_Rift_Athena_Skydive_NoSound_C")
                 {
-                    Found.push_back(KeepLoaded(Ability));
+                    Found.Add(KeepLoaded(Ability));
+                }
+            }
+        }
+        // 9.21: the pawn sends Event.SurfaceType.Changed from its floor hit (0x181BA40). Its lava damage
+        // comes from GAB_SurfaceChange in GAS_AthenaPlayer. Check the generic set where the build has no Athena set.
+        UFortAbilitySet* SurfaceSet = GameData && UFortGameData::HasAthenaPlayerAbilitySet() ? GameData->AthenaPlayerAbilitySet.LoadSynchronous() : nullptr;
+        if (!SurfaceSet)
+        {
+            SurfaceSet = Set;
+        }
+        if (SurfaceSet)
+        {
+            const FName SurfaceChange(L"GAB_SurfaceChange_C", FNAME_Find);
+            const TArray<UClass*>& Abilities = SurfaceSet->GameplayAbilities;
+            for (UClass* Ability : Abilities)
+            {
+                if (Ability && Ability->GetFName() == SurfaceChange)
+                {
+                    Found.Add(KeepLoaded(Ability));
+                    break;
                 }
             }
         }
@@ -1256,17 +1276,21 @@ namespace
         for (const wchar_t* Path : { L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C", L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNORevive.GAB_AthenaDBNORevive_C" })
         {
             UClass* Ability = LoadObject<UClass>(nullptr, Path);
-            if (Ability && Ability->IsChildOf(UGameplayAbility::StaticClass()) && std::find(Found.begin(), Found.end(), Ability) == Found.end())
+            if (Ability && Ability->IsChildOf(UGameplayAbility::StaticClass()) && !Found.Contains(Ability))
             {
-                Found.push_back(KeepLoaded(Ability));
+                Found.Add(KeepLoaded(Ability));
             }
         }
-        std::wstring Names;
+        FString Names;
         for (UClass* Ability : Found)
         {
-            Names += (Names.empty() ? L"" : L", ") + NameOf(Ability);
+            if (!Names.IsEmpty())
+            {
+                Names += TEXT(", ");
+            }
+            Names += Ability->GetName();
         }
-        Log::Info(L"Battle Royale bots: a player's abilities the bots get: {}", Names.empty() ? std::wstring(L"none") : Names);
+        Log::Info(L"Battle Royale bots: a player's abilities the bots get: {}", Names.IsEmpty() ? TEXT("none") : *Names);
         return Found;
     }
 

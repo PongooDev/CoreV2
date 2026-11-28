@@ -1028,6 +1028,22 @@ namespace
         const FStringAssetReference& Path = Reference.ToStringReference();
         return Path.IsValid() ? FindObject<UFortWorldItemDefinition>(nullptr, *Path.ToString()) : nullptr;
     }
+
+    bool HasCreativePhone(AFortInventory* Inventory, UFortWorldItemDefinition* Phone)
+    {
+        if (Inventory)
+        {
+            TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+            for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+            {
+                if (Instances[Index] && static_cast<UFortItemDefinition*>(Instances[Index]->ItemEntry.ItemDefinition) == Phone)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }
 
 void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
@@ -1043,15 +1059,7 @@ void AFortPlayerControllerAthena::GrantCreativePhoneItemDefLoadedCallback()
         return;
     }
     AFortInventory* Inventory = WorldInventory;
-    bool bHasPhone = false;
-    if (Inventory)
-    {
-        TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
-        for (int32_t Index = 0; Index < Instances.Num() && !bHasPhone; ++Index)
-        {
-            bHasPhone = Instances[Index] && static_cast<UFortItemDefinition*>(Instances[Index]->ItemEntry.ItemDefinition) == static_cast<UFortItemDefinition*>(Phone);
-        }
-    }
+    const bool bHasPhone = HasCreativePhone(Inventory, Phone);
     if (!bHasPhone)
     {
         UFortKismetLibrary::K2_GiveItemToPlayer(this, Phone, 1, true, -1);
@@ -1083,8 +1091,22 @@ void AFortPlayerControllerAthena::HandleCreativeModeEnabledChanged(bool bIsEnabl
         // As 8.51's RevokeItem (K2_RemoveItemFromPlayer, all of them, forced).
         if (UFortWorldItemDefinition* Phone = GetCreativeMoveToolItemDefinition(PhoneReference))
         {
+            const auto HeldWeaponName = [this]()
+            {
+                AFortPawn* Pawn = Cast<AFortPawn>(GetPawn());
+                AFortWeapon* Held = Pawn && AFortPawn::HasCurrentWeapon() ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+                return GetNameSafe(Held).ToStdString();
+            };
+            const auto HeldBefore = HeldWeaponName();
             UFortKismetLibrary::K2_RemoveItemFromPlayer(this, Phone, -1, true);
-            Log::Info(L"Creative: {} may no longer edit here: the Creative phone ({}) is taken if they have it", PlayerNameOf(this), Phone->GetName().ToStdString());
+            AFortInventory* Inventory = WorldInventory;
+            Log::Info(L"Creative: {} may no longer edit here: after revoking {}, phone in server inventory: {}; equipped weapon {} -> {}",
+                PlayerNameOf(this), Phone->GetName().ToStdString(), Inventory ? (HasCreativePhone(Inventory, Phone) ? L"yes" : L"no") : L"no inventory",
+                HeldBefore, HeldWeaponName());
+        }
+        else
+        {
+            Log::Warning(L"Creative: {} may no longer edit here: the Creative phone definition could not be resolved for removal", PlayerNameOf(this));
         }
         return;
     }
